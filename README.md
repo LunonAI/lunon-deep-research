@@ -1,6 +1,5 @@
-<!-- assets/banner.png is a placeholder. Replace with the final hero banner before publishing. -->
 <p align="center">
-  <img src="assets/banner.png" alt="Lunon DeepResearch Bench" width="680">
+  <img src="assets/lunon-announcement.gif" alt="Lunon" width="680">
 </p>
 
 # lunon-deep-research
@@ -84,8 +83,8 @@ lunon-deep-research/
 ├── report_logs/          # Model outputs as JSONL: {id, prompt, article}
 │   ├── drb_i/             # 100 DRB I query outputs
 │   └── drb_ii/            # 132 DRB II task outputs
-├── assets/                # Investigation phase and client portal screenshots
-│   └── banner.png         # Hero banner (placeholder)
+├── assets/                # Brand and product visuals
+│   └── lunon-announcement.gif  # Hero banner (Lunon logo reveal)
 ├── VERSION                # Pinned lunon-platform commit SHA / version tag
 ├── CITATION.cff           # Machine-readable citation metadata
 ├── LICENSE                # MIT (placeholder)
