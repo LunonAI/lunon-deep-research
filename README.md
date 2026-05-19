@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/lunon-announcement.gif" alt="Lunon" width="680">
+  <img src="assets/lunon-announcement.gif" alt="Lunon" width="380">
 </p>
 
 # lunon-deep-research
