@@ -1,0 +1,45 @@
+# Secrets / local config — never commit
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env/
+
+# OS / editor cruft
+.DS_Store
+*.swp
+*:Zone.Identifier
+
+# === STRATEGY / RESEARCH ARTIFACTS — keep LOCAL (do not publish) ===
+# Phase outputs (every iteration, mined rationales, scored articles)
+p0_artifacts/
+p1_artifacts/
+p2_artifacts/
+p3_artifacts/
+p4_artifacts/
+
+# Decision log + internal docs (competitor analysis, A/B history, costs)
+docs/
+
+# Cost ledgers (dollar amounts by phase/provider)
+cost_tracking/
+
+# Phase checklists + roadmaps (entire competitive strategy)
+p0-checklist.md
+p1-checklist.md
+p1-architecture-update.md
+p1-plan-mode-assistant.md
+p2-checklist.md
+p2-5-checklist.md
+p3-checklist.md
+p4-checklist.md
+*roadmap*.md
+*sota*.md
+
+# Stray planning files
+*-brief.md
