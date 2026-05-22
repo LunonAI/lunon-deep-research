@@ -153,8 +153,12 @@ def collapse_empty_sections(text: str, min_words: int = 10) -> tuple[str, int]:
 # contains these, renumbering would silently break the references, which is
 # worse than the original numbering inconsistency. We skip renumbering in that
 # case and log it. (Documented as P2 item: cross-ref-aware renumber.)
+# `§` is `\W`, so a leading `\b` only matches when the prior char is `\w`
+# (e.g. "text§2"). In real prose `§` follows a space, so the boundary never
+# fires — split `§` out of the `\b`-prefixed alternation so it matches on
+# its own.
 _CROSS_REF_RE = re.compile(
-    r"\b(?:section|sec\.?|§|see)\s*\d+(?:\.\d+){0,3}\b|"
+    r"(?:\b(?:section|sec\.?|see)|§)\s*\d+(?:\.\d+){0,3}\b|"
     r"(?:as\s+(?:shown|covered|discussed)\s+in\s+)\d+(?:\.\d+){0,3}",
     re.IGNORECASE,
 )
