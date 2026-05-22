@@ -63,7 +63,9 @@ from .pipeline import (architect, criteria_spec, design_guide, grounding,
 from .state import PipelineState
 
 INNER_CAP = int(os.environ.get("DR_INNER_CAP", "3"))
-VALIDATION_CAP = 2  # max corrective refiner passes (item 35)
+VALIDATION_CAP = 3  # loop limit; allows the documented max of 2 corrective
+# refiner passes (item 35). refiner_passes starts at 1 after the initial
+# refiner; loop runs corrective passes while refiner_passes < VALIDATION_CAP.
 
 
 def _phase(name: str, fn, *args, **kwargs):
