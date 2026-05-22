@@ -171,11 +171,16 @@ def _has_cross_refs(text: str) -> bool:
 def renumber_headings(text: str) -> tuple[str, dict]:
     """Rebuild a valid numbering tree on all #/##/### headings.
 
-    - Top-level headings (`#`) get sequence 1, 2, 3...
-    - Second-level (`##`) get 1.1, 1.2, ... resetting at each new top-level
-    - Third-level (`###`) get 1.1.1, 1.1.2, ...
-    - Fourth-level (`####`) and deeper are demoted to `###` (structural cap)
-    - Existing numeric prefixes on heading text are stripped before renumbering
+    Heading-level → numbering mapping (matches AgentCPM ≤3-depth cap):
+    - H1 (`#`) — the report title; no number added
+    - H2 (`##`) — top-level sections: "1", "2", "3", ...
+    - H3 (`###`) — subsections: "1.1", "1.2", ... resetting at each new H2
+    - H4+ (`####` and deeper) — demoted to H3 first, then numbered as H3
+
+    Three-level numbering (e.g. "1.1.1") is intentionally NOT produced; H4+
+    content is collapsed to H3 by the structural cap above and then numbered
+    as the next H3 under its current H2. Existing numeric prefixes on heading
+    text are stripped before renumbering.
 
     Returns (renumbered_text, stats). Stats includes:
         applied: bool — False if cross-refs detected (skipped to avoid breaking)
@@ -187,7 +192,7 @@ def renumber_headings(text: str) -> tuple[str, dict]:
         return text, {"applied": False, "n_renumbered": 0, "n_demoted": 0,
                       "skipped_reason": "cross_references_present"}
 
-    counters = [0, 0, 0]   # depth 1, 2, 3
+    counters = [0, 0]   # index 0 = H2 sequence, index 1 = H3 sequence under current H2
     n_renumbered = 0
     n_demoted = 0
 
