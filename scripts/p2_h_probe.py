@@ -98,13 +98,13 @@ def classify_result(article_len: int, response: str | None) -> dict:
 def main(article_id: str = "8") -> int:
     art = load_article(article_id)
     article_text = art["article"]
-    print(f"Loaded id={article_id} ({len(article_text)} chars, language={art.get('id')}).")
+    print(f"Loaded id={article_id} ({len(article_text)} chars, language={art.get('language', 'zh')}).")
 
     # Format the prompt using the harness's template. Note: harness uses
     # Python f-string substitution {article} → article body.
     user_prompt = CLEAN_PROMPT_ZH_TEMPLATE.format(article=article_text)
 
-    print(f"Calling cleaner LLM via engine llm.call (role='criteria_gen', resolves to gpt-5.5)...")
+    print("Calling cleaner LLM via engine llm.call (role='criteria_gen', resolves to gpt-5.5)...")
     t0 = time.time()
     err = None
     response = None
@@ -126,9 +126,9 @@ def main(article_id: str = "8") -> int:
     print(f"Latency: {dt:.1f}s; error: {err}")
     if response is not None:
         print(f"Response chars: {len(response)} ({len(response.strip())} after strip).")
-        print(f"--- first 500 chars of response ---")
+        print("--- first 500 chars of response ---")
         print(response[:500])
-        print(f"--- end first 500 ---")
+        print("--- end first 500 ---")
     classification = classify_result(len(article_text), response if err is None else None)
     print(f"\nClassification: {classification['outcome']}")
     print(f"Fix path:       {classification['fix_path']}")
@@ -137,9 +137,11 @@ def main(article_id: str = "8") -> int:
     out_path = ROOT / "p2_artifacts" / "H_probe_result.md"
     with out_path.open("w") as f:
         f.write("# Wave 0 H — ZH-Cleaner Failure Probe Result\n\n")
-        f.write(f"**Date:** 2026-05-22\n")
+        f.write("**Date:** 2026-05-22\n")
         f.write(f"**Article probed:** id={article_id} ({len(article_text)} chars, ZH)\n")
-        f.write(f"**Model used:** GPT-5.5 via engine `llm.call('criteria_gen', ...)` — mirrors harness RACE_MODEL default.\n")
+        f.write(
+            "**Model used:** GPT-5.5 via engine `llm.call('criteria_gen', ...)` — mirrors harness RACE_MODEL default.\n"
+        )
         f.write(f"**Latency:** {dt:.1f}s\n")
         f.write(f"**Error:** {err}\n")
         f.write(f"**Response chars:** {len(response) if response else 'n/a'}\n\n")
