@@ -4,7 +4,8 @@
 # Resumable adapter picks up. Exits when p1_final reaches 95/100 OR after
 # 6 hard-restart cycles (gives up).
 set -u
-cd /home/connor/dev/lunon-deep-research
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$REPO_ROOT"
 LEDGER=cost_tracking/ledger.jsonl
 OUT=p1_artifacts/p1_final.jsonl
 LOG=/tmp/p1_final.out
@@ -46,7 +47,7 @@ while true; do
     delta=$((end_ledger - start_ledger))
     if is_alive && [ "$delta" -lt 5 ]; then
         echo "[supervisor] STALL detected $start_ts→$end_ts ledger Δ=$delta tasks=$n_now/100 — kill+restart"
-        pkill -9 -f "p1_final.jsonl --workers 4" 2>/dev/null
+        pkill -9 -f "p1_final.jsonl --workers 20" 2>/dev/null
         sleep 5
         restart_count=$((restart_count + 1))
         PID=$(launch)

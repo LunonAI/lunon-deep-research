@@ -119,7 +119,11 @@ def collapse_empty_sections(text: str, min_words: int = 10) -> tuple[str, int]:
         nxt = heading_idx[k + 1] if k + 1 < len(heading_idx) else len(lines)
         body = "\n".join(lines[i + 1 : nxt])
         if len(body.split()) < min_words:
+            # Drop both the heading AND its body — otherwise the body lines
+            # survive as floating, heading-less prose in the final article.
             keep[i] = False
+            for j in range(i + 1, nxt):
+                keep[j] = False
             n_collapsed += 1
     return "\n".join(ln for ln, k in zip(lines, keep, strict=False) if k), n_collapsed
 
