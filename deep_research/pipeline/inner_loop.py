@@ -30,7 +30,12 @@ _SYSTEM = (
 )
 
 
-def _relevant_criteria(spec: dict, section_dims=None) -> list:
+def _relevant_criteria(spec: dict) -> list:
+    # Returns the flat list of all (dimension, criterion) pairs from a
+    # criteria spec. Previously took a `section_dims` argument that was
+    # never read or filtered on; removed to keep the signature honest. If
+    # per-section dimension scoping is ever desired, add filtering here
+    # rather than re-introducing a silently-ignored argument.
     out = []
     for dim, items in (spec.get("criterions") or {}).items():
         for c in items:
