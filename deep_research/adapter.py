@@ -16,12 +16,19 @@ Run: DRB_PHASE=P1 /usr/bin/python3 -m deep_research.adapter \
 
 import argparse
 import json
+import os
 import pathlib
 import sys
 
 from . import assert_phase, deep_research
 
-DEFAULT_QUERY = "/home/connor/dev/deep_research_bench/data/prompt_data/query.jsonl"
+# Path to the DRB query.jsonl harness manifest. Override per-environment with
+# `DR_QUERY_FILE=/path/to/query.jsonl` so the same code works on other devs'
+# machines (e.g. macOS at /Users/<user>/...).
+DEFAULT_QUERY = os.environ.get(
+    "DR_QUERY_FILE",
+    "/home/connor/dev/deep_research_bench/data/prompt_data/query.jsonl",
+)
 
 
 def _load_queries(path):
