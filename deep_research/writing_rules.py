@@ -212,10 +212,25 @@ def check_opening(text: str) -> dict:
 
 def check_insight_minimums(text: str) -> dict:
     fwd = len(set(_DATE.findall(text)))
+    # P2 Wave-1.5-N0 (2026-05-22): expanded alternations after L2 diagnostic.
+    # Pre-fix: ZH coverage was 4 patterns; the regex matched 0 hits on 78% of
+    # W9 ZH tasks → gate fired and retries had 0% success because the writer's
+    # actual ZH comparative-vocabulary doesn't use the captured tokens. EN
+    # coverage was 5 patterns and missed many common forms. Both sides expanded
+    # below; the substantive set of comparative-discourse moves the judge
+    # rewards is broader than the original.
     alts = len(
         re.findall(
-            r"(alternative|另一种|相比之下|whereas|trade-?off|"
-            r"weaker|stronger|劣于|优于)",
+            # EN comparative / contrastive vocabulary
+            r"(alternative(?:ly)?|whereas|however|on the other hand|"
+            r"by contrast|conversely|instead|in contrast|"
+            r"trade-?off|weaker|stronger|versus|vs\.?\s|"
+            # ZH comparative / contrastive vocabulary. `较` without `\s` because
+            # Chinese prose is contiguous (no whitespace between chars); the
+            # comparative uses `较好`/`较大`/`较低` should match. Greptile #3 fix.
+            r"另一种|另一方面|然而|相比之下|相较|较|相对而言|"
+            r"与之相对|替代方案|相反|不同于|反观|权衡|取舍|利弊|折中|"
+            r"劣于|优于|不如|胜过)",
             text,
             re.I,
         )

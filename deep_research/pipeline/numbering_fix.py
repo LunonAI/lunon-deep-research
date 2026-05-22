@@ -13,11 +13,20 @@ deterministic regex + tree rebuild. Three operations in fixed order:
 
 1. STOP-LIST REGEX   (2d)  — delete stage-direction phrases and jargon lines
 2. EMPTY-SECTION COLLAPSE — drop headings whose body is <10 words after step 1
-3. NUMBERING RENUMBER (2a) — rebuild a valid heading-number tree IFF the article
-                             doesn't contain cross-references that would break
+3. NUMBERING RENUMBER (2a + P2-F) — rebuild a valid heading-number tree AND
+                                    rewrite in-body cross-references via an
+                                    old→new heading map. Cross-refs to numbers
+                                    without a mapping target are left alone
+                                    (orphan count tracked).
 
 The ordering matters: stop-list might delete content under a heading, leaving
 it empty; we collapse the empty heading; THEN renumber the now-clean tree.
+
+P2-F (2026-05-22): the renumber step formerly SKIPPED rebuilding the tree
+when in-body cross-refs were present (to avoid breaking them). It now always
+renumbers and rewrites cross-refs using the heading_map built during the pass.
+Validation: zero broken cross-refs across all 89 W9-scored articles
+(scripts/p2_validate_f.py).
 
 Citation: NVIDIA AI-Q middleware validator (HF blog, 2025) for the deterministic
 post-edit pattern. No published paper specifically on heading renumbering —
@@ -147,22 +156,31 @@ def collapse_empty_sections(text: str, min_words: int = 10) -> tuple[str, int]:
 
 # ---------- Step 2a: deterministic heading renumbering ----------
 
-# Patterns that look like cross-references TO a section number. If the article
-# contains these, renumbering would silently break the references, which is
-# worse than the original numbering inconsistency. We skip renumbering in that
-# case and log it. (Documented as P2 item: cross-ref-aware renumber.)
+# Patterns that look like cross-references TO a section number. With P2-F
+# (cross-ref-aware renumbering), we no longer SKIP renumbering when these are
+# present — we rewrite them using the old→new heading map. The detection regex
+# stays for diagnostics and was used by the pre-F skip path.
 # `§` is `\W`, so a leading `\b` only matches when the prior char is `\w`
 # (e.g. "text§2"). In real prose `§` follows a space, so the boundary never
 # fires — split `§` out of the `\b`-prefixed alternation so it matches on
 # its own.
-# The second alternative is capped at \d{1,2} (not \d+) so it doesn't match
-# 4-digit years — "as shown in 2024 surveys" was previously matching and
-# silently suppressing renumber on any article with year-dated prose, which
-# is most of them. Section refs are realistically 1-99, so {1,2} keeps real
-# matches like "as shown in 3" or "as shown in 3.2".
+# The number is capped at \d{1,2} (not \d+) so it doesn't match 4-digit
+# years — "as shown in 2024 surveys" was previously matching and silently
+# suppressing renumber on any article with year-dated prose, which is most
+# of them. Section refs are realistically 1-99, so {1,2} keeps real matches
+# like "as shown in 3" or "as shown in 3.2".
 _CROSS_REF_RE = re.compile(
     r"(?:\b(?:section|sec\.?|see)|§)\s*\d{1,2}(?:\.\d+){0,3}\b|"
     r"(?:as\s+(?:shown|covered|discussed)\s+in\s+)\d{1,2}(?:\.\d+){0,3}\b",
+    re.IGNORECASE,
+)
+
+# Substitution variant of _CROSS_REF_RE: captures the prefix and the number
+# separately so we can rewrite the number while preserving the surrounding
+# phrasing. Used by the P2-F cross-ref-aware renumber path.
+_CROSS_REF_SUB_RE = re.compile(
+    r"(?P<prefix>(?:\b(?:section|sec\.?|see)\s+|§\s*|as\s+(?:shown|covered|discussed)\s+in\s+))"
+    r"(?P<num>\d{1,2}(?:\.\d+){0,3})\b",
     re.IGNORECASE,
 )
 
@@ -193,49 +211,115 @@ def renumber_headings(text: str) -> tuple[str, dict]:
     the writer-prompt cap of "1.1.1" (max three numeric levels) is matched
     by what this function emits.
 
+    P2-F change (2026-05-22): formerly this function SKIPPED renumbering when
+    cross-refs were detected (`_has_cross_refs(text) → return early`). Now it
+    builds an old→new heading-number map and rewrites cross-refs alongside
+    the renumber. The validation criterion is: after renumbering, every
+    cross-ref points to the same conceptual section it did before.
+
     Returns (renumbered_text, stats). Stats includes:
-        applied: bool — False if cross-refs detected (skipped to avoid breaking)
+        applied: bool — always True under P2-F (was False on cross-refs in P1).
         n_renumbered: int — number of headings updated
         n_demoted: int — number of H5+ → H4 demotions (cap enforcement)
-        skipped_reason: str | None
+        cross_refs_rewritten: int — number of in-body cross-refs substituted
+        heading_map: dict[str, str] — old_num → new_num (only headings that
+            had an explicit leading number; titles without numbers omitted)
+        skipped_reason: str | None — None under P2-F; reserved for future
+            short-circuit conditions.
     """
-    if _has_cross_refs(text):
-        return text, {"applied": False, "n_renumbered": 0, "n_demoted": 0, "skipped_reason": "cross_references_present"}
+    # Step 1: scan headings, record old_num + clean_title for each.
+    plan = []
+    for m in _HEADING_RE.finditer(text):
+        hashes = m.group(1)
+        title_raw = m.group(2)
+        old_num_match = _LEADING_NUM_RE.match(title_raw)
+        old_num = old_num_match.group().strip().rstrip(".") if old_num_match else None
+        plan.append(
+            {
+                "hashes": hashes,
+                "depth": len(hashes),
+                "old_num": old_num,
+                "clean_title": _LEADING_NUM_RE.sub("", title_raw),
+            }
+        )
 
-    # index 0 = H2 sequence, 1 = H3 under current H2, 2 = H4 under current H3.
+    # Step 2: assign new numbers, build the old→new map.
+    # counters[0] = H2 sequence, [1] = H3 under current H2, [2] = H4 under current H3.
     counters = [0, 0, 0]
     n_renumbered = 0
     n_demoted = 0
-
-    def repl(m: re.Match) -> str:
-        nonlocal n_renumbered, n_demoted
-        hashes = m.group(1)
-        title = m.group(2)
-        depth = len(hashes)
+    heading_map: dict[str, str] = {}
+    for h in plan:
+        depth = h["depth"]
         # Enforce the 4-markdown-level / 3-numeric-level cap. H5+ → H4 so
         # we still emit a numbered heading rather than dropping it.
         if depth >= 5:
             depth = 4
-            hashes = "####"
+            h["hashes"] = "####"
             n_demoted += 1
+        h["effective_depth"] = depth
         if depth == 1:
-            # H1 is the report title — no number added.
-            clean_title = _LEADING_NUM_RE.sub("", title)
-            return f"{hashes} {clean_title}"
-        # depth=2 → d=0 ("1"), depth=3 → d=1 ("1.1"), depth=4 → d=2 ("1.1.1")
-        d = depth - 2
+            h["new_num"] = None  # H1 = report title; no number prefix.
+            continue
+        d = depth - 2  # depth=2 → d=0; depth=3 → d=1; depth=4 → d=2.
         counters[d] += 1
-        # Reset deeper counters when we open a new sibling at this level.
         for j in range(d + 1, len(counters)):
             counters[j] = 0
-        # Build numeric prefix from counters[0..d]
-        nums = ".".join(str(counters[j]) for j in range(d + 1))
-        clean_title = _LEADING_NUM_RE.sub("", title)
+        h["new_num"] = ".".join(str(counters[j]) for j in range(d + 1))
         n_renumbered += 1
-        return f"{hashes} {nums} {clean_title}"
+        if h["old_num"] is not None:
+            # If the same old_num appeared on multiple headings (a numbering
+            # bug we're fixing), the LAST occurrence wins the map slot. Pre-F
+            # this whole pass was skipped on cross-refs anyway, so duplicate
+            # old_num was never a problem; we surface it now as a known minor
+            # quirk: cross-refs to a duplicated old_num will point to the
+            # last-renumbered occurrence, not necessarily the one the writer
+            # intended. Document and move on — this is no worse than the
+            # pre-F behavior of leaving the cross-ref pointing to whichever
+            # heading shared the duplicate old_num.
+            heading_map[h["old_num"]] = h["new_num"]
 
-    out = _HEADING_RE.sub(repl, text)
-    return out, {"applied": True, "n_renumbered": n_renumbered, "n_demoted": n_demoted, "skipped_reason": None}
+    # Step 3: rewrite headings using the plan.
+    plan_iter = iter(plan)
+
+    def repl_heading(m: re.Match) -> str:
+        h = next(plan_iter)
+        hashes = h["hashes"]
+        if h["new_num"] is None:
+            return f"{hashes} {h['clean_title']}"
+        return f"{hashes} {h['new_num']} {h['clean_title']}"
+
+    out = _HEADING_RE.sub(repl_heading, text)
+
+    # Step 4: rewrite in-body cross-references using the heading_map.
+    n_xref = 0
+    n_xref_orphan = 0
+
+    def repl_xref(m: re.Match) -> str:
+        nonlocal n_xref, n_xref_orphan
+        num = m.group("num")
+        if num in heading_map:
+            n_xref += 1
+            return m.group("prefix") + heading_map[num]
+        # Cross-ref points to a number that doesn't match any old heading.
+        # Leave it alone — substituting would be guessing. Could be a writer
+        # mistake (referenced section never existed) or an artifact of an
+        # already-broken numbering before our pass. Either way, silently
+        # rewriting it would make things worse.
+        n_xref_orphan += 1
+        return m.group(0)
+
+    out = _CROSS_REF_SUB_RE.sub(repl_xref, out)
+
+    return out, {
+        "applied": True,
+        "n_renumbered": n_renumbered,
+        "n_demoted": n_demoted,
+        "cross_refs_rewritten": n_xref,
+        "cross_refs_orphaned": n_xref_orphan,
+        "heading_map": heading_map,
+        "skipped_reason": None,
+    }
 
 
 # ---------- Step 2c: post-write structural-cap warning ----------
@@ -289,6 +373,8 @@ class NumberingFixOutput:
     renumbering_applied: bool
     headings_renumbered: int
     headings_demoted: int
+    cross_refs_rewritten: int
+    cross_refs_orphaned: int
     cap_violations: dict
     skipped_reason: str | None
 
@@ -299,7 +385,8 @@ def run(article: str) -> NumberingFixOutput:
     Order (CRITICAL — see plan v3 §2a):
       1. Stop-list deletes meta-commentary lines/phrases
       2. Empty-section collapse drops now-empty headings
-      3. Renumber rebuilds the heading-number tree (or skips if cross-refs)
+      3. Renumber rebuilds the heading-number tree AND rewrites cross-refs
+         using an old→new heading map (P2-F, was: skip on cross-refs)
     """
     a, n_strip = strip_stage_directions(article)
     a, n_collapse = collapse_empty_sections(a)
@@ -312,6 +399,8 @@ def run(article: str) -> NumberingFixOutput:
         renumbering_applied=renum["applied"],
         headings_renumbered=renum["n_renumbered"],
         headings_demoted=renum["n_demoted"],
+        cross_refs_rewritten=renum.get("cross_refs_rewritten", 0),
+        cross_refs_orphaned=renum.get("cross_refs_orphaned", 0),
         cap_violations=caps,
         skipped_reason=renum["skipped_reason"],
     )
