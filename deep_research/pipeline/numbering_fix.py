@@ -96,6 +96,9 @@ def strip_stage_directions(text: str) -> tuple[str, int]:
         n += k
     # Normalize: collapse multi-space and stray ' , ' artifacts
     cleaned = re.sub(r"\s+,", ",", cleaned)
+    # Orphaned parens left behind when a parenthetical was entirely a stripped
+    # phrase, e.g. "(as discussed in section 3.1)" → "( )" → "".
+    cleaned = re.sub(r"\(\s*\)", "", cleaned)
     cleaned = re.sub(r"[ \t]+", " ", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned, n
@@ -111,14 +114,28 @@ def collapse_empty_sections(text: str, min_words: int = 10) -> tuple[str, int]:
     fewer than `min_words` words of body between them, drop the empty heading.
 
     Returns (cleaned_text, n_collapsed). Conservative — only drops headings
-    that have effectively no content (≤9 words).
+    that have effectively no content (≤9 words). A heading whose next heading
+    is at a DEEPER level is treated as a parent (its content lives in the
+    subsections) and is preserved regardless of body-word count.
     """
     lines = text.splitlines()
     keep = [True] * len(lines)
-    heading_idx = [i for i, l in enumerate(lines) if _HEADING_RE.match(l)]
+    # (line_index, depth) so we can detect a parent-of-subsection.
+    heading_info = []
+    for i, l in enumerate(lines):
+        m = _HEADING_RE.match(l)
+        if m:
+            heading_info.append((i, len(m.group(1))))
     n_collapsed = 0
-    for k, i in enumerate(heading_idx):
-        nxt = heading_idx[k + 1] if k + 1 < len(heading_idx) else len(lines)
+    for k, (i, depth) in enumerate(heading_info):
+        if k + 1 < len(heading_info):
+            nxt, next_depth = heading_info[k + 1]
+        else:
+            nxt, next_depth = len(lines), 0
+        # If next heading is deeper, this heading is a parent — keep it,
+        # its substance is carried by its subsections.
+        if next_depth > depth:
+            continue
         body = "\n".join(lines[i + 1:nxt])
         if len(body.split()) < min_words:
             # Drop both the heading AND its body — otherwise the body lines
