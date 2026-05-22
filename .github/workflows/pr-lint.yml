@@ -1,0 +1,34 @@
+name: PR Lint
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  conventional-commits:
+    name: Conventional Commits PR title
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            chore
+            refactor
+            docs
+            test
+            build
+            ci
+            perf
+            style
+          requireScope: false
+          subjectPattern: ^[A-Za-z0-9].+$
+          subjectPatternError: |
+            The subject "{subject}" found in the pull request title "{title}" must start
+            with an uppercase letter, lowercase letter, or digit.
