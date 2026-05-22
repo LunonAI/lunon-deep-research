@@ -13,11 +13,20 @@ deterministic regex + tree rebuild. Three operations in fixed order:
 
 1. STOP-LIST REGEX   (2d)  — delete stage-direction phrases and jargon lines
 2. EMPTY-SECTION COLLAPSE — drop headings whose body is <10 words after step 1
-3. NUMBERING RENUMBER (2a) — rebuild a valid heading-number tree IFF the article
-                             doesn't contain cross-references that would break
+3. NUMBERING RENUMBER (2a + P2-F) — rebuild a valid heading-number tree AND
+                                    rewrite in-body cross-references via an
+                                    old→new heading map. Cross-refs to numbers
+                                    without a mapping target are left alone
+                                    (orphan count tracked).
 
 The ordering matters: stop-list might delete content under a heading, leaving
 it empty; we collapse the empty heading; THEN renumber the now-clean tree.
+
+P2-F (2026-05-22): the renumber step formerly SKIPPED rebuilding the tree
+when in-body cross-refs were present (to avoid breaking them). It now always
+renumbers and rewrites cross-refs using the heading_map built during the pass.
+Validation: zero broken cross-refs across all 89 W9-scored articles
+(scripts/p2_validate_f.py).
 
 Citation: NVIDIA AI-Q middleware validator (HF blog, 2025) for the deterministic
 post-edit pattern. No published paper specifically on heading renumbering —
