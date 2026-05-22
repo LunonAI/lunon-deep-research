@@ -18,6 +18,7 @@ Outputs a one-pager at p2_artifacts/F_validation_result.md.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -71,7 +72,13 @@ def main() -> int:
             articles.append(d)
     # Restrict to the 89 W9 scored articles. Use scored_results raw_results.jsonl
     # for the canonical 89-id set; fall back to all 100 if not present.
-    scored_path = Path("/home/connor/dev/deep_research_bench/results/race/lunon-p1-2026-05-21-final/raw_results.jsonl")
+    # P2_SCORED_PATH env-override makes this reproducible on other machines.
+    scored_path_env = os.environ.get("P2_SCORED_PATH")
+    scored_path = (
+        Path(scored_path_env)
+        if scored_path_env
+        else Path("/home/connor/dev/deep_research_bench/results/race/lunon-p1-2026-05-21-final/raw_results.jsonl")
+    )
     scored_ids: set | None = None
     if scored_path.exists():
         scored_ids = set()
@@ -80,6 +87,12 @@ def main() -> int:
                 d = json.loads(line)
                 # id field in scored output is int; raw output is str
                 scored_ids.add(str(d.get("id", "")))
+    else:
+        print(
+            f"WARNING: scored_path not found ({scored_path}); falling back to all articles. "
+            f"Set P2_SCORED_PATH to the harness's raw_results.jsonl to reproduce the 89-W9 result.",
+            file=sys.stderr,
+        )
 
     eligible = []
     for d in articles:
