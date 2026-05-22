@@ -242,9 +242,13 @@ def renumber_headings(text: str) -> tuple[str, dict]:
 
 
 def cap_violations(text: str) -> dict:
-    """Return counts of structural-cap violations. Logging-only by default;
-    fixable violations (depth-4+) are already collapsed by renumber_headings;
-    >7-subsection violations are reported but NOT auto-fixed (destructive).
+    """Return counts of structural-cap violations. Logging-only.
+
+    H4 is now a valid third numeric level ("1.1.1") per the writer-prompt
+    spec and `renumber_headings`, so violations start at H5+. H5+ headings
+    are demoted to H4 by `renumber_headings`, so in normal post-edit output
+    `deeper_than_4` should always be 0. >7-subsection violations are
+    reported but NOT auto-fixed (destructive).
     """
     headings = _HEADING_RE.findall(text)
     depth_counts = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0}
@@ -267,7 +271,8 @@ def cap_violations(text: str) -> dict:
     over_cap = sum(1 for n in subsections_per_h2 if n > 7)
     return {
         "depth_counts": depth_counts,
-        "deeper_than_3": depth_counts.get(4, 0) + depth_counts.get(5, 0) + depth_counts.get(6, 0),
+        # H5+ is the violation tier now that H4 emits valid "1.1.1" numbering.
+        "deeper_than_4": depth_counts.get(5, 0) + depth_counts.get(6, 0),
         "subsections_per_h2": subsections_per_h2,
         "sections_over_7_subsections": over_cap,
     }
