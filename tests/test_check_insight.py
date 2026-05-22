@@ -77,6 +77,30 @@ def test_no_false_positives_on_year_or_neutral_text():
     assert out["counts"]["alternatives"] == 0, f"got false positives: {out['counts']['alternatives']}"
 
 
+def test_no_false_positive_on_bijiao_compound():
+    """`较` is meant to match comparative uses (`较好`, `较大`, `较低`) but NOT
+    the neutral compound `比较` (compare/comparative). Pre-fix the bare `较`
+    token matched inside `比较`, inflating alts count on neutral comparative
+    prose. The negative lookbehind `(?<!比)较` enforces this. Greptile PR #3
+    post-merge follow-up."""
+    text = (
+        "通过比较多种方法可以发现一些规律。比较分析表明各方法在不同场景下都有优势。进一步比较显示，结果具有一致性。"
+        # 3 instances of 比较, ZERO contrastive moves. Should NOT match.
+    )
+    out = check_insight_minimums(text)
+    assert out["counts"]["alternatives"] == 0, (
+        f"bare 较 matched inside 比较 — got {out['counts']['alternatives']} false positives"
+    )
+
+    # Still match legitimate comparative uses of bare 较.
+    legit = "新方法在小样本上较稳健。其精度也较低。整体表现较优于经典方法。"
+    out2 = check_insight_minimums(legit)
+    # 较稳健 (1), 较低 (1), 较优于 (1, plus 优于 as separate match — net should be ≥3)
+    assert out2["counts"]["alternatives"] >= 3, (
+        f"legitimate 较X uses didn't match — got {out2['counts']['alternatives']}"
+    )
+
+
 def test_gate_passes_when_2_plus_alts_with_fwd_causal_quant():
     """Smoke: a passable text should pass the gate."""
     text = (
