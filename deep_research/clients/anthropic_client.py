@@ -4,6 +4,7 @@ auto cost-log discipline. Used for orchestrator/planner/scout/architect/writer.
 Cost hook: Anthropic usage shape (input_tokens/output_tokens) is logged via
 track.log_usage, which already accepts that shape (track.py:57-58).
 """
+
 import time
 
 import anthropic
@@ -23,8 +24,7 @@ _RETRYABLE = (
 )
 
 
-def raw_call(model, user, system="", max_tokens=8000, think=False,
-             effort="low", max_retries=3, note=""):
+def raw_call(model, user, system="", max_tokens=8000, think=False, effort="low", max_retries=3, note=""):
     """Return (text_str, usage_dict). Raises RuntimeError after retries.
 
     Opus 4.7 API: reasoning is controlled by output_config.effort; think=True
@@ -50,12 +50,12 @@ def raw_call(model, user, system="", max_tokens=8000, think=False,
             resp = _client.messages.create(**kw)
         except _RETRYABLE as e:
             last = f"{type(e).__name__}: {e}"
-            time.sleep(min(2 ** attempt * 3, 45))
+            time.sleep(min(2**attempt * 3, 45))
             continue
         except anthropic.APIStatusError as e:
             if e.status_code in (429, 500, 502, 503, 504, 529):
                 last = f"HTTP {e.status_code}"
-                time.sleep(min(2 ** attempt * 3, 45))
+                time.sleep(min(2**attempt * 3, 45))
                 continue
             raise RuntimeError(f"Anthropic HTTP {e.status_code}: {str(e)[:400]}")
         u = resp.usage
@@ -69,9 +69,7 @@ def raw_call(model, user, system="", max_tokens=8000, think=False,
             "cache_read_input_tokens": getattr(u, "cache_read_input_tokens", 0) or 0,
         }
         log_usage(model, usage, note=note or "claude")
-        text = "".join(
-            b.text for b in resp.content if getattr(b, "type", "") == "text"
-        ).strip()
+        text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
         if text:
             return text, usage
         last = f"empty content (stop={resp.stop_reason})"

@@ -12,6 +12,7 @@ Flow (assembled across W1-W5):
 DR_STUB=1 short-circuits to a trivial article — ONLY for adapter infra tests,
 never for evals (eval paths must not set DR_STUB).
 """
+
 import os
 
 from . import assert_phase
@@ -22,4 +23,5 @@ def run(query: str, language: str) -> dict:
     if os.environ.get("DR_STUB") == "1":
         return {"article": f"[STUB:{language}] {query[:60]}"}
     from .orchestrate import pipeline  # assembled in W1-W5
+
     return {"article": pipeline(query, language)}
