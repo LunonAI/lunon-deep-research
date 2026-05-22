@@ -43,6 +43,8 @@ def _persist_drift(s, language: str, query: str) -> None:
             "article_chars": len(s.article or ""),
             "article_words": len((s.article or "").split()),
             "tool_calls": s.tool_calls,
+            "numbering_fix": getattr(s, "numbering_fix_stats", {}),
+            "refiner_gate": getattr(s, "refiner_gate_verdict", {}),
         }
         _DRIFT_PATH.parent.mkdir(parents=True, exist_ok=True)
         with _DRIFT_LOCK, _DRIFT_PATH.open("a", encoding="utf-8") as fh:
@@ -55,8 +57,9 @@ from . import middleware as mw
 from ._env import assert_phase, log_usage
 from .retrieval import domain_routed
 from .pipeline import (architect, criteria_spec, design_guide, grounding,
-                       init_format, inner_loop, intent, orchestrator, refiner,
-                       role_play, scout, validation, writer, zh_writer_pass)
+                       init_format, inner_loop, intent, numbering_fix,
+                       orchestrator, refiner, refiner_gate, role_play, scout,
+                       validation, writer, zh_writer_pass)
 from .state import PipelineState
 
 INNER_CAP = int(os.environ.get("DR_INNER_CAP", "3"))
@@ -137,6 +140,9 @@ def from_plan(ctx: dict, query: str, language: str) -> str:
     draft = writer.assemble(s.opening, s.sections)
     draft = refiner.strip_meta(draft)
 
+    # PRE-refiner snapshot for ART-style gate (plan v3 §3b, Branch B monitor)
+    pre_refiner_draft = draft
+
     # Refiner (W4) — feeds design_guide as system context now
     refined = _phase("refiner", _refine_with_guide, draft, s.archetype["archetype"],
                       language, s.section_scores, s.failing_rationales,
@@ -144,16 +150,48 @@ def from_plan(ctx: dict, query: str, language: str) -> str:
     s.article = refined["article"]
     s.refiner_passes = 1
 
+    # ART-style refiner gate (monitor-mode in P1): compare pre vs post and
+    # log the would-be decision. Cost ~$0.05/task. Result captured in
+    # cost_tracking/ledger.jsonl for post-hoc audit.
+    gate_mode = os.environ.get("DR_REFINER_GATE", "monitor")
+    if gate_mode != "off":
+        verdict = _phase("refiner_gate", refiner_gate.compare,
+                         pre_refiner_draft, s.article,
+                         language=language,
+                         archetype=s.archetype.get("archetype", ""),
+                         task_fp=query[:120], mode=gate_mode)
+        s.refiner_gate_verdict = verdict
+        # In active mode, the gate may revert; in monitor mode, decision is
+        # always "keep_post" by construction
+        if verdict.get("decision") == "revert_to_pre":
+            s.article = pre_refiner_draft
+
     # NEW: validation gate with cap-2 corrective refiner passes (item 35)
     s = _validation_loop(s, language)
-
-    # Drift instrumentation — purely additive, fail-soft (won't affect output)
-    _persist_drift(s, language, query)
 
     # ZH writer-pass (item 27)
     if language == "zh":
         zp = _phase("zh_writer_pass", zh_writer_pass.zh_pass, s.article, query)
         s.article = zp["article"]
+
+    # Deterministic post-edit (plan v3 §2a+2d+2c-validator): stop-list regex,
+    # empty-section collapse, heading-tree renumber. NO LLM call. Closes the
+    # bottom-10 cross-cutting judge complaints (inconsistent numbering, stage
+    # directions, methodology meta-commentary leak).
+    nfo = _phase("numbering_fix", numbering_fix.run, s.article)
+    s.article = nfo.article
+    s.numbering_fix_stats = {
+        "strips": nfo.stage_directions_removed,
+        "collapsed": nfo.sections_collapsed,
+        "renumbered": nfo.headings_renumbered,
+        "demoted": nfo.headings_demoted,
+        "cap_violations": nfo.cap_violations,
+        "skipped_reason": nfo.skipped_reason,
+    }
+
+    # Drift instrumentation — captured AFTER all post-edits so the artifact
+    # reflects the actually-shipped article.
+    _persist_drift(s, language, query)
 
     return s.article
 

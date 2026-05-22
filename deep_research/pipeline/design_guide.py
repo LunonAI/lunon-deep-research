@@ -41,7 +41,8 @@ _REWARDS = [
     "Make every prompt-required item a visible section, subsection, or table column.",
     "Provide requested metrics explicitly (CAGR, market size, MAE/RMSE, "
     "projections) — never substitute 'trends'/'growth' for the number.",
-    "Explain causal mechanisms as A→X→Y→B chains; reject bare A→B.",
+    "Explain causal mechanisms as step-by-step chains showing each intermediate "
+    "link; reject single-step assertions that skip the intervening mechanism.",
     "Build entity×dimension comparison MATRICES whenever multiple entities are "
     "compared — judge rewards matrices over scattered prose.",
     "Lead each major section with scope, definitions, data sources, methodology "

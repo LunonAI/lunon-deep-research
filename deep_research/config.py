@@ -31,6 +31,7 @@ _DEFAULTS = {
     "inner_scorer": GPT55,
     "grounding": GPT55,
     "refiner": GPT55,
+    "refiner_gate": GPT55,  # ART-style pre/post judge (plan v3 §3b)
     # researcher specialists (all Nemotron; isolated contexts per specialist)
     "evidence_gatherer": NEMOTRON,
     "mechanism_explorer": NEMOTRON,

@@ -25,7 +25,9 @@ _ROLE = {
         "sources. Prefer datasets, filings, official statistics, named studies.",
     "mechanism_explorer":
         "MECHANISM EXPLORER. Causal-first: WHY it happens. Named theories/"
-        "frameworks, explicit A→X→Y→B chains, feedback loops. Reject bare A→B.",
+        "frameworks, step-by-step causal chains showing each intermediate "
+        "link, feedback loops. Reject single-step assertions; require the "
+        "intervening mechanism.",
     "comparator":
         "COMPARATOR. Head-to-head: benchmarks, rankings, trade-offs. Extract "
         "shared comparison dimensions; preserve tabular numbers exactly.",
@@ -41,14 +43,14 @@ _ROLE = {
 
 _EXTRACT_SYSTEM = (
     "You are a research specialist. {role}\nFrom the search results, extract "
-    "SOURCED evidence atoms that serve the brief. Think briefly if you must, "
+    "SOURCED findings that serve the brief. Think briefly if you must, "
     "but your FINAL output MUST be a single JSON object and nothing after it: "
     "{{\"findings\": [ {{\"statement\": str (one specific self-contained claim "
     "with concrete numbers/names/dates), \"source_name\": str (publication/"
     "institution, e.g. 'IEA 2025' — never a bare number), \"url\": str, "
     "\"quote\": str (verbatim support <=125 chars), \"query_ids\": [str]}} "
-    "...8-14 atoms ]}}. Only atoms grounded in the results; reconcile conflicts "
-    "in the statement; match the brief's language."
+    "...8-14 findings ]}}. Only findings grounded in the results; reconcile "
+    "conflicts in the statement; match the brief's language."
 )
 
 
