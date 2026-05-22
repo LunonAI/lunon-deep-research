@@ -13,20 +13,23 @@ target_sections (the query that produced the evidence).
 
 class MemoryBank:
     def __init__(self):
-        self._items = {}      # eid -> block
+        self._items = {}  # eid -> block
         self._by_section = {}  # section_id -> [eid]
         self._n = 0
 
-    def add(self, *, source_name, url, title, text, query_id, section_ids,
-            specialist, language) -> str:
+    def add(self, *, source_name, url, title, text, query_id, section_ids, specialist, language) -> str:
         self._n += 1
         eid = f"E{self._n}"
         block = {
-            "eid": eid, "source_name": (source_name or "").strip(),
-            "url": url or "", "title": (title or "").strip(),
-            "text": (text or "").strip(), "query_id": query_id,
+            "eid": eid,
+            "source_name": (source_name or "").strip(),
+            "url": url or "",
+            "title": (title or "").strip(),
+            "text": (text or "").strip(),
+            "query_id": query_id,
             "section_ids": list(section_ids or []),
-            "specialist": specialist, "language": language,
+            "specialist": specialist,
+            "language": language,
         }
         self._items[eid] = block
         for sid in block["section_ids"]:
@@ -49,8 +52,7 @@ class MemoryBank:
         return list(self._items.values())
 
     def stats(self):
-        return {"n_evidence": len(self._items),
-                "n_sections_with_evidence": len(self._by_section)}
+        return {"n_evidence": len(self._items), "n_sections_with_evidence": len(self._by_section)}
 
     def source_table(self):
         """De-duplicated {url -> {n, source_name, title}} for the writer's
@@ -59,6 +61,5 @@ class MemoryBank:
         for b in self._items.values():
             if b["url"] and b["url"] not in out:
                 i += 1
-                out[b["url"]] = {"n": i, "source_name": b["source_name"],
-                                 "title": b["title"]}
+                out[b["url"]] = {"n": i, "source_name": b["source_name"], "title": b["title"]}
         return out

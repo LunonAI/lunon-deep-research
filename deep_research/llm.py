@@ -4,6 +4,7 @@ call(role, user, ...) resolves the model via config.model_for(role), infers the
 provider from the model-id prefix, and routes to the matching client. Gate-
 affecting callers pass `seed=` for best-effort determinism (plan point 12).
 """
+
 import json
 import re
 
@@ -23,9 +24,20 @@ def _provider(model: str) -> str:
     raise ValueError(f"cannot infer provider for model {model!r}")
 
 
-def call(role, user, system="", *, max_tokens=8000, seed=None,
-         effort="low", reasoning_effort=None, think=False, note="",
-         timeout=300, max_retries=3):
+def call(
+    role,
+    user,
+    system="",
+    *,
+    max_tokens=8000,
+    seed=None,
+    effort="low",
+    reasoning_effort=None,
+    think=False,
+    note="",
+    timeout=300,
+    max_retries=3,
+):
     """Return assistant text for `role`. Auto-routes by model provider.
 
     effort: unified reasoning level ('low'|'medium'|'high'). openai maps it to
@@ -35,30 +47,51 @@ def call(role, user, system="", *, max_tokens=8000, seed=None,
     """
     model = config.model_for(role)
     if not model:
-        raise RuntimeError(f"role {role!r} has no model configured (zh_writer "
-                           f"may be intentionally dropped — caller must check)")
+        raise RuntimeError(
+            f"role {role!r} has no model configured (zh_writer may be intentionally dropped — caller must check)"
+        )
     prov = _provider(model)
     tag = note or role
     eff = reasoning_effort or effort
     if prov == "openai":
         text, _ = openai_client.raw_call(
-            model, user, system=system, reasoning_effort=eff,
-            max_completion_tokens=max_tokens, seed=seed, note=tag,
-            timeout=timeout, max_retries=max_retries)
+            model,
+            user,
+            system=system,
+            reasoning_effort=eff,
+            max_completion_tokens=max_tokens,
+            seed=seed,
+            note=tag,
+            timeout=timeout,
+            max_retries=max_retries,
+        )
         return text
     if prov == "anthropic":
         text, _ = anthropic_client.raw_call(
-            model, user, system=system, max_tokens=max_tokens,
-            think=think, effort=eff, note=tag, max_retries=max_retries)
+            model,
+            user,
+            system=system,
+            max_tokens=max_tokens,
+            think=think,
+            effort=eff,
+            note=tag,
+            max_retries=max_retries,
+        )
         return text
     text, _ = openrouter_client.raw_call(
-        model, user, system=system, max_tokens=max_tokens, seed=seed, note=tag,
-        timeout=min(timeout, 180), max_retries=max_retries)
+        model,
+        user,
+        system=system,
+        max_tokens=max_tokens,
+        seed=seed,
+        note=tag,
+        timeout=min(timeout, 180),
+        max_retries=max_retries,
+    )
     return text
 
 
-_THINK = re.compile(r"<think>.*?</think>|<reasoning>.*?</reasoning>",
-                     re.DOTALL | re.IGNORECASE)
+_THINK = re.compile(r"<think>.*?</think>|<reasoning>.*?</reasoning>", re.DOTALL | re.IGNORECASE)
 
 
 def _balanced_scan(text, open_c, close_c):
@@ -72,7 +105,7 @@ def _balanced_scan(text, open_c, close_c):
         elif ch == close_c and depth:
             depth -= 1
             if depth == 0 and start != -1:
-                spans.append(text[start:i + 1])
+                spans.append(text[start : i + 1])
     return list(reversed(spans))
 
 
@@ -100,16 +133,37 @@ def extract_json(text):
     raise ValueError(f"No JSON found in response: {text[:300]}")
 
 
-def call_json(role, user, system="", *, max_tokens=8000, seed=None,
-              effort="medium", reasoning_effort=None, think=False, note="",
-              retries=2, timeout=300, max_retries=3):
+def call_json(
+    role,
+    user,
+    system="",
+    *,
+    max_tokens=8000,
+    seed=None,
+    effort="medium",
+    reasoning_effort=None,
+    think=False,
+    note="",
+    retries=2,
+    timeout=300,
+    max_retries=3,
+):
     """call() + JSON extraction with a light retry on parse failure."""
     last = None
     for _ in range(retries + 1):
-        txt = call(role, user, system=system, max_tokens=max_tokens, seed=seed,
-                   effort=effort, reasoning_effort=reasoning_effort,
-                   think=think, note=note, timeout=timeout,
-                   max_retries=max_retries)
+        txt = call(
+            role,
+            user,
+            system=system,
+            max_tokens=max_tokens,
+            seed=seed,
+            effort=effort,
+            reasoning_effort=reasoning_effort,
+            think=think,
+            note=note,
+            timeout=timeout,
+            max_retries=max_retries,
+        )
         try:
             return extract_json(txt)
         except ValueError as e:

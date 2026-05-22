@@ -11,7 +11,7 @@ OUT=p1_artifacts/p1_final.jsonl
 LOG=/tmp/p1_final.out
 
 launch() {
-    DR_SECTION_WORKERS=8 DRB_PHASE=P1 PYTHONPATH=/home/connor/dev/lunon-deep-research \
+    DR_SECTION_WORKERS=8 DRB_PHASE=P1 PYTHONPATH="$REPO_ROOT" \
         nohup /usr/bin/python3 -u -m deep_research.adapter \
         --out p1_artifacts/p1_final.jsonl --workers 20 \
         > "$LOG" 2>&1 &

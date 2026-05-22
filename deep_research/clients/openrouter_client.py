@@ -6,6 +6,7 @@ Reproducibility (decision #1): pin ONE underlying provider. Set
 the served provider is recorded in the cost-log note so it can be pinned once
 observed.
 """
+
 import time
 
 import requests
@@ -25,8 +26,7 @@ _SESSION.mount("http://", _ADAPTER)
 _SESSION.mount("https://", _ADAPTER)
 
 
-def raw_call(model, user, system="", max_tokens=8000, seed=None,
-             max_retries=3, timeout=180, note="", provider=None):
+def raw_call(model, user, system="", max_tokens=8000, seed=None, max_retries=3, timeout=180, note="", provider=None):
     # Tighter retry budget for OpenRouter (Nemotron/DeepInfra latency) — caps
     # a single hung extract call at ~3*(180+12)≈10min instead of 28min so a
     # rate-limited worker can't stall an entire task. Specialists.research
@@ -74,7 +74,7 @@ def raw_call(model, user, system="", max_tokens=8000, seed=None,
             r = _SESSION.post(_URL, headers=headers, json=payload, timeout=timeout)
         except Exception as e:  # noqa: BLE001
             last = f"{type(e).__name__}: {e}"
-            time.sleep(2 ** attempt)
+            time.sleep(2**attempt)
             continue
         if r.status_code == 200:
             # OpenRouter occasionally returns truncated/non-JSON bodies under
@@ -84,7 +84,7 @@ def raw_call(model, user, system="", max_tokens=8000, seed=None,
                 data = r.json()
             except Exception as e:  # noqa: BLE001
                 last = f"json-parse error: {type(e).__name__}: {str(e)[:120]}"
-                time.sleep(min(2 ** attempt * 3, 45))
+                time.sleep(min(2**attempt * 3, 45))
                 continue
             usage = data.get("usage") or {}
             served = data.get("provider", "?")
@@ -100,7 +100,7 @@ def raw_call(model, user, system="", max_tokens=8000, seed=None,
             continue
         if r.status_code in (429, 500, 502, 503, 504):
             last = f"HTTP {r.status_code}: {r.text[:200]}"
-            time.sleep(min(2 ** attempt * 3, 45))
+            time.sleep(min(2**attempt * 3, 45))
             continue
         raise RuntimeError(f"OpenRouter HTTP {r.status_code}: {r.text[:400]}")
     raise RuntimeError(f"OpenRouter {model} failed after {max_retries} retries: {last}")

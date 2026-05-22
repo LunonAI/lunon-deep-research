@@ -1,0 +1,36 @@
+name: PR Lint
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  conventional-commits:
+    name: Conventional Commits PR title
+    runs-on: ubuntu-latest
+    steps:
+      # Pinned to commit SHA (resolves to v5 as of 2026-05-21) for the same
+      # supply-chain reason ruff-action is SHA-pinned in ci.yml.
+      - uses: amannn/action-semantic-pull-request@e32d7e603df1aa1ba07e981f2a23455dee596825  # v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            chore
+            refactor
+            docs
+            test
+            build
+            ci
+            perf
+            style
+          requireScope: false
+          subjectPattern: ^[A-Za-z0-9].+$
+          subjectPatternError: |
+            The subject "{subject}" found in the pull request title "{title}" must start
+            with an uppercase letter, lowercase letter, or digit.

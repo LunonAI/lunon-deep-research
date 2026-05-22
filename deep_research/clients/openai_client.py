@@ -6,6 +6,7 @@ temperature/top_p — gpt-5.x reasoning models reject them), plus:
 - auto cost-log on every HTTP 200 (empty-content retries still bill), mirroring
   gpt55.py.
 """
+
 import time
 
 import requests
@@ -26,9 +27,17 @@ _SESSION.mount("http://", _ADAPTER)
 _SESSION.mount("https://", _ADAPTER)
 
 
-def raw_call(model, user, system="", reasoning_effort="low",
-             max_completion_tokens=6000, seed=None, max_retries=3, timeout=300,
-             note=""):
+def raw_call(
+    model,
+    user,
+    system="",
+    reasoning_effort="low",
+    max_completion_tokens=6000,
+    seed=None,
+    max_retries=3,
+    timeout=300,
+    note="",
+):
     """Return (content_str, usage_dict). Raises RuntimeError after retries."""
     if not _KEY:
         raise RuntimeError("OPENAI_API_KEY missing from .env")
@@ -53,13 +62,12 @@ def raw_call(model, user, system="", reasoning_effort="low",
             r = _SESSION.post(_URL, headers=headers, json=payload, timeout=timeout)
         except Exception as e:  # noqa: BLE001
             last = f"{type(e).__name__}: {e}"
-            time.sleep(2 ** attempt)
+            time.sleep(2**attempt)
             continue
         if r.status_code == 200:
             data = r.json()
             usage = data.get("usage") or {}
-            log_usage(data.get("model") or model, usage,
-                      note=note or f"reasoning={reasoning_effort}")
+            log_usage(data.get("model") or model, usage, note=note or f"reasoning={reasoning_effort}")
             ch = data["choices"][0]
             content = (ch["message"].get("content") or "").strip()
             if content:
@@ -73,7 +81,7 @@ def raw_call(model, user, system="", reasoning_effort="low",
             continue
         if r.status_code in (429, 500, 502, 503, 504):
             last = f"HTTP {r.status_code}: {r.text[:200]}"
-            time.sleep(min(2 ** attempt * 3, 45))
+            time.sleep(min(2**attempt * 3, 45))
             continue
         raise RuntimeError(f"OpenAI HTTP {r.status_code}: {r.text[:400]}")
     raise RuntimeError(f"OpenAI {model} failed after {max_retries} retries: {last}")

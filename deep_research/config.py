@@ -10,6 +10,7 @@ Model stack (p1-checklist:13-18; divergences logged in plan + SUMMARY):
 - Intent / criteria-gen / archetype / inner-loop scorer / grounding / Refiner = GPT-5.5
 - ZH writer-pass = chosen at W6 (Qwen3-235B vs DeepSeek-V3.2 via OpenRouter)
 """
+
 import os
 
 GPT55 = "gpt-5.5"

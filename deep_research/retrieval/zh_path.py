@@ -5,6 +5,7 @@ P1 ZH retrieval = Exa (Simplified-Chinese query, type=auto) + optional Jina
 reader for thin snippets. W7 measures the ZH/EN RACE gap; >~5 pts triggers the
 decision-#3 P1.5 patch (Jina-based direct Baidu SERP scrape — DR_ZH_BAIDU=1).
 """
+
 import os
 import time
 
@@ -24,12 +25,12 @@ def _baidu_scrape(query, n=6):
         log_request("jina_fetch", note="zh_baidu_scrape")
         # crude extraction: jina returns markdown links; keep first n external
         import re
+
         for m in re.finditer(r"\[([^\]]{8,120})\]\((https?://[^\s)]+)\)", md):
             t, u = m.group(1), m.group(2)
             if "baidu.com" in u:
                 continue
-            out.append({"title": t, "url": u, "text": t,
-                        "published_date": "", "score": 0})
+            out.append({"title": t, "url": u, "text": t, "published_date": "", "score": 0})
             if len(out) >= n:
                 break
     return out

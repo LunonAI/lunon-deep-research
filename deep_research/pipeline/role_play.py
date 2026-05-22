@@ -8,6 +8,7 @@ architect's system prompt and is available to the writer system prompt.
 Verified by: persona length 60-200 words; persona reflects domain (e.g.,
 Finance → "senior buy-side equity analyst..." NOT "generic researcher").
 """
+
 from dataclasses import dataclass
 
 from .. import llm
@@ -43,17 +44,20 @@ _SYSTEM = (
 
 @node("role_play")
 def run(inp: RolePlayInput) -> RolePlayOutput:
-    user = (f"Prompt language: {inp.language}\nDomain: {inp.domain}\n"
-            f"Archetype: {inp.archetype}\n\nPROMPT:\n{inp.query}\n\n"
-            "Write the persona.")
+    user = (
+        f"Prompt language: {inp.language}\nDomain: {inp.domain}\n"
+        f"Archetype: {inp.archetype}\n\nPROMPT:\n{inp.query}\n\n"
+        "Write the persona."
+    )
     for attempt in range(2):
-        txt = llm.call("architect", user, system=_SYSTEM, max_tokens=900,
-                       effort="low", note=f"role_play.{attempt}")
+        txt = llm.call("architect", user, system=_SYSTEM, max_tokens=900, effort="low", note=f"role_play.{attempt}")
         words = len(txt.split())
         if words >= 60:
             return RolePlayOutput(persona=txt.strip())
         # too short — retry once with an explicit length requirement
-        user = (user + f"\n\n[RETRY] Your previous reply was {words} words — "
-                "WELL BELOW the 80-180 word REQUIREMENT. Write the FULL "
-                "persona paragraph now, 80-180 words, NO preface, NO bullets.")
+        user = (
+            user + f"\n\n[RETRY] Your previous reply was {words} words — "
+            "WELL BELOW the 80-180 word REQUIREMENT. Write the FULL "
+            "persona paragraph now, 80-180 words, NO preface, NO bullets."
+        )
     return RolePlayOutput(persona=txt.strip())

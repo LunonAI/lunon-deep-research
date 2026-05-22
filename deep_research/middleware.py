@@ -12,16 +12,26 @@ explicit helpers at the pipeline integration points:
 4. validate_report — ReportValidation: terminal length/structure/truncation
    check; returns (ok, reasons) so the caller can nudge continuation.
 """
+
 import difflib
 import re
 
-VALID_SPECIALISTS = ["evidence_gatherer", "mechanism_explorer", "comparator",
-                      "critic", "horizon_scanner", "generalist"]
+VALID_SPECIALISTS = ["evidence_gatherer", "mechanism_explorer", "comparator", "critic", "horizon_scanner", "generalist"]
 VALID_QTYPES = ["factual", "causal", "comparative", "critical", "trend"]
 
-_TRUNC_MARKERS = ("...", "[truncated", "TODO", "TBD", "placeholder",
-                   "lorem ipsum", "<continue", "to be completed", "（待补充）",
-                   "未完待续", "[continued]")
+_TRUNC_MARKERS = (
+    "...",
+    "[truncated",
+    "TODO",
+    "TBD",
+    "placeholder",
+    "lorem ipsum",
+    "<continue",
+    "to be completed",
+    "（待补充）",
+    "未完待续",
+    "[continued]",
+)
 
 
 def sanitize_role(name: str, valid=None) -> str:
@@ -50,29 +60,28 @@ class BudgetGuard:
     def spend(self, n: int = 1):
         self.used += n
         if self.used > self.budget:
-            raise RuntimeError(
-                f"tool-call budget exceeded ({self.used}>{self.budget})")
+            raise RuntimeError(f"tool-call budget exceeded ({self.used}>{self.budget})")
 
     @property
     def remaining(self):
         return max(0, self.budget - self.used)
 
 
-def reasoning_aware_json(call_json_fn, role, user, system, *, max_tokens,
-                         note, tries=3, **kw):
+def reasoning_aware_json(call_json_fn, role, user, system, *, max_tokens, note, tries=3, **kw):
     """EmptyResponseRetry: retry an LLM JSON call with a corrective nudge when
     the output is empty/refusal/unparseable (detected failure pattern)."""
     last = None
     nudge = ""
-    for i in range(tries):
+    for _ in range(tries):
         try:
-            return call_json_fn(role, user + nudge, system=system,
-                                max_tokens=max_tokens, note=note, **kw)
+            return call_json_fn(role, user + nudge, system=system, max_tokens=max_tokens, note=note, **kw)
         except Exception as e:  # noqa: BLE001
             last = e
-            nudge = ("\n\n[RETRY] Your previous reply was empty or not valid "
-                     "JSON. Output ONLY the required JSON object, no prose, "
-                     "no code fences.")
+            nudge = (
+                "\n\n[RETRY] Your previous reply was empty or not valid "
+                "JSON. Output ONLY the required JSON object, no prose, "
+                "no code fences."
+            )
     raise RuntimeError(f"reasoning_aware_json({role}) failed: {last}")
 
 
@@ -88,7 +97,6 @@ def validate_report(text: str, *, min_words: int = 1200):
     if any(m.lower() in tail for m in _TRUNC_MARKERS):
         reasons.append("ends on a truncation/placeholder marker")
     low = (text or "").lower()
-    if any(m.lower() in low for m in ("lorem ipsum", "[placeholder", "tbd]",
-                                      "（待补充）")):
+    if any(m.lower() in low for m in ("lorem ipsum", "[placeholder", "tbd]", "（待补充）")):
         reasons.append("contains placeholder text")
     return (not reasons), reasons
