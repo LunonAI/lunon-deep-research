@@ -94,6 +94,9 @@ def strip_stage_directions(text: str) -> tuple[str, int]:
         n += k
     # Normalize: collapse multi-space and stray ' , ' artifacts
     cleaned = re.sub(r"\s+,", ",", cleaned)
+    # Orphaned parens left behind when a parenthetical was entirely a stripped
+    # phrase, e.g. "(as discussed in section 3.1)" → "( )" → "".
+    cleaned = re.sub(r"\(\s*\)", "", cleaned)
     cleaned = re.sub(r"[ \t]+", " ", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned, n
@@ -109,14 +112,28 @@ def collapse_empty_sections(text: str, min_words: int = 10) -> tuple[str, int]:
     fewer than `min_words` words of body between them, drop the empty heading.
 
     Returns (cleaned_text, n_collapsed). Conservative — only drops headings
-    that have effectively no content (≤9 words).
+    that have effectively no content (≤9 words). A heading whose next heading
+    is at a DEEPER level is treated as a parent (its content lives in the
+    subsections) and is preserved regardless of body-word count.
     """
     lines = text.splitlines()
     keep = [True] * len(lines)
-    heading_idx = [i for i, ln in enumerate(lines) if _HEADING_RE.match(ln)]
+    # (line_index, depth) so we can detect a parent-of-subsection.
+    heading_info = []
+    for i, ln in enumerate(lines):
+        m = _HEADING_RE.match(ln)
+        if m:
+            heading_info.append((i, len(m.group(1))))
     n_collapsed = 0
-    for k, i in enumerate(heading_idx):
-        nxt = heading_idx[k + 1] if k + 1 < len(heading_idx) else len(lines)
+    for k, (i, depth) in enumerate(heading_info):
+        if k + 1 < len(heading_info):
+            nxt, next_depth = heading_info[k + 1]
+        else:
+            nxt, next_depth = len(lines), 0
+        # If next heading is deeper, this heading is a parent — keep it,
+        # its substance is carried by its subsections.
+        if next_depth > depth:
+            continue
         body = "\n".join(lines[i + 1 : nxt])
         if len(body.split()) < min_words:
             # Drop both the heading AND its body — otherwise the body lines
@@ -152,11 +169,16 @@ def _has_cross_refs(text: str) -> bool:
 def renumber_headings(text: str) -> tuple[str, dict]:
     """Rebuild a valid numbering tree on all #/##/### headings.
 
-    - Top-level headings (`#`) get sequence 1, 2, 3...
-    - Second-level (`##`) get 1.1, 1.2, ... resetting at each new top-level
-    - Third-level (`###`) get 1.1.1, 1.1.2, ...
-    - Fourth-level (`####`) and deeper are demoted to `###` (structural cap)
-    - Existing numeric prefixes on heading text are stripped before renumbering
+    Heading-level → numbering mapping (matches AgentCPM ≤3-depth cap):
+    - H1 (`#`) — the report title; no number added
+    - H2 (`##`) — top-level sections: "1", "2", "3", ...
+    - H3 (`###`) — subsections: "1.1", "1.2", ... resetting at each new H2
+    - H4+ (`####` and deeper) — demoted to H3 first, then numbered as H3
+
+    Three-level numbering (e.g. "1.1.1") is intentionally NOT produced; H4+
+    content is collapsed to H3 by the structural cap above and then numbered
+    as the next H3 under its current H2. Existing numeric prefixes on heading
+    text are stripped before renumbering.
 
     Returns (renumbered_text, stats). Stats includes:
         applied: bool — False if cross-refs detected (skipped to avoid breaking)
@@ -167,7 +189,7 @@ def renumber_headings(text: str) -> tuple[str, dict]:
     if _has_cross_refs(text):
         return text, {"applied": False, "n_renumbered": 0, "n_demoted": 0, "skipped_reason": "cross_references_present"}
 
-    counters = [0, 0, 0]  # depth 1, 2, 3
+    counters = [0, 0]  # index 0 = H2 sequence, index 1 = H3 sequence under current H2
     n_renumbered = 0
     n_demoted = 0
 
