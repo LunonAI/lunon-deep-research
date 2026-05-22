@@ -25,9 +25,14 @@ jobs:
       - name: Install ruff
         # Pinned to commit SHA (resolves to v3 as of 2026-05-21).
         # Force-pushed tags can swap the action body; SHA pin prevents that.
+        # `args: --version` suppresses the action's built-in `ruff check .`
+        # default so the explicit steps below are the only thing that gates
+        # CI. Without this, the action silently checks the whole workspace
+        # (broader than the deep_research/-only scope this PR is opting in to).
         uses: astral-sh/ruff-action@4919ec5cf1f49eff0871dbcea0da843445b837e6  # v3
         with:
           version: "0.14.11"
+          args: "--version"
 
       - name: ruff check
         run: ruff check deep_research/
