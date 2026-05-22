@@ -27,7 +27,6 @@ from ..state import DesignGuide, Scaffold
 
 _FAIL_LOG = (pathlib.Path(__file__).resolve().parent.parent.parent
              / "p1_artifacts" / "validation_failures.jsonl")
-_FAIL_LOG.parent.mkdir(parents=True, exist_ok=True)
 _TOK = 4  # ~chars-per-token heuristic; cheap, scoring uses the harness cleaner
 
 
@@ -190,6 +189,7 @@ def run(inp: ValidationInput) -> ValidationOutput:
 def log_failures(task_id: str, vout: ValidationOutput) -> None:
     """Persist a final-cap failure to validation_failures.jsonl."""
     try:
+        _FAIL_LOG.parent.mkdir(parents=True, exist_ok=True)
         with _FAIL_LOG.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps({"task_id": task_id, "counts": vout.counts,
                                  "failures": vout.failures}, ensure_ascii=False)
