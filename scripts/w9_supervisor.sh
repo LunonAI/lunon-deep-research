@@ -38,10 +38,12 @@ while true; do
         break
     fi
     # check ledger growth over 15 min
-    start_ledger=$(wc -l < "$LEDGER")
+    # Fallback to 0 when LEDGER doesn't yet exist — otherwise empty stdout makes
+    # bash arithmetic treat delta as 0 and trips the stall path on a healthy run.
+    start_ledger=$(wc -l < "$LEDGER" 2>/dev/null || echo 0)
     start_ts=$(date -u +%H:%M:%S)
     sleep 900  # 15 min
-    end_ledger=$(wc -l < "$LEDGER")
+    end_ledger=$(wc -l < "$LEDGER" 2>/dev/null || echo 0)
     end_ts=$(date -u +%H:%M:%S)
     n_now=$(wc -l < "$OUT" 2>/dev/null || echo 0)
     delta=$((end_ledger - start_ledger))
