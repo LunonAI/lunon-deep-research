@@ -157,9 +157,14 @@ def collapse_empty_sections(text: str, min_words: int = 10) -> tuple[str, int]:
 # (e.g. "text§2"). In real prose `§` follows a space, so the boundary never
 # fires — split `§` out of the `\b`-prefixed alternation so it matches on
 # its own.
+# The second alternative is capped at \d{1,2} (not \d+) so it doesn't match
+# 4-digit years — "as shown in 2024 surveys" was previously matching and
+# silently suppressing renumber on any article with year-dated prose, which
+# is most of them. Section refs are realistically 1-99, so {1,2} keeps real
+# matches like "as shown in 3" or "as shown in 3.2".
 _CROSS_REF_RE = re.compile(
     r"(?:\b(?:section|sec\.?|see)|§)\s*\d+(?:\.\d+){0,3}\b|"
-    r"(?:as\s+(?:shown|covered|discussed)\s+in\s+)\d+(?:\.\d+){0,3}",
+    r"(?:as\s+(?:shown|covered|discussed)\s+in\s+)\d{1,2}(?:\.\d+){0,3}\b",
     re.IGNORECASE,
 )
 

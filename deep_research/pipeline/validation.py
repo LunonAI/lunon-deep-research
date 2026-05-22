@@ -138,15 +138,16 @@ def run(inp: ValidationInput) -> ValidationOutput:
         failures.append({"check": "opening_template", "severity": "high",
                          "detail": {"missing": opn["missing"]}})
 
-    # 6. NUMBERING CONSISTENCY (W9 diagnostic — 30% of Readability losses
-    # cited "inconsistent section numbering" / "duplicated headings").
+    # 6. NUMBERING CONSISTENCY — telemetry only. Numbering is handled
+    # deterministically by `pipeline/numbering_fix.renumber_headings`, which
+    # runs at the end of `orchestrate.from_plan`. Triggering a corrective
+    # refiner pass here was paying an LLM call for an issue that the post-
+    # edit step would have resolved for free. Counts kept for drift logging.
     headings = re.findall(r"^(#{2,4})\s*([0-9.]+)?\s", inp.article, re.MULTILINE)
     nums = [n for _, n in headings if n]
     counts["headings_with_numbers"] = len(nums)
     counts["unique_numbers"] = len(set(nums))
-    if len(nums) > 0 and len(set(nums)) < len(nums) * 0.95:  # >5% duplicate numbers
-        failures.append({"check": "numbering_consistency", "severity": "high",
-                         "detail": f"{len(nums)-len(set(nums))} duplicate numbered headings (judge penalizes 'duplicated section numbers')"})
+    # No failure appended — numbering_fix is the single source of truth.
 
     # 7. CROSS-SECTION REDUNDANCY (W9 diagnostic — 40%+ Readability losses
     # cited "repeats concepts across sections"). Crude detection: count
