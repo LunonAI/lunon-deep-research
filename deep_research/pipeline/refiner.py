@@ -97,7 +97,7 @@ def refine(draft: str, *, archetype: str, language: str,
     # 10-30% pruning the judge wants.
     if ratio < 0.70:
         return {"article": draft, "applied": False, "ratio": round(ratio, 3),
-                "reason": "min-ratio<0.75 revert"}
+                "reason": "min-ratio<0.70 revert"}
     return {"article": out, "applied": True, "ratio": round(ratio, 3),
             "reason": "ok"}
 
