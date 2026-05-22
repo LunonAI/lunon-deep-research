@@ -96,7 +96,7 @@ _ARCH_REFINE_EMPHASIS = {
     "list-all": "Maximize exhaustive coverage; one clearly-delimited unit per "
                 "required item; comparison/inventory tables.",
     "compare": "Sharpen the entity×dimension comparison matrix; equalize depth "
-               "across entities; quantptify every cell where possible.",
+               "across entities; quantify every cell where possible.",
     "trend": "Strengthen the dated chronological spine and the forward signal.",
     "explain-mechanism": "Deepen causal chains by showing each intermediate "
                          "step explicitly; add named theories/frameworks and "
