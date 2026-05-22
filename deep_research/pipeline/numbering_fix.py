@@ -161,7 +161,7 @@ def collapse_empty_sections(text: str, min_words: int = 10) -> tuple[str, int]:
 # is most of them. Section refs are realistically 1-99, so {1,2} keeps real
 # matches like "as shown in 3" or "as shown in 3.2".
 _CROSS_REF_RE = re.compile(
-    r"(?:\b(?:section|sec\.?|see)|§)\s*\d+(?:\.\d+){0,3}\b|"
+    r"(?:\b(?:section|sec\.?|see)|§)\s*\d{1,2}(?:\.\d+){0,3}\b|"
     r"(?:as\s+(?:shown|covered|discussed)\s+in\s+)\d{1,2}(?:\.\d+){0,3}\b",
     re.IGNORECASE,
 )
@@ -176,29 +176,34 @@ def _has_cross_refs(text: str) -> bool:
 
 
 def renumber_headings(text: str) -> tuple[str, dict]:
-    """Rebuild a valid numbering tree on all #/##/### headings.
+    """Rebuild a valid numbering tree on all #/##/###/#### headings.
 
-    Heading-level → numbering mapping (matches AgentCPM ≤3-depth cap):
+    Heading-level → numbering mapping (aligned with the writer prompts in
+    `writing_rules._NUMBERING_RULE` and the AgentCPM 3-numeric-level spec):
     - H1 (`#`) — the report title; no number added
     - H2 (`##`) — top-level sections: "1", "2", "3", ...
     - H3 (`###`) — subsections: "1.1", "1.2", ... resetting at each new H2
-    - H4+ (`####` and deeper) — demoted to H3 first, then numbered as H3
+    - H4 (`####`) — sub-subsections: "1.1.1", "1.1.2", ... resetting at each new H3
+    - H5+ — demoted to H4 first, then numbered as the next sub-subsection
 
-    Three-level numbering (e.g. "1.1.1") is intentionally NOT produced; H4+
-    content is collapsed to H3 by the structural cap above and then numbered
-    as the next H3 under its current H2. Existing numeric prefixes on heading
-    text are stripped before renumbering.
+    H4 → "1.1.1" emits TRUE three-level numbering. An earlier version
+    demoted H4 to H3 and re-numbered it as a sibling of the preceding H3
+    (so `### 2.1 → #### 2.1.1` became `### 2.2`), which broke the
+    parent-child relationship the writer intended. That's now fixed:
+    the writer-prompt cap of "1.1.1" (max three numeric levels) is matched
+    by what this function emits.
 
     Returns (renumbered_text, stats). Stats includes:
         applied: bool — False if cross-refs detected (skipped to avoid breaking)
         n_renumbered: int — number of headings updated
-        n_demoted: int — number of #### → ### demotions (cap enforcement)
+        n_demoted: int — number of H5+ → H4 demotions (cap enforcement)
         skipped_reason: str | None
     """
     if _has_cross_refs(text):
         return text, {"applied": False, "n_renumbered": 0, "n_demoted": 0, "skipped_reason": "cross_references_present"}
 
-    counters = [0, 0]  # index 0 = H2 sequence, index 1 = H3 sequence under current H2
+    # index 0 = H2 sequence, 1 = H3 under current H2, 2 = H4 under current H3.
+    counters = [0, 0, 0]
     n_renumbered = 0
     n_demoted = 0
 
@@ -207,21 +212,20 @@ def renumber_headings(text: str) -> tuple[str, dict]:
         hashes = m.group(1)
         title = m.group(2)
         depth = len(hashes)
-        # Enforce 3-level cap (2c structural rule)
-        if depth >= 4:
-            depth = 3
-            hashes = "###"
+        # Enforce the 4-markdown-level / 3-numeric-level cap. H5+ → H4 so
+        # we still emit a numbered heading rather than dropping it.
+        if depth >= 5:
+            depth = 4
+            hashes = "####"
             n_demoted += 1
-        # H1 is the report title — leave numbering off it. H2 is the top
-        # section unit (counter index 0); H3 is subsection (index 1); H4+
-        # was already demoted to 3.
         if depth == 1:
+            # H1 is the report title — no number added.
             clean_title = _LEADING_NUM_RE.sub("", title)
             return f"{hashes} {clean_title}"
-        # depth=2 → d=0, depth=3 → d=1
+        # depth=2 → d=0 ("1"), depth=3 → d=1 ("1.1"), depth=4 → d=2 ("1.1.1")
         d = depth - 2
         counters[d] += 1
-        # Reset deeper counters
+        # Reset deeper counters when we open a new sibling at this level.
         for j in range(d + 1, len(counters)):
             counters[j] = 0
         # Build numeric prefix from counters[0..d]
