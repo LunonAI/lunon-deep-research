@@ -228,6 +228,8 @@ def from_plan(ctx: dict, query: str, language: str) -> str:
         "collapsed": nfo.sections_collapsed,
         "renumbered": nfo.headings_renumbered,
         "demoted": nfo.headings_demoted,
+        "xref_rewritten": nfo.cross_refs_rewritten,
+        "xref_orphaned": nfo.cross_refs_orphaned,
         "cap_violations": nfo.cap_violations,
         "skipped_reason": nfo.skipped_reason,
     }
