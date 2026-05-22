@@ -104,3 +104,7 @@ class PipelineState:
     article: str = ""
     validation_log: list = field(default_factory=list)
     refiner_passes: int = 0
+    # Deterministic post-edit telemetry (numbering_fix module, plan v3 §2a+2d+2c)
+    numbering_fix_stats: dict = field(default_factory=dict)
+    # ART-style refiner gate verdict (plan v3 §3b, Branch B monitor-mode)
+    refiner_gate_verdict: dict = field(default_factory=dict)

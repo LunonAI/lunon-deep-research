@@ -38,9 +38,10 @@ _DOMAIN_KEY = {
     "default": "_overall",
 }
 
-# ---- LOCKED cleaning-resistant rule (verbatim, p0_artifacts/cleaner_behavior.md)
+# ---- Inline-source-name attribution (verbatim from p0_artifacts/cleaner_behavior.md;
+# internal label removed so the term itself does not leak into article text).
 CLEANING_RESISTANT_RULE = (
-    "CLEANING-RESISTANT ATTRIBUTION (mandatory, non-negotiable):\n"
+    "SOURCE ATTRIBUTION (mandatory, non-negotiable):\n"
     "1. Attribute with source NAMES inline as prose — e.g. \"according to "
     "McKinsey 2025\", \"Gartner's 2024 analysis\" — never a bare [n]/[^n] for "
     "anything load-bearing.\n"
@@ -55,14 +56,16 @@ CLEANING_RESISTANT_RULE = (
 )
 
 _INSIGHT_MIN = (
-    "INSIGHT ELEMENTS — PREFERRED WHEN THEY GENUINELY FIT THE TASK:\n"
-    "When the prompt naturally calls for them, include forward-looking "
-    "statements with date anchors, critiqued alternatives, non-obvious causal "
-    "chains (A→X→Y→B), and quantified projections with confidence ranges. "
-    "**Do NOT artificially insert these if they bloat the article or distract "
-    "from the core ask** — the judge penalizes 'many speculative projections, "
-    "extensive caveats, and methodological disclaimers that reduce efficiency' "
-    "(W9 actual rationale). Brevity + relevance beat formulaic insertion."
+    "INSIGHT ELEMENTS — TIGHT ARCHETYPE-CONDITIONAL POLICY:\n"
+    "Do NOT add forward-looking projections, scenario tables, confidence "
+    "intervals, future-dated content, or methodological caveats UNLESS the "
+    "prompt explicitly asks for prediction/forecast OR the task archetype is "
+    "predict, recommend, or trend. For all other archetypes (list-all, "
+    "compare, explain-mechanism), keep the prose grounded in what the sources "
+    "directly support; brevity + relevance > formulaic insight insertion. "
+    "When insight IS appropriate, ground every forward statement in a named "
+    "source and a concrete date or confidence range — never speculate without "
+    "evidential support."
 )
 
 # NEW (W9 diagnostic 2026-05-21): the judge cited "inconsistent section
@@ -95,8 +98,9 @@ _ARCH_REFINE_EMPHASIS = {
     "compare": "Sharpen the entity×dimension comparison matrix; equalize depth "
                "across entities; quantptify every cell where possible.",
     "trend": "Strengthen the dated chronological spine and the forward signal.",
-    "explain-mechanism": "Deepen causal chains (A→X→Y→B), add named "
-                         "theories/frameworks and confounders.",
+    "explain-mechanism": "Deepen causal chains by showing each intermediate "
+                         "step explicitly; add named theories/frameworks and "
+                         "confounders.",
     "predict": "Add scenarios, drivers, explicit confidence ranges and time "
                "horizons; tie every forecast to evidence.",
     "recommend": "Make the ranked recommendation decisive; add a rationale "
@@ -131,6 +135,17 @@ def writer_system(archetype: str, domain: str, language: str,
         f"our prior articles 81% LOSS on Readability for being overlong, "
         f"repetitive, and structurally inconsistent. Match the reference "
         f"length conventions; do not pad."
+        # AgentCPM-Report (arXiv 2602.06540) verbatim non-redundancy + meta-suppression directives
+        f"\n\nYou should ensure that the content you write is not redundant "
+        f"with other sections. Each section must advance the report; do NOT "
+        f"restate drivers, caveats, or conclusions from sibling sections."
+        f"\n\nDO NOT output meta-commentary about other sections, your "
+        f"process, your methodology, your evidence sourcing, or your writing "
+        f"approach. Output ONLY the report content itself. The reader does "
+        f"not see (and is not told) how the report was produced."
+        f"\n\nSTRUCTURAL CAPS — HARD: use 2-7 subsections per major section; "
+        f"never exceed 3 levels of heading depth (e.g. 1, 1.1, 1.1.1 — never "
+        f"1.1.1.1). Skip a subsection rather than break these limits."
         f"\n\n{opening_directive()}\n\n{_NUMBERING_RULE}\n\n{_DEDUP_RULE}\n\n"
         f"{_INSIGHT_MIN}\n\n{CLEANING_RESISTANT_RULE}"
         f"\n\nLENGTH GOVERNOR — HARD: target ≈{ceil} words total (EN reference "

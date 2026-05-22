@@ -27,8 +27,9 @@ _ARCH_EMPHASIS = {
                "section; bias to comparative + factual; equal depth per entity.",
     "trend": "Chronological evolution + current state + forward signal; bias to "
              "trend + causal; demand dated developments.",
-    "explain-mechanism": "Causal spine: A→X→Y→B chains, named theories/"
-                         "frameworks; bias to causal + critical; reject bare A→B.",
+    "explain-mechanism": "Causal spine: step-by-step chains showing each "
+                         "intermediate link, named theories/frameworks; bias "
+                         "to causal + critical; reject single-step assertions.",
     "predict": "Evidence-grounded forecast with scenarios, drivers, confidence "
                "ranges, time horizons; bias to trend + causal + critical.",
     "recommend": "Lead to a decisive ranked recommendation with a rationale "

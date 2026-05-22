@@ -48,7 +48,7 @@ F. THEN polish: quantify evaluative claims, deepen entity detail WHERE it
    direct statement.
 
 Length may decrease 10-20% — that's GOOD, not a bug. Preserve the position-1
-opening verbatim. Obey the cleaning-resistant rule below.
+opening verbatim. Obey the source-attribution rule below.
 
 # History: GEPA cycle 1 (universal pruning) and cycle 2 (cross-section dedup +
 # numbering) both reverted on tiny dev slices, but W9 actual judge analysis

@@ -16,10 +16,10 @@ _SEED = 12345
 # comparisons matter; unsupported claims hurt these archetypes.
 _SYSTEM_STRICT = (
     "You are a citation-grounding verifier. You are given a report SECTION and "
-    "the EVIDENCE atoms available to it. Identify every claim in the section "
+    "the EVIDENCE findings available to it. Identify every claim in the section "
     "that asserts a specific figure, date, named fact, or attributes something "
     "to a source, and that is NOT supported by (or is contradicted by) the "
-    "evidence atoms. Do NOT flag general analytical/synthetic statements that "
+    "evidence findings. Do NOT flag general analytical/synthetic statements that "
     "do not assert a checkable fact. Output ONLY JSON: {\"unsupported\": "
     "[{\"claim\": str (verbatim/near-verbatim), \"issue\": "
     "\"unsupported\"|\"contradicted\", \"fix\": str (what evidence to cite or "
@@ -35,7 +35,7 @@ _SYSTEM_STRICT = (
 _SYSTEM_LENIENT = (
     "You are a citation-grounding verifier for an ENUMERATIVE coverage task "
     "where breadth-of-coverage matters more than per-claim citation. You are "
-    "given a report SECTION and the EVIDENCE atoms available to it. Flag ONLY "
+    "given a report SECTION and the EVIDENCE findings available to it. Flag ONLY "
     "claims that are DIRECTLY CONTRADICTED by the evidence — do NOT flag "
     "claims that lack explicit evidence support but represent reasonable "
     "inference or well-known domain knowledge. The judge will penalize US for "
