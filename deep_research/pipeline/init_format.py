@@ -10,6 +10,7 @@ the validator checks against it (every section >= 0.7 of expected length).
 
 Length budgeting respects the per-domain governor (writing_rules.length_ceiling).
 """
+
 from dataclasses import dataclass
 
 from .. import writing_rules as wr
@@ -22,7 +23,7 @@ _WORDS_PER_TOKEN = 0.75
 
 @dataclass
 class InitFormatInput:
-    plan: dict           # from architect
+    plan: dict  # from architect
     language: str
     domain: str
 
@@ -59,16 +60,17 @@ def run(inp: InitFormatInput) -> InitFormatOutput:
 
     sections = []
     for i, s in enumerate(toc):
-        sid = s.get("id", f"S{i+1}")
+        sid = s.get("id", f"S{i + 1}")
         share = total_tokens * weights[i] / weight_sum
         expected = max(800, int(share))
-        sections.append(ScaffoldSection(
-            section_id=sid,
-            title=s.get("title", f"Section {i+1}"),
-            subsections=[ss.get("title", "") for ss in s.get("subsections", [])],
-            expected_length_tokens=expected,
-            assigned_specialists=_section_specialists(sid, inp.plan),
-        ))
+        sections.append(
+            ScaffoldSection(
+                section_id=sid,
+                title=s.get("title", f"Section {i + 1}"),
+                subsections=[ss.get("title", "") for ss in s.get("subsections", [])],
+                expected_length_tokens=expected,
+                assigned_specialists=_section_specialists(sid, inp.plan),
+            )
+        )
 
-    return InitFormatOutput(scaffold=Scaffold(
-        sections=sections, total_target_tokens=total_tokens))
+    return InitFormatOutput(scaffold=Scaffold(sections=sections, total_target_tokens=total_tokens))

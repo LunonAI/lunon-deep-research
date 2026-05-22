@@ -10,6 +10,7 @@ hooks (gpt55/Opus/OpenRouter); this wrapper adds the node-level boundary marker
 so we can group ledger rows by node by querying `note LIKE 'node:%'` or by
 filtering rows between the entry/exit markers.
 """
+
 import functools
 import time
 
@@ -29,7 +30,8 @@ def node(name: str):
                 return out
             finally:
                 dur = round(time.time() - t0, 2)
-                log_usage(f"node:{name}", {},
-                          note=f"node:{name} exit dur={dur}s")
+                log_usage(f"node:{name}", {}, note=f"node:{name} exit dur={dur}s")
+
         return wrapper
+
     return deco

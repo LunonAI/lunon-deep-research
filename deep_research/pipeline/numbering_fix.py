@@ -23,9 +23,9 @@ Citation: NVIDIA AI-Q middleware validator (HF blog, 2025) for the deterministic
 post-edit pattern. No published paper specifically on heading renumbering —
 this is an engineering task the literature hasn't bothered to write up.
 """
+
 import re
 from dataclasses import dataclass
-
 
 # ---------- Step 2d: stage-direction stop-list ----------
 
@@ -70,9 +70,7 @@ _INLINE_PHRASES = [
 # becomes "X" cleanly (not "2.1, X").
 _INLINE_REGEXES = [
     re.compile(
-        r"[, ]*\b" + re.escape(p) + r"\b"
-        + (r"\s*\d+(?:\.\d+)*" if absorb_num else r"")
-        + r"[, ]*",
+        r"[, ]*\b" + re.escape(p) + r"\b" + (r"\s*\d+(?:\.\d+)*" if absorb_num else r"") + r"[, ]*",
         re.IGNORECASE,
     )
     for p, absorb_num in _INLINE_PHRASES
@@ -115,15 +113,15 @@ def collapse_empty_sections(text: str, min_words: int = 10) -> tuple[str, int]:
     """
     lines = text.splitlines()
     keep = [True] * len(lines)
-    heading_idx = [i for i, l in enumerate(lines) if _HEADING_RE.match(l)]
+    heading_idx = [i for i, ln in enumerate(lines) if _HEADING_RE.match(ln)]
     n_collapsed = 0
     for k, i in enumerate(heading_idx):
         nxt = heading_idx[k + 1] if k + 1 < len(heading_idx) else len(lines)
-        body = "\n".join(lines[i + 1:nxt])
+        body = "\n".join(lines[i + 1 : nxt])
         if len(body.split()) < min_words:
             keep[i] = False
             n_collapsed += 1
-    return "\n".join(l for l, k in zip(lines, keep) if k), n_collapsed
+    return "\n".join(ln for ln, k in zip(lines, keep, strict=False) if k), n_collapsed
 
 
 # ---------- Step 2a: deterministic heading renumbering ----------
@@ -163,10 +161,9 @@ def renumber_headings(text: str) -> tuple[str, dict]:
         skipped_reason: str | None
     """
     if _has_cross_refs(text):
-        return text, {"applied": False, "n_renumbered": 0, "n_demoted": 0,
-                      "skipped_reason": "cross_references_present"}
+        return text, {"applied": False, "n_renumbered": 0, "n_demoted": 0, "skipped_reason": "cross_references_present"}
 
-    counters = [0, 0, 0]   # depth 1, 2, 3
+    counters = [0, 0, 0]  # depth 1, 2, 3
     n_renumbered = 0
     n_demoted = 0
 
@@ -199,11 +196,11 @@ def renumber_headings(text: str) -> tuple[str, dict]:
         return f"{hashes} {nums} {clean_title}"
 
     out = _HEADING_RE.sub(repl, text)
-    return out, {"applied": True, "n_renumbered": n_renumbered,
-                 "n_demoted": n_demoted, "skipped_reason": None}
+    return out, {"applied": True, "n_renumbered": n_renumbered, "n_demoted": n_demoted, "skipped_reason": None}
 
 
 # ---------- Step 2c: post-write structural-cap warning ----------
+
 
 def cap_violations(text: str) -> dict:
     """Return counts of structural-cap violations. Logging-only by default;
@@ -231,14 +228,14 @@ def cap_violations(text: str) -> dict:
     over_cap = sum(1 for n in subsections_per_h2 if n > 7)
     return {
         "depth_counts": depth_counts,
-        "deeper_than_3": depth_counts.get(4, 0) + depth_counts.get(5, 0)
-                         + depth_counts.get(6, 0),
+        "deeper_than_3": depth_counts.get(4, 0) + depth_counts.get(5, 0) + depth_counts.get(6, 0),
         "subsections_per_h2": subsections_per_h2,
         "sections_over_7_subsections": over_cap,
     }
 
 
 # ---------- Pipeline entry point ----------
+
 
 @dataclass
 class NumberingFixOutput:

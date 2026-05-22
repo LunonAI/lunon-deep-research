@@ -6,6 +6,7 @@ researcher specialists), 24-32 acceptance criteria that FOLD IN every
 regenerated sub-criterion and every extracted intent as an explicit coverage
 obligation, and per-section depth targets. Archetype-aware (item 16).
 """
+
 import json
 
 from .. import llm
@@ -22,18 +23,18 @@ TYPE_TO_SPECIALIST = {
 # Archetype-specific Architect emphasis (item 16: per-archetype planner template).
 _ARCH_EMPHASIS = {
     "list-all": "Exhaustive enumeration: a section/subsection or table row per "
-                "required item; bias query mix to factual + comparative.",
+    "required item; bias query mix to factual + comparative.",
     "compare": "Build an explicit entity×dimension comparison matrix as a core "
-               "section; bias to comparative + factual; equal depth per entity.",
+    "section; bias to comparative + factual; equal depth per entity.",
     "trend": "Chronological evolution + current state + forward signal; bias to "
-             "trend + causal; demand dated developments.",
+    "trend + causal; demand dated developments.",
     "explain-mechanism": "Causal spine: step-by-step chains showing each "
-                         "intermediate link, named theories/frameworks; bias "
-                         "to causal + critical; reject single-step assertions.",
+    "intermediate link, named theories/frameworks; bias "
+    "to causal + critical; reject single-step assertions.",
     "predict": "Evidence-grounded forecast with scenarios, drivers, confidence "
-               "ranges, time horizons; bias to trend + causal + critical.",
+    "ranges, time horizons; bias to trend + causal + critical.",
     "recommend": "Lead to a decisive ranked recommendation with a rationale "
-                 "table; bias to factual + comparative + critical.",
+    "table; bias to factual + comparative + critical.",
 }
 
 _SYSTEM = """You are the Architect. Convert the landscape + intents + evaluation \
@@ -66,8 +67,9 @@ HARD RULES:
 - report_toc <=8 top-level; each 2-5 subsections. Match the prompt's language."""
 
 
-def build(prompt: str, language: str, archetype: str, intents: list,
-          landscape: dict, coverage_obligations: list) -> dict:
+def build(
+    prompt: str, language: str, archetype: str, intents: list, landscape: dict, coverage_obligations: list
+) -> dict:
     emphasis = _ARCH_EMPHASIS.get(archetype, "")
     user = (
         f"PROMPT ({language}):\n{prompt}\n\n"
@@ -83,8 +85,9 @@ def build(prompt: str, language: str, archetype: str, intents: list,
     # Adaptive thinking on, effort=low: the structured prompt does the heavy
     # lifting; medium effort added ~5min/task for no plan-quality gain in the
     # W1 smoke. Latency decision (logged).
-    plan = llm.call_json("architect", user, system=_SYSTEM, max_tokens=16000,
-                         effort="low", think=True, note="architect")
+    plan = llm.call_json(
+        "architect", user, system=_SYSTEM, max_tokens=16000, effort="low", think=True, note="architect"
+    )
     if not isinstance(plan, dict):  # B-13 defensive — plan structure is critical
         plan = plan[0] if isinstance(plan, list) and plan and isinstance(plan[0], dict) else {}
     _normalize(plan)

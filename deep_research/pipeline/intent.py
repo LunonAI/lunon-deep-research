@@ -4,12 +4,13 @@ GPT-5.5 extracts the user's explicit + implicit intents/requirements from the
 prompt. These are injected into the Architect plan as explicit coverage targets
 (folded into acceptance_criteria) so instruction-following is anchored early.
 """
+
 from .. import llm
 
 _SYSTEM = (
     "You extract the user's research intents from a deep-research prompt. "
-    "Output ONLY JSON: {\"intents\": [ {\"intent\": str, \"kind\": "
-    "\"explicit\"|\"implicit\", \"deliverable\": str} ... ]}. "
+    'Output ONLY JSON: {"intents": [ {"intent": str, "kind": '
+    '"explicit"|"implicit", "deliverable": str} ... ]}. '
     "explicit = stated verbatim in the prompt (named entities, required "
     "dimensions, requested metrics, time frames, the final ask). implicit = a "
     "requirement a domain expert would infer is necessary to satisfy the "
@@ -24,9 +25,12 @@ def extract(prompt: str, language: str) -> list:
     """Return list[{intent, kind, deliverable}]."""
     obj = llm.call_json(
         "intent",
-        f"Prompt language: {language}\n\nPROMPT:\n{prompt}\n\n"
-        "Extract the intents as specified.",
-        system=_SYSTEM, max_tokens=6000, reasoning_effort="medium", seed=7,
-        note="intent")
+        f"Prompt language: {language}\n\nPROMPT:\n{prompt}\n\nExtract the intents as specified.",
+        system=_SYSTEM,
+        max_tokens=6000,
+        reasoning_effort="medium",
+        seed=7,
+        note="intent",
+    )
     intents = obj.get("intents") if isinstance(obj, dict) else obj
     return intents if isinstance(intents, list) else []

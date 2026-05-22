@@ -8,6 +8,7 @@
 - Per-domain length governor (item 21; decision #5) — soft ceiling = EN
   reference median word_len by domain, from p0_artifacts/reference_catalog.jsonl.
 """
+
 import collections
 import json
 import pathlib
@@ -18,8 +19,7 @@ _CAT = pathlib.Path(__file__).resolve().parent.parent / "p0_artifacts" / "refere
 
 
 def _en_domain_medians():
-    rows = [json.loads(l) for l in _CAT.read_text(encoding="utf-8").splitlines()
-            if l.strip()]
+    rows = [json.loads(ln) for ln in _CAT.read_text(encoding="utf-8").splitlines() if ln.strip()]
     en = [r for r in rows if r.get("language") == "en"]
     by = collections.defaultdict(list)
     for r in en:
@@ -42,8 +42,8 @@ _DOMAIN_KEY = {
 # internal label removed so the term itself does not leak into article text).
 CLEANING_RESISTANT_RULE = (
     "SOURCE ATTRIBUTION (mandatory, non-negotiable):\n"
-    "1. Attribute with source NAMES inline as prose — e.g. \"according to "
-    "McKinsey 2025\", \"Gartner's 2024 analysis\" — never a bare [n]/[^n] for "
+    '1. Attribute with source NAMES inline as prose — e.g. "according to '
+    'McKinsey 2025", "Gartner\'s 2024 analysis" — never a bare [n]/[^n] for '
     "anything load-bearing.\n"
     "2. No sentence may be semantically dependent on a citation mark surviving. "
     "Every sentence must read complete after all [n]/[^n] and reference/"
@@ -94,17 +94,16 @@ _DEDUP_RULE = (
 
 _ARCH_REFINE_EMPHASIS = {
     "list-all": "Maximize exhaustive coverage; one clearly-delimited unit per "
-                "required item; comparison/inventory tables.",
+    "required item; comparison/inventory tables.",
     "compare": "Sharpen the entity×dimension comparison matrix; equalize depth "
-               "across entities; quantptify every cell where possible.",
+    "across entities; quantptify every cell where possible.",
     "trend": "Strengthen the dated chronological spine and the forward signal.",
     "explain-mechanism": "Deepen causal chains by showing each intermediate "
-                         "step explicitly; add named theories/frameworks and "
-                         "confounders.",
-    "predict": "Add scenarios, drivers, explicit confidence ranges and time "
-               "horizons; tie every forecast to evidence.",
+    "step explicitly; add named theories/frameworks and "
+    "confounders.",
+    "predict": "Add scenarios, drivers, explicit confidence ranges and time horizons; tie every forecast to evidence.",
     "recommend": "Make the ranked recommendation decisive; add a rationale "
-                 "table and the decision logic under constraints.",
+    "table and the decision logic under constraints.",
 }
 
 
@@ -121,11 +120,11 @@ def opening_directive() -> str:
         "(2) a QUANTIFIED SCOPE claim with a concrete number, (3) a NAMED "
         "CONTRARIAN view ('despite the common claim that …'), (4) a "
         "FORWARD-LOOKING DATE ANCHOR ('through 2030', 'by Q3 2026'). No "
-        "preamble before the thesis.")
+        "preamble before the thesis."
+    )
 
 
-def writer_system(archetype: str, domain: str, language: str,
-                  toc_titles: list) -> str:
+def writer_system(archetype: str, domain: str, language: str, toc_titles: list) -> str:
     ceil = length_ceiling(domain)
     return (
         f"You are an elite research-report writer. Language: {language}. "
@@ -152,12 +151,15 @@ def writer_system(archetype: str, domain: str, language: str,
         f"median for this domain). HARD ceiling = {int(ceil * 1.15)} words; "
         f"exceeding it actively HURTS the score. Be dense, not padded.\n\n"
         f"Cover every section of the plan TOC verbatim: "
-        f"{json.dumps(toc_titles, ensure_ascii=False)[:2000]}")
+        f"{json.dumps(toc_titles, ensure_ascii=False)[:2000]}"
+    )
 
 
 # ---------- post-draft validators (item 17 / 18) ----------
-_DATE = re.compile(r"\b(20[2-9]\d|in \d+ years|by Q[1-4]|H[12] 20\d\d|"
-                    r"\d{4}[-–]\d{2,4}|未来|到 ?20\d\d|20\d\d ?年)\b")
+_DATE = re.compile(
+    r"\b(20[2-9]\d|in \d+ years|by Q[1-4]|H[12] 20\d\d|"
+    r"\d{4}[-–]\d{2,4}|未来|到 ?20\d\d|20\d\d ?年)\b"
+)
 
 
 def _approx_tokens(s: str) -> int:
@@ -174,13 +176,21 @@ def check_opening(text: str) -> dict:
         seg_l = seg.lower()
         thesis = bool(re.search(r"[.。!?！？]", seg)) and len(seg.split()) > 6
         quant = bool(re.search(r"\d", seg))
-        contrarian = any(k in seg_l for k in (
-            "despite", "contrary", "common claim", "widely", "however",
-            "尽管", "与普遍", "并非", "误区"))
+        contrarian = any(
+            k in seg_l
+            for k in ("despite", "contrary", "common claim", "widely", "however", "尽管", "与普遍", "并非", "误区")
+        )
         date = bool(_DATE.search(seg))
-        miss = [n for n, ok in (("thesis", thesis), ("quantified_scope", quant),
-                                ("contrarian", contrarian),
-                                ("date_anchor", date)) if not ok]
+        miss = [
+            n
+            for n, ok in (
+                ("thesis", thesis),
+                ("quantified_scope", quant),
+                ("contrarian", contrarian),
+                ("date_anchor", date),
+            )
+            if not ok
+        ]
         return miss
 
     miss200 = present(head200)
@@ -191,41 +201,78 @@ def check_opening(text: str) -> dict:
         action = "accept_soft_warning"
     else:
         action = "regen_opening"
-    return {"ok": not miss200, "within_200": not miss200,
-            "within_300": not miss300, "missing": miss300, "action": action}
+    return {
+        "ok": not miss200,
+        "within_200": not miss200,
+        "within_300": not miss300,
+        "missing": miss300,
+        "action": action,
+    }
 
 
 def check_insight_minimums(text: str) -> dict:
     fwd = len(set(_DATE.findall(text)))
-    alts = len(re.findall(r"(alternative|另一种|相比之下|whereas|trade-?off|"
-                          r"weaker|stronger|劣于|优于)", text, re.I))
-    causal = len(re.findall(r"(→|->|leads to .* which|because .* in turn|"
-                            r"导致.*进而|从而)", text))
-    quant_proj = len(re.findall(r"(±|\+/-|range|区间|置信|confidence|"
-                                r"\d+%\s*[-–]\s*\d+%|\d+\s*[-–]\s*\d+x)", text, re.I))
-    need = {"forward_looking>=3": fwd >= 3, "alternatives>=2": alts >= 2,
-            "causal_chain>=1": causal >= 1, "quant_projection>=1": quant_proj >= 1}
-    return {"ok": all(need.values()), "counts": {
-        "forward_looking": fwd, "alternatives": alts,
-        "causal_chain": causal, "quant_projection": quant_proj},
-        "fail": [k for k, v in need.items() if not v]}
+    alts = len(
+        re.findall(
+            r"(alternative|另一种|相比之下|whereas|trade-?off|"
+            r"weaker|stronger|劣于|优于)",
+            text,
+            re.I,
+        )
+    )
+    causal = len(
+        re.findall(
+            r"(→|->|leads to .* which|because .* in turn|"
+            r"导致.*进而|从而)",
+            text,
+        )
+    )
+    quant_proj = len(
+        re.findall(
+            r"(±|\+/-|range|区间|置信|confidence|"
+            r"\d+%\s*[-–]\s*\d+%|\d+\s*[-–]\s*\d+x)",
+            text,
+            re.I,
+        )
+    )
+    need = {
+        "forward_looking>=3": fwd >= 3,
+        "alternatives>=2": alts >= 2,
+        "causal_chain>=1": causal >= 1,
+        "quant_projection>=1": quant_proj >= 1,
+    }
+    return {
+        "ok": all(need.values()),
+        "counts": {
+            "forward_looking": fwd,
+            "alternatives": alts,
+            "causal_chain": causal,
+            "quant_projection": quant_proj,
+        },
+        "fail": [k for k, v in need.items() if not v],
+    }
 
 
 def citation_strip_audit(text: str) -> dict:
     """Item 19 auditor: strip [n]/[^n] + reference blocks; the body must remain
     semantically complete and carry inline source NAMES."""
     stripped = re.sub(r"\[\^?\d+\]", "", text)
-    stripped = re.sub(r"\n#+\s*(References|参考文献|Sources)[\s\S]*$", "",
-                       stripped, flags=re.I)
-    has_inline_names = bool(re.search(
-        r"(according to|per |报告|estimates|analysis|数据|Source:|"
-        r"[A-Z][a-zA-Z]+ (?:20\d\d|study|report))", stripped))
+    stripped = re.sub(r"\n#+\s*(References|参考文献|Sources)[\s\S]*$", "", stripped, flags=re.I)
+    has_inline_names = bool(
+        re.search(
+            r"(according to|per |报告|estimates|analysis|数据|Source:|"
+            r"[A-Z][a-zA-Z]+ (?:20\d\d|study|report))",
+            stripped,
+        )
+    )
     # crude completeness proxy: stripping changed <8% of chars (source-name prose
     # survives; bracket-dependent prose collapses)
     retention = len(stripped) / max(1, len(text))
-    return {"ok": has_inline_names and retention > 0.9,
-            "retention": round(retention, 3),
-            "has_inline_source_names": has_inline_names}
+    return {
+        "ok": has_inline_names and retention > 0.9,
+        "retention": round(retention, 3),
+        "has_inline_source_names": has_inline_names,
+    }
 
 
 def refiner_emphasis(archetype: str) -> str:

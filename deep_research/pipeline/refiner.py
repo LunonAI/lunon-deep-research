@@ -7,6 +7,7 @@ section criteria scores + failing-criterion rationales, NO raw evidence
 (item 26 context boundary). De-hedge pass folded in (judge penalizes hedging
 ~25.6% at equal content, v4 §2.9).
 """
+
 import re
 
 from .. import llm
@@ -14,7 +15,8 @@ from .. import writing_rules as wr
 
 # Adapted from AI-Q REWRITE_PROMPT (aiq_teardown.md §6) — generalized, NOT
 # overfit to the 100 tasks (v4 §4.5 repro-risk note).
-_SYSTEM = """You are an expert research-report editor. Your PRIMARY job (per \
+_SYSTEM = (
+    """You are an expert research-report editor. Your PRIMARY job (per \
 the W9 judge analysis: we lose 81% of Readability criteria) is to make the \
 article CONCISE, STRUCTURED, and FREE OF CROSS-SECTION REPETITION. The judge \
 explicitly cited "excessive length", "repetitive across sections", "inconsistent \
@@ -57,22 +59,27 @@ opening verbatim. Obey the source-attribution rule below.
 # into the actual judge-cited fixes with conciseness reframed as primary, not
 # secondary to growth. Validated alongside writer-side changes.
 
-""" + wr.CLEANING_RESISTANT_RULE
+"""
+    + wr.CLEANING_RESISTANT_RULE
+)
 
 
-def refine(draft: str, *, archetype: str, language: str,
-           section_scores=None, failing_rationales=None) -> dict:
+def refine(draft: str, *, archetype: str, language: str, section_scores=None, failing_rationales=None) -> dict:
     emphasis = wr.refiner_emphasis(archetype)
     feedback = ""
     if section_scores:
         feedback += f"\n\nPER-SECTION CRITERIA SCORES:\n{section_scores}"
     if failing_rationales:
-        feedback += ("\n\nFAILING-CRITERION RATIONALES (fix these specifically, "
-                     f"no raw evidence is provided — improve from the feedback):"
-                     f"\n{failing_rationales}")
-    user = (f"LANGUAGE: {language}\nARCHETYPE EMPHASIS: {emphasis}\n"
-            f"{feedback}\n\nREPORT TO ENHANCE (return ONLY the full enhanced "
-            f"report, same language, no preamble):\n\n{draft}")
+        feedback += (
+            "\n\nFAILING-CRITERION RATIONALES (fix these specifically, "
+            f"no raw evidence is provided — improve from the feedback):"
+            f"\n{failing_rationales}"
+        )
+    user = (
+        f"LANGUAGE: {language}\nARCHETYPE EMPHASIS: {emphasis}\n"
+        f"{feedback}\n\nREPORT TO ENHANCE (return ONLY the full enhanced "
+        f"report, same language, no preamble):\n\n{draft}"
+    )
 
     # Refiner is ENHANCEMENT, not load-bearing — same fail-soft pattern as
     # zh_writer_pass. If gpt-5.5 server-side takes >timeout (5% observed
@@ -81,12 +88,24 @@ def refine(draft: str, *, archetype: str, language: str,
     # Timeout raised 600→750s to cover p95 of observed durations.
     # Retries reduced 3→2 so worst-case wasted time is 1500s not 1800s.
     try:
-        out = llm.call("refiner", user, system=_SYSTEM, max_tokens=32000,
-                       effort="medium", seed=None, note="refiner",
-                       timeout=750, max_retries=2)
+        out = llm.call(
+            "refiner",
+            user,
+            system=_SYSTEM,
+            max_tokens=32000,
+            effort="medium",
+            seed=None,
+            note="refiner",
+            timeout=750,
+            max_retries=2,
+        )
     except Exception as e:  # noqa: BLE001
-        return {"article": draft, "applied": False, "ratio": 1.0,
-                "reason": f"refiner-error (raw shipped): {type(e).__name__}: {str(e)[:80]}"}
+        return {
+            "article": draft,
+            "applied": False,
+            "ratio": 1.0,
+            "reason": f"refiner-error (raw shipped): {type(e).__name__}: {str(e)[:80]}",
+        }
     out = out.strip()
     in_len, out_len = len(draft), len(out)
     ratio = out_len / max(1, in_len)
@@ -96,13 +115,10 @@ def refine(draft: str, *, archetype: str, language: str,
     # 0.70 floor still catches catastrophic refiner collapse but allows the
     # 10-30% pruning the judge wants.
     if ratio < 0.70:
-        return {"article": draft, "applied": False, "ratio": round(ratio, 3),
-                "reason": "min-ratio<0.75 revert"}
-    return {"article": out, "applied": True, "ratio": round(ratio, 3),
-            "reason": "ok"}
+        return {"article": draft, "applied": False, "ratio": round(ratio, 3), "reason": "min-ratio<0.75 revert"}
+    return {"article": out, "applied": True, "ratio": round(ratio, 3), "reason": "ok"}
 
 
 def strip_meta(text: str) -> str:
     """Light pre-clean: drop obvious model meta-lines before refining."""
-    return re.sub(r"(?im)^\s*(here is|below is|i have written|as an? ai)\b.*$",
-                  "", text).strip()
+    return re.sub(r"(?im)^\s*(here is|below is|i have written|as an? ai)\b.*$", "", text).strip()

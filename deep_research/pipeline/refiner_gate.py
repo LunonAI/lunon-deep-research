@@ -14,14 +14,12 @@ counterfactual data; we collect Step 4 telemetry first, graduate to active in P2
 The 0.02 revert threshold is a placeholder and flagged as a P2 calibration item
 (proper calibration requires measuring inner_loop scorer test-retest variance).
 """
-import json
 
 from .. import llm
 from .._env import log_usage
 
-
 _MODE_MONITOR = "monitor"  # log only, never revert
-_MODE_ACTIVE = "active"    # revert if judge says pre > post + threshold
+_MODE_ACTIVE = "active"  # revert if judge says pre > post + threshold
 
 # Threshold: post must be at least this much worse than pre to trigger a revert
 # in active mode. 0.02 is a heuristic — see P2 calibration TODO.
@@ -36,16 +34,22 @@ _SYSTEM = (
     "explicit mechanisms, clean structure, NON-redundancy, NO meta-commentary, "
     "consistent numbering. Penalize verbose padding, repetition across "
     "sections, future-dated speculation without sources, methodology disclaimers. "
-    "\n\nOutput ONLY JSON: {\"winner\": \"PRE\"|\"POST\"|\"TIE\", "
-    "\"delta\": number in [-1.0, +1.0] (positive = POST better, negative = PRE "
-    "better; ~0.0 = tie), \"rationale\": str (one sentence naming the deciding "
+    '\n\nOutput ONLY JSON: {"winner": "PRE"|"POST"|"TIE", '
+    '"delta": number in [-1.0, +1.0] (positive = POST better, negative = PRE '
+    'better; ~0.0 = tie), "rationale": str (one sentence naming the deciding '
     "factor)}."
 )
 
 
-def compare(pre_article: str, post_article: str, *, language: str,
-            archetype: str = "", task_fp: str = "", mode: str = _MODE_MONITOR
-            ) -> dict:
+def compare(
+    pre_article: str,
+    post_article: str,
+    *,
+    language: str,
+    archetype: str = "",
+    task_fp: str = "",
+    mode: str = _MODE_MONITOR,
+) -> dict:
     """Compare pre/post refiner versions of a report.
 
     Returns dict: {decision, winner, delta, rationale, action, mode}.
@@ -53,6 +57,7 @@ def compare(pre_article: str, post_article: str, *, language: str,
     - action describes what the gate DID (in monitor mode, action is always
       'logged_only' regardless of winner)
     """
+
     # Truncate to fit context window — keep first + last portions of each
     # article (head + tail), since middle content is usually less diagnostic
     def trim(t: str, limit: int = 12000) -> str:
@@ -69,24 +74,20 @@ def compare(pre_article: str, post_article: str, *, language: str,
 
     try:
         verdict = llm.call_json(
-            "refiner_gate", user, system=_SYSTEM, max_tokens=400,
-            seed=0, effort="low", note="refiner_gate"
+            "refiner_gate", user, system=_SYSTEM, max_tokens=400, seed=0, effort="low", note="refiner_gate"
         )
     except Exception as e:  # noqa: BLE001 — gate is advisory, never block ship
-        verdict = {"winner": "TIE", "delta": 0.0,
-                   "rationale": f"gate-error: {type(e).__name__}",
-                   "degraded": True}
+        verdict = {"winner": "TIE", "delta": 0.0, "rationale": f"gate-error: {type(e).__name__}", "degraded": True}
 
     if not isinstance(verdict, dict):
-        verdict = {"winner": "TIE", "delta": 0.0,
-                   "rationale": "non-dict gate output", "degraded": True}
+        verdict = {"winner": "TIE", "delta": 0.0, "rationale": "non-dict gate output", "degraded": True}
 
     winner = verdict.get("winner", "TIE")
     delta = float(verdict.get("delta", 0.0) or 0.0)
     rationale = verdict.get("rationale", "")[:200]
 
     # Decide what the gate WOULD do; what it ACTUALLY does depends on mode
-    would_revert = (winner == "PRE" and delta <= -_REVERT_THRESHOLD)
+    would_revert = winner == "PRE" and delta <= -_REVERT_THRESHOLD
     if mode == _MODE_ACTIVE:
         decision = "revert_to_pre" if would_revert else "keep_post"
         action = "reverted_to_pre" if would_revert else "kept_post"
@@ -99,10 +100,7 @@ def compare(pre_article: str, post_article: str, *, language: str,
     log_usage(
         "refiner_gate",
         {},  # token counts already captured by the inner llm.call_json
-        note=(
-            f"refiner_gate mode={mode} winner={winner} delta={delta:+.3f} "
-            f"action={action} task_fp={task_fp[:60]}"
-        ),
+        note=(f"refiner_gate mode={mode} winner={winner} delta={delta:+.3f} action={action} task_fp={task_fp[:60]}"),
     )
 
     return {
