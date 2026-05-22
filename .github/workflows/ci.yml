@@ -18,7 +18,9 @@ jobs:
     name: Lint (ruff check + format)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # First-party action, but the same force-pushed-tag argument we use for
+      # ruff-action below applies — pin for consistency.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
 
       - name: Install ruff
         # Pinned to commit SHA (resolves to v3 as of 2026-05-21).
