@@ -4,6 +4,7 @@ Tiny prompts to keep cost negligible. Verifies: DRB_PHASE fail-loud guard,
 all 3 LLM providers (GPT-5.5 / Opus 4.7 / Nemotron-OpenRouter), Exa, Jina, and
 that cost rows land in the ledger under phase P1.
 """
+
 import json
 import os
 import pathlib
@@ -39,19 +40,17 @@ def main():
 
     # 2-4. three LLM providers
     try:
-        results["gpt5.5"] = llm.call("intent", "Reply with exactly: OK_GPT",
-                                     max_tokens=2000, reasoning_effort="low")[:40]
+        results["gpt5.5"] = llm.call("intent", "Reply with exactly: OK_GPT", max_tokens=2000, reasoning_effort="low")[
+            :40
+        ]
     except Exception as e:  # noqa: BLE001
         results["gpt5.5"] = f"ERROR {type(e).__name__}: {e}"
     try:
-        results["opus4.7"] = llm.call("writer", "Reply with exactly: OK_OPUS",
-                                      max_tokens=200)[:40]
+        results["opus4.7"] = llm.call("writer", "Reply with exactly: OK_OPUS", max_tokens=200)[:40]
     except Exception as e:  # noqa: BLE001
         results["opus4.7"] = f"ERROR {type(e).__name__}: {e}"
     try:
-        results["nemotron_or"] = llm.call("evidence_gatherer",
-                                          "Reply with exactly: OK_NEMO",
-                                          max_tokens=200)[:60]
+        results["nemotron_or"] = llm.call("evidence_gatherer", "Reply with exactly: OK_NEMO", max_tokens=200)[:60]
     except Exception as e:  # noqa: BLE001
         results["nemotron_or"] = f"ERROR {type(e).__name__}: {e}"
 
@@ -73,8 +72,7 @@ def main():
     results["ledger_recent_phases"] = _ledger_tail_phases()
 
     print(json.dumps(results, indent=2, ensure_ascii=False))
-    bad = [k for k, v in results.items()
-           if isinstance(v, str) and ("ERROR" in v or "FAIL" in v or v == "EMPTY")]
+    bad = [k for k, v in results.items() if isinstance(v, str) and ("ERROR" in v or "FAIL" in v or v == "EMPTY")]
     return 1 if bad else 0
 
 

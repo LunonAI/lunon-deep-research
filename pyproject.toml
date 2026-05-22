@@ -1,0 +1,45 @@
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+src = ["deep_research"]
+extend-exclude = [
+  "p0_artifacts",
+  "p1_artifacts",
+  "p2_artifacts",
+  "cost_tracking/__pycache__",
+  ".venv",
+]
+
+[tool.ruff.lint]
+select = [
+  "E",   # pycodestyle errors
+  "F",   # pyflakes
+  "W",   # pycodestyle warnings
+  "I",   # isort
+  "UP",  # pyupgrade
+  "B",   # flake8-bugbear
+]
+ignore = [
+  "E501",  # line-too-long — handled by the formatter
+  "B008",  # function-call-in-default-argument — common pattern in click/typer style
+  "B904",  # raise-without-from — low signal, frequent in glue code
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Smoke/eval scripts can import-without-use for diagnostic reasons.
+"deep_research/smoke.py" = ["F401"]
+# Imports from /home/connor/dev/deep_research_bench/ require sys.path.insert
+# at module load time; ruff sees them as late-import violations.
+"deep_research/harness_bridge.py" = ["E402"]
+# A helper function (`_persist_drift`) is intentionally defined before the
+# package imports to keep cost-tracking logic colocated with the top-of-file
+# state setup. Leaving as-is rather than reorganizing in a CI-bootstrap PR.
+"deep_research/orchestrate.py" = ["E402"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["deep_research"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"

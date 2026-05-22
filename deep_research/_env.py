@@ -6,6 +6,7 @@
 - log_usage / log_request: cost_tracking hooks (import-safe, never raise into caller),
   mirroring the gpt55.py auto-log pattern for the new Claude/OpenRouter clients.
 """
+
 import os
 import pathlib
 
@@ -51,9 +52,11 @@ def assert_phase() -> str:
 # pattern as p0_artifacts/gpt55.py lines 40-48.
 try:
     import sys as _sys
+
     _sys.path.insert(0, str(_ROOT / "cost_tracking"))
-    from track import log_usage, log_request  # noqa: E402,F401
+    from track import log_request, log_usage  # noqa: E402,F401
 except Exception:  # noqa: BLE001
+
     def log_usage(*a, **k):  # type: ignore
         return None
 

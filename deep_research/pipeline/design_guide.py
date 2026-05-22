@@ -10,6 +10,7 @@ defaults. We adopt LINK's pipeline SHAPE; our P0 catalog provides the CONTENT.
 Output (DesignGuide) is consumed by writer.py, refiner.py, zh_writer_pass.py,
 and validation.py — every downstream call sees the SAME guide.
 """
+
 import json
 from dataclasses import dataclass
 
@@ -25,8 +26,8 @@ class DesignGuideInput:
     language: str
     archetype: str
     domain: str
-    persona: str          # from role_play
-    plan: dict            # from architect
+    persona: str  # from role_play
+    plan: dict  # from architect
 
 
 @dataclass
@@ -45,8 +46,7 @@ _REWARDS = [
     "link; reject single-step assertions that skip the intervening mechanism.",
     "Build entity×dimension comparison MATRICES whenever multiple entities are "
     "compared — judge rewards matrices over scattered prose.",
-    "Lead each major section with scope, definitions, data sources, methodology "
-    "before detail.",
+    "Lead each major section with scope, definitions, data sources, methodology before detail.",
     "Include quantitative evidence and scenario modelling, not assertions.",
     "Provide source rigor: named publications/institutions/years, inline.",
     "End with a synthesis section that directly answers the prompt's final ask.",
@@ -56,8 +56,7 @@ _PENALTIES = [
     "named cases (judge calls this '笼统提及').",
     "Lists of factors without mechanisms/pathways/relative importance.",
     "Scope drift into adjacent background that crowds out the requested ask.",
-    "Hedging at equal content (judge penalty ~25.6%) — assert what the evidence "
-    "in the text supports.",
+    "Hedging at equal content (judge penalty ~25.6%) — assert what the evidence in the text supports.",
     "Generic 'value-investing platitudes' or other domain-cliché filler.",
     "Truncation markers, placeholder text, broken numbering, malformed tables.",
     "Same drivers/caveats repeated across multiple sections.",
@@ -92,19 +91,17 @@ Rules:
 
 @node("design_guide")
 def run(inp: DesignGuideInput) -> DesignGuideOutput:
-    deep_count = sum(1 for s in inp.plan.get("report_toc", [])
-                     if s.get("depth_target") == "deep")
+    deep_count = sum(1 for s in inp.plan.get("report_toc", []) if s.get("depth_target") == "deep")
     user = (
         f"PROMPT ({inp.language}):\n{inp.query}\n\n"
         f"DOMAIN: {inp.domain}\nARCHETYPE: {inp.archetype}\n"
         f"PERSONA (use to calibrate voice/register): {inp.persona}\n\n"
-        f"PLAN TOC: {json.dumps([s.get('title') for s in inp.plan.get('report_toc',[])], ensure_ascii=False)}\n"
+        f"PLAN TOC: {json.dumps([s.get('title') for s in inp.plan.get('report_toc', [])], ensure_ascii=False)}\n"
         f"Deep-depth section count: {deep_count}\n\n"
         "Emit the DesignGuide JSON now."
     )
     try:
-        obj = llm.call_json("architect", user, system=_SYSTEM, max_tokens=2400,
-                            effort="low", note="design_guide")
+        obj = llm.call_json("architect", user, system=_SYSTEM, max_tokens=2400, effort="low", note="design_guide")
     except Exception:  # noqa: BLE001
         obj = {}
     if not isinstance(obj, dict):  # B-13 defensive
@@ -116,11 +113,10 @@ def run(inp: DesignGuideInput) -> DesignGuideOutput:
         transitions_register=str(obj.get("transitions_register", "analytical")),
         tone_register=str(obj.get("tone_register", "analytical")),
         table_use=str(obj.get("table_use", "comparison-when-multi-entity")),
-        terminology={str(k): str(v) for k, v in
-                     (obj.get("terminology") or {}).items()},
-        zh_register_markers=[str(x) for x in
-                              (obj.get("zh_register_markers") or [])][:8]
-                              if inp.language == "zh" else [],
+        terminology={str(k): str(v) for k, v in (obj.get("terminology") or {}).items()},
+        zh_register_markers=[str(x) for x in (obj.get("zh_register_markers") or [])][:8]
+        if inp.language == "zh"
+        else [],
         # citation rule is LOCKED (cleaner_behavior.md) — never model-derived
         citation_format="inline-source-name",
         citation_instruction=wr.CLEANING_RESISTANT_RULE,

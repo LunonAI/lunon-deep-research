@@ -10,7 +10,6 @@ DeepSeek-V3.2, Opus upstream), scores with a native-register critic, and
 applies the falsifiable winner rule (plan point 13): higher mean critic score,
 no task < 6/10; both non-viable (>2 tasks <6) → dropped.
 """
-import json
 
 from .. import config, llm
 from ..clients import openrouter_client
@@ -25,7 +24,7 @@ _PASS_SYSTEM = (
 _CRITIC_SYSTEM = (
     "你是中文研究报告语言质量评审。仅就【中文母语地道度与专业书面语域】打分（0-10，"
     "整数），不评估事实正确性。10=与资深中文分析师撰写无异；6=可接受；<6=存在翻译腔/"
-    "用词生硬/语域不当。只输出 JSON：{\"score\": <int>, \"reason\": \"<=20字\"}。"
+    '用词生硬/语域不当。只输出 JSON：{"score": <int>, "reason": "<=20字"}。'
 )
 
 
@@ -39,12 +38,19 @@ def zh_pass(article: str, prompt: str) -> dict:
         # ZH writers (Qwen3/DeepSeek/etc) aren't served by DeepInfra (our
         # Nemotron pin). Unpin per-call so OpenRouter picks any provider.
         out, _ = openrouter_client.raw_call(
-            role_model, f"原始任务：{prompt[:400]}\n\n报告：\n{article}",
-            system=_PASS_SYSTEM, max_tokens=32000, note="zh_writer_pass",
-            provider="")
+            role_model,
+            f"原始任务：{prompt[:400]}\n\n报告：\n{article}",
+            system=_PASS_SYSTEM,
+            max_tokens=32000,
+            note="zh_writer_pass",
+            provider="",
+        )
     except Exception as e:  # noqa: BLE001
-        return {"article": article, "applied": False,
-                "reason": f"zh-pass error (raw shipped): {type(e).__name__}: {str(e)[:80]}"}
+        return {
+            "article": article,
+            "applied": False,
+            "reason": f"zh-pass error (raw shipped): {type(e).__name__}: {str(e)[:80]}",
+        }
     out = out.strip()
     if len(out) < 0.85 * len(article):  # guard: don't ship a truncated pass
         return {"article": article, "applied": False, "reason": "zh-pass too short"}
@@ -55,22 +61,39 @@ def _critic_score(zh_text: str) -> dict:
     """Robust ZH critic: bumps token budget + falls back to regex-extracted
     score if JSON parse fails (W6 V4 Pro test surfaced one such case)."""
     import re
+
     try:
-        obj = llm.call_json("inner_scorer", zh_text[:24000],
-                            system=_CRITIC_SYSTEM, max_tokens=4000, seed=12345,
-                            effort="low", note="zh_critic")
+        obj = llm.call_json(
+            "inner_scorer",
+            zh_text[:24000],
+            system=_CRITIC_SYSTEM,
+            max_tokens=4000,
+            seed=12345,
+            effort="low",
+            note="zh_critic",
+        )
         if isinstance(obj, dict):
-            return {"score": float(obj.get("score", 0)),
-                    "reason": obj.get("reason", "")}
+            return {"score": float(obj.get("score", 0)), "reason": obj.get("reason", "")}
     except Exception:  # noqa: BLE001
         pass
     # Fallback: raw call + regex-extract a single 0-10 integer score
     try:
         from .. import llm as _llm
-        raw = _llm.call("inner_scorer", zh_text[:24000], system=_CRITIC_SYSTEM,
-                        max_tokens=4000, seed=12345, effort="low",
-                        note="zh_critic.fallback")
-        m = re.search(r'"score"\s*:\s*([0-9.]+)', raw) or re.search(r'\b([0-9]|10)\s*/\s*10\b', raw) or re.search(r'\b([0-9])\b', raw)
+
+        raw = _llm.call(
+            "inner_scorer",
+            zh_text[:24000],
+            system=_CRITIC_SYSTEM,
+            max_tokens=4000,
+            seed=12345,
+            effort="low",
+            note="zh_critic.fallback",
+        )
+        m = (
+            re.search(r'"score"\s*:\s*([0-9.]+)', raw)
+            or re.search(r"\b([0-9]|10)\s*/\s*10\b", raw)
+            or re.search(r"\b([0-9])\b", raw)
+        )
         s = float(m.group(1)) if m else 0.0
         return {"score": s, "reason": "regex-fallback"}
     except Exception as e:  # noqa: BLE001
@@ -87,9 +110,12 @@ def select_zh_writer(zh_drafts: list) -> dict:
         for d in zh_drafts:
             try:
                 txt, _ = openrouter_client.raw_call(
-                    cand, f"原始任务：{d['prompt'][:400]}\n\n报告：\n"
-                    f"{d['opus_article']}", system=_PASS_SYSTEM,
-                    max_tokens=32000, note=f"zh_sel.{cand}")
+                    cand,
+                    f"原始任务：{d['prompt'][:400]}\n\n报告：\n{d['opus_article']}",
+                    system=_PASS_SYSTEM,
+                    max_tokens=32000,
+                    note=f"zh_sel.{cand}",
+                )
                 sc = _critic_score(txt)
             except Exception as e:  # noqa: BLE001
                 sc = {"score": 0.0, "reason": f"gen-error {e}"}
@@ -104,12 +130,10 @@ def select_zh_writer(zh_drafts: list) -> dict:
 
     viables = [c for c in candidates if viable(c)]
     if not viables:
-        decision = {"winner": "", "dropped": True,
-                    "reason": "both non-viable (>2 tasks <6/10) — ship Opus raw"}
+        decision = {"winner": "", "dropped": True, "reason": "both non-viable (>2 tasks <6/10) — ship Opus raw"}
     else:
         winner = max(viables, key=lambda c: means[c])
-        decision = {"winner": winner, "dropped": False,
-                    "reason": f"highest mean ({means[winner]:.2f}), viable"}
+        decision = {"winner": winner, "dropped": False, "reason": f"highest mean ({means[winner]:.2f}), viable"}
     decision["means"] = means
     decision["per_task"] = per_task
     return decision

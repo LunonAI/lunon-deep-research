@@ -7,10 +7,10 @@ matches the precomputed p0_artifacts/archetype_map.jsonl distribution).
 Drives: Exa Auto vs Deep (item 10 — deep for explain-mechanism|predict),
 specialist mix, archetype-specific writer/refiner emphasis.
 """
+
 from . import llm
 
-ARCHETYPES = ["list-all", "compare", "trend", "explain-mechanism", "predict",
-              "recommend"]
+ARCHETYPES = ["list-all", "compare", "trend", "explain-mechanism", "predict", "recommend"]
 
 # Verbatim from p0_artifacts/archetype_classify.py SYSTEM (single-prompt form).
 _SYSTEM = (
@@ -42,8 +42,12 @@ def classify(prompt: str) -> dict:
     obj = llm.call_json(
         "archetype",
         "Classify this prompt. Return the JSON object only.\n\n" + prompt,
-        system=_SYSTEM, max_tokens=4000, reasoning_effort="low", seed=7,
-        note="archetype")
+        system=_SYSTEM,
+        max_tokens=4000,
+        reasoning_effort="low",
+        seed=7,
+        note="archetype",
+    )
     if not isinstance(obj, dict):  # B-13 defensive: coerce list/other → dict
         obj = obj[0] if isinstance(obj, list) and obj and isinstance(obj[0], dict) else {}
     a = str(obj.get("archetype", "")).strip().lower()

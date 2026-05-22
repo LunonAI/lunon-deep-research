@@ -13,6 +13,7 @@ State is a single PipelineState dataclass threaded through every node;
 each phase emits cost-by-node ledger markers via `_phase(name, fn)` so we get
 a free per-node cost breakdown at every milestone (item 36).
 """
+
 import json
 import os
 import pathlib
@@ -21,8 +22,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 # Inner-loop drift logging (separate from adapter task-output; purely additive)
-_DRIFT_PATH = (pathlib.Path(__file__).resolve().parent.parent
-               / "p1_artifacts" / "inner_loop_drift.jsonl")
+_DRIFT_PATH = pathlib.Path(__file__).resolve().parent.parent / "p1_artifacts" / "inner_loop_drift.jsonl"
 _DRIFT_LOCK = threading.Lock()
 
 
@@ -52,14 +52,28 @@ def _persist_drift(s, language: str, query: str) -> None:
     except Exception:  # noqa: BLE001 — never break the caller
         pass
 
+
 from . import archetype as _arch
-from . import middleware as mw
 from ._env import assert_phase, log_usage
+from .pipeline import (
+    architect,
+    criteria_spec,
+    design_guide,
+    grounding,
+    init_format,
+    inner_loop,
+    intent,
+    numbering_fix,
+    orchestrator,
+    refiner,
+    refiner_gate,
+    role_play,
+    scout,
+    validation,
+    writer,
+    zh_writer_pass,
+)
 from .retrieval import domain_routed
-from .pipeline import (architect, criteria_spec, design_guide, grounding,
-                       init_format, inner_loop, intent, numbering_fix,
-                       orchestrator, refiner, refiner_gate, role_play, scout,
-                       validation, writer, zh_writer_pass)
 from .state import PipelineState
 
 INNER_CAP = int(os.environ.get("DR_INNER_CAP", "3"))
@@ -77,8 +91,7 @@ def _phase(name: str, fn, *args, **kwargs):
     try:
         return fn(*args, **kwargs)
     finally:
-        log_usage(f"node:{name}", {},
-                  note=f"node:{name} exit dur={round(time.time()-t0,2)}s")
+        log_usage(f"node:{name}", {}, note=f"node:{name} exit dur={round(time.time() - t0, 2)}s")
 
 
 # ---- Phase 1: planning spine (existing + role_play insertion) ----
@@ -87,21 +100,29 @@ def plan_only(query: str, language: str) -> dict:
     arche = _phase("archetype", _arch.classify, query)
     domain = _phase("domain", domain_routed.classify_domain, query)
     intents = _phase("intent", intent.extract, query, language)
-    persona = _phase("role_play", role_play.run,
-                     role_play.RolePlayInput(query=query, language=language,
-                                              archetype=arche["archetype"],
-                                              domain=domain)).persona
+    persona = _phase(
+        "role_play",
+        role_play.run,
+        role_play.RolePlayInput(query=query, language=language, archetype=arche["archetype"], domain=domain),
+    ).persona
     land = _phase("scout", scout.run, query, language, "auto")
     spec = _phase("criteria_spec", criteria_spec.regenerate, query, language)
     cov = criteria_spec.as_coverage_obligations(spec)
-    plan = _phase("architect", _build_plan_with_persona, query, language,
-                   arche["archetype"], intents, land, cov, persona)
-    return {"archetype": arche, "domain": domain, "intents": intents,
-            "persona": persona, "landscape": land, "spec": spec, "plan": plan}
+    plan = _phase(
+        "architect", _build_plan_with_persona, query, language, arche["archetype"], intents, land, cov, persona
+    )
+    return {
+        "archetype": arche,
+        "domain": domain,
+        "intents": intents,
+        "persona": persona,
+        "landscape": land,
+        "spec": spec,
+        "plan": plan,
+    }
 
 
-def _build_plan_with_persona(query, language, archetype, intents, land, cov,
-                              persona):
+def _build_plan_with_persona(query, language, archetype, intents, land, cov, persona):
     """Architect call with the role_play persona prepended (item 32 wiring)."""
     plan = architect.build(query, language, archetype, intents, land, cov)
     plan["_persona"] = persona  # carry forward for downstream nodes
@@ -117,29 +138,35 @@ def from_plan(ctx: dict, query: str, language: str) -> str:
     s = _state_from_ctx(ctx, query, language)
 
     # New nodes: design_guide → init_format (after architect, before writer)
-    s.design_guide = _phase("design_guide", design_guide.run,
-                             design_guide.DesignGuideInput(
-                                 query=query, language=language,
-                                 archetype=s.archetype["archetype"],
-                                 domain=s.domain, persona=s.persona,
-                                 plan=s.plan)).guide
-    s.scaffold = _phase("init_format", init_format.run,
-                         init_format.InitFormatInput(
-                             plan=s.plan, language=language,
-                             domain=s.domain)).scaffold
+    s.design_guide = _phase(
+        "design_guide",
+        design_guide.run,
+        design_guide.DesignGuideInput(
+            query=query,
+            language=language,
+            archetype=s.archetype["archetype"],
+            domain=s.domain,
+            persona=s.persona,
+            plan=s.plan,
+        ),
+    ).guide
+    s.scaffold = _phase(
+        "init_format", init_format.run, init_format.InitFormatInput(plan=s.plan, language=language, domain=s.domain)
+    ).scaffold
 
     # Research dispatch (W2)
-    res = _phase("orchestrator", orchestrator.run, s.plan, query, language,
-                  s.archetype["archetype"], s.domain)
+    res = _phase("orchestrator", orchestrator.run, s.plan, query, language, s.archetype["archetype"], s.domain)
     s.memory_bank = res["memory_bank"]
     s.digest = res["digest"]
     s.tool_calls = res["tool_calls"]
 
     # Writer opening + per-section quality loop (W3 + W5)
-    s.opening = _phase("writer_opening", writer.write_opening, s.plan, query,
-                        language, s.archetype["archetype"], s.domain, s.digest)
+    s.opening = _phase(
+        "writer_opening", writer.write_opening, s.plan, query, language, s.archetype["archetype"], s.domain, s.digest
+    )
     s.sections, s.section_scores, s.failing_rationales = _phase(
-        "writer_sections_loop", _run_section_loop, s, query, language)
+        "writer_sections_loop", _run_section_loop, s, query, language
+    )
 
     draft = writer.assemble(s.opening, s.sections)
     draft = refiner.strip_meta(draft)
@@ -148,9 +175,16 @@ def from_plan(ctx: dict, query: str, language: str) -> str:
     pre_refiner_draft = draft
 
     # Refiner (W4) — feeds design_guide as system context now
-    refined = _phase("refiner", _refine_with_guide, draft, s.archetype["archetype"],
-                      language, s.section_scores, s.failing_rationales,
-                      s.design_guide)
+    refined = _phase(
+        "refiner",
+        _refine_with_guide,
+        draft,
+        s.archetype["archetype"],
+        language,
+        s.section_scores,
+        s.failing_rationales,
+        s.design_guide,
+    )
     s.article = refined["article"]
     s.refiner_passes = 1
 
@@ -159,11 +193,16 @@ def from_plan(ctx: dict, query: str, language: str) -> str:
     # cost_tracking/ledger.jsonl for post-hoc audit.
     gate_mode = os.environ.get("DR_REFINER_GATE", "monitor")
     if gate_mode != "off":
-        verdict = _phase("refiner_gate", refiner_gate.compare,
-                         pre_refiner_draft, s.article,
-                         language=language,
-                         archetype=s.archetype.get("archetype", ""),
-                         task_fp=query[:120], mode=gate_mode)
+        verdict = _phase(
+            "refiner_gate",
+            refiner_gate.compare,
+            pre_refiner_draft,
+            s.article,
+            language=language,
+            archetype=s.archetype.get("archetype", ""),
+            task_fp=query[:120],
+            mode=gate_mode,
+        )
         s.refiner_gate_verdict = verdict
         # In active mode, the gate may revert; in monitor mode, decision is
         # always "keep_post" by construction
@@ -214,8 +253,7 @@ def _state_from_ctx(ctx, query, language):
 
 
 def _run_section_loop(s: PipelineState, query, language):
-    plan, bank, spec, archetype, domain = (
-        s.plan, s.memory_bank, s.spec, s.archetype["archetype"], s.domain)
+    plan, bank, spec, archetype, domain = (s.plan, s.memory_bank, s.spec, s.archetype["archetype"], s.domain)
     units = writer.outline_units(plan)
     prior_titles = [u["title"] for u in units]
 
@@ -223,26 +261,44 @@ def _run_section_loop(s: PipelineState, query, language):
         sid = u["id"]
         ev = bank.for_section(sid)
         # writer now also sees design_guide via a kwarg appended below
-        draft_s = _write_with_guide(u, plan, bank, query, language, archetype,
-                                     domain, prior_titles, s.design_guide,
-                                     s.scaffold)
+        draft_s = _write_with_guide(
+            u, plan, bank, query, language, archetype, domain, prior_titles, s.design_guide, s.scaffold
+        )
         last_scores = None
         for _ in range(INNER_CAP):
             g = grounding.check(draft_s, ev, language, archetype=archetype)
             if not g["ok"]:
-                draft_s = _write_with_guide(u, plan, bank, query, language,
-                                             archetype, domain, prior_titles,
-                                             s.design_guide, s.scaffold,
-                                             feedback=grounding.feedback_text(g))
+                draft_s = _write_with_guide(
+                    u,
+                    plan,
+                    bank,
+                    query,
+                    language,
+                    archetype,
+                    domain,
+                    prior_titles,
+                    s.design_guide,
+                    s.scaffold,
+                    feedback=grounding.feedback_text(g),
+                )
                 continue
             r = inner_loop.score_section(draft_s, spec, language, u["title"])
             last_scores = r
             if r["ok"]:
                 break
-            draft_s = _write_with_guide(u, plan, bank, query, language,
-                                         archetype, domain, prior_titles,
-                                         s.design_guide, s.scaffold,
-                                         feedback=inner_loop.feedback_text(r))
+            draft_s = _write_with_guide(
+                u,
+                plan,
+                bank,
+                query,
+                language,
+                archetype,
+                domain,
+                prior_titles,
+                s.design_guide,
+                s.scaffold,
+                feedback=inner_loop.feedback_text(r),
+            )
         return sid, u, draft_s, last_scores
 
     order_ix = {u["id"]: i for i, u in enumerate(units)}
@@ -255,18 +311,20 @@ def _run_section_loop(s: PipelineState, query, language):
     for sid, u, draft_s, last in results:
         sections.append(draft_s)
         if last:
-            score_summary.append({"section": sid, "title": u["title"],
-                                   "min_score": last.get("min_score"),
-                                   "fail": [f.get("criterion") for f in
-                                            last.get("fail", [])]})
+            score_summary.append(
+                {
+                    "section": sid,
+                    "title": u["title"],
+                    "min_score": last.get("min_score"),
+                    "fail": [f.get("criterion") for f in last.get("fail", [])],
+                }
+            )
             for f in last.get("fail", []):
-                failing.append(f"[{sid}] {f.get('criterion')}: "
-                                f"{f.get('rationale','')}")
+                failing.append(f"[{sid}] {f.get('criterion')}: {f.get('rationale', '')}")
     return sections, score_summary, failing
 
 
-def _write_with_guide(u, plan, bank, query, language, archetype, domain,
-                       prior_titles, guide, scaffold, feedback=""):
+def _write_with_guide(u, plan, bank, query, language, archetype, domain, prior_titles, guide, scaffold, feedback=""):
     """writer.write_section + design_guide block + scaffold expected-length."""
     expected_tok = 1200
     if scaffold:
@@ -277,26 +335,33 @@ def _write_with_guide(u, plan, bank, query, language, archetype, domain,
     extra = ""
     if guide:
         extra = f"\n\nDESIGN GUIDE (apply to this section):\n{guide.as_writer_block()}"
-    extra += (f"\n\nSECTION LENGTH TARGET: ~{expected_tok} tokens "
-              f"(minimum {int(0.7*expected_tok)}).")
-    return writer.write_section(u, plan, bank, prompt=query, language=language,
-                                 archetype=archetype, domain=domain,
-                                 prior_titles=prior_titles,
-                                 feedback=(feedback or "") + extra)
+    extra += f"\n\nSECTION LENGTH TARGET: ~{expected_tok} tokens (minimum {int(0.7 * expected_tok)})."
+    return writer.write_section(
+        u,
+        plan,
+        bank,
+        prompt=query,
+        language=language,
+        archetype=archetype,
+        domain=domain,
+        prior_titles=prior_titles,
+        feedback=(feedback or "") + extra,
+    )
 
 
-def _refine_with_guide(draft, archetype, language, section_scores,
-                        failing_rationales, guide, extra=""):
+def _refine_with_guide(draft, archetype, language, section_scores, failing_rationales, guide, extra=""):
     feedback_text = ""
     if guide:
         feedback_text += "\n\nDESIGN GUIDE TO APPLY:\n" + guide.as_writer_block()
     if extra:
         feedback_text += "\n\n" + extra
     out = refiner.refine(
-        draft, archetype=archetype, language=language,
-        section_scores=json.dumps(section_scores, ensure_ascii=False)[:8000]
-        + feedback_text,
-        failing_rationales="\n".join(failing_rationales)[:8000])
+        draft,
+        archetype=archetype,
+        language=language,
+        section_scores=json.dumps(section_scores, ensure_ascii=False)[:8000] + feedback_text,
+        failing_rationales="\n".join(failing_rationales)[:8000],
+    )
     return out
 
 
@@ -304,25 +369,38 @@ def _validation_loop(s: PipelineState, language: str) -> PipelineState:
     """Cap-2 corrective refiner passes; on cap-exhaustion log + proceed
     (never block adapter — DRB needs an article per task)."""
     while s.refiner_passes <= VALIDATION_CAP:
-        vout = _phase("validation", validation.run,
-                       validation.ValidationInput(
-                           article=s.article, plan=s.plan, scaffold=s.scaffold,
-                           design_guide=s.design_guide, language=language,
-                           domain=s.domain))
-        s.validation_log.append({"pass": s.refiner_passes,
-                                  "ok": vout.ok, "counts": vout.counts,
-                                  "failures": vout.failures})
+        vout = _phase(
+            "validation",
+            validation.run,
+            validation.ValidationInput(
+                article=s.article,
+                plan=s.plan,
+                scaffold=s.scaffold,
+                design_guide=s.design_guide,
+                language=language,
+                domain=s.domain,
+            ),
+        )
+        s.validation_log.append(
+            {"pass": s.refiner_passes, "ok": vout.ok, "counts": vout.counts, "failures": vout.failures}
+        )
         if vout.ok:
             return s
         if s.refiner_passes >= VALIDATION_CAP:
             validation.log_failures(task_id="", vout=vout)
             return s
         # corrective refiner pass — feedback is STRUCTURED (validation.feedback_text)
-        refined = _phase(f"refiner_corrective_{s.refiner_passes}",
-                          _refine_with_guide,
-                          s.article, s.archetype["archetype"], language,
-                          s.section_scores, s.failing_rationales,
-                          s.design_guide, extra=vout.feedback_text)
+        refined = _phase(
+            f"refiner_corrective_{s.refiner_passes}",
+            _refine_with_guide,
+            s.article,
+            s.archetype["archetype"],
+            language,
+            s.section_scores,
+            s.failing_rationales,
+            s.design_guide,
+            extra=vout.feedback_text,
+        )
         # min-ratio guard: if refiner reverted, accept current as best
         if not refined.get("applied"):
             return s

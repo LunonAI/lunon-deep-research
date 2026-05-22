@@ -10,11 +10,12 @@ archetype router, WebWeaver, length governor) — that is the point: it is the
 control, the engine is the treatment. Framed everywhere as a minimum bar, not
 a floor (net direction vs real AI-Q unclear; decision #4).
 """
+
 import json
 
 from . import llm
+from .pipeline import refiner, scout, specialists
 from .retrieval import domain_routed
-from .pipeline import scout, specialists, refiner
 
 _WRITER_SYSTEM = (
     "You are an expert research analyst writing a comprehensive deep-research "
@@ -31,12 +32,10 @@ def run(query: str, language: str) -> str:
 
     # 3-5 generalist Nemotron research cycles (AI-Q researcher, not specialized)
     briefs = [query] + [str(t) for t in (land.get("high_level_toc") or [])[:4]]
-    qlist = [{"id": f"A{i}", "text": b, "target_sections": []}
-             for i, b in enumerate(briefs[:5])]
+    qlist = [{"id": f"A{i}", "text": b, "target_sections": []} for i, b in enumerate(briefs[:5])]
     findings = []
     for q in qlist:
-        r = specialists.research("generalist", [q], language=language,
-                                 domain=domain, exa_mode="auto")
+        r = specialists.research("generalist", [q], language=language, domain=domain, exa_mode="auto")
         findings += r.get("findings", [])
 
     ev = json.dumps(findings, ensure_ascii=False)[:60000]
@@ -45,8 +44,11 @@ def run(query: str, language: str) -> str:
         f"PROMPT ({language}):\n{query}\n\nLANDSCAPE:\n"
         f"{json.dumps(land, ensure_ascii=False)[:12000]}\n\nEVIDENCE:\n{ev}\n\n"
         f"Write the full report now.",
-        system=_WRITER_SYSTEM, max_tokens=32000, effort="medium",
-        note="aiq.writer")
+        system=_WRITER_SYSTEM,
+        max_tokens=32000,
+        effort="medium",
+        note="aiq.writer",
+    )
 
     out = refiner.refine(draft, archetype="recommend", language=language)
     return out["article"]
@@ -55,21 +57,22 @@ def run(query: str, language: str) -> str:
 if __name__ == "__main__":
     import argparse
     import pathlib
+
     from . import assert_phase
+
     assert_phase()
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True)
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--workers", type=int, default=6)
-    ap.add_argument("--query-file",
-                    default="/home/connor/dev/deep_research_bench/data/prompt_data/query.jsonl")
+    ap.add_argument("--query-file", default="/home/connor/dev/deep_research_bench/data/prompt_data/query.jsonl")
     a = ap.parse_args()
     import threading
     from concurrent.futures import ThreadPoolExecutor
-    qs = [json.loads(x) for x in
-          pathlib.Path(a.query_file).read_text().splitlines() if x.strip()]
+
+    qs = [json.loads(x) for x in pathlib.Path(a.query_file).read_text().splitlines() if x.strip()]
     if a.limit:
-        qs = qs[:a.limit]
+        qs = qs[: a.limit]
     outp = pathlib.Path(a.out)
     outp.parent.mkdir(parents=True, exist_ok=True)
     done = set()
@@ -90,8 +93,7 @@ if __name__ == "__main__":
             print(f"id={q['id']} FAIL {e}", flush=True)
             return
         with lock, outp.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"id": str(q["id"]), "prompt": q["prompt"],
-                                 "article": art}, ensure_ascii=False) + "\n")
+            fh.write(json.dumps({"id": str(q["id"]), "prompt": q["prompt"], "article": art}, ensure_ascii=False) + "\n")
         print(f"wrote id={q['id']}", flush=True)
 
     with ThreadPoolExecutor(max_workers=a.workers) as ex:

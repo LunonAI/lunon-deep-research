@@ -13,6 +13,7 @@ metadata path cannot.
 Both fail soft (return []); domain_routed keeps keyless EDGAR + Exa as the
 spine so nothing breaks if a key/identity is missing or an API is flaky.
 """
+
 import time
 
 import requests
@@ -30,6 +31,7 @@ def _ensure_edgar():
         return _edgar_ready
     try:
         import edgar
+
         edgar.set_identity(_EDGAR_ID)
         _edgar_ready = True
     except Exception:  # noqa: BLE001
@@ -44,6 +46,7 @@ def edgar_evidence(query: str, max_companies: int = 2):
     out = []
     try:
         import edgar
+
         res = edgar.find_company(query)
     except Exception:  # noqa: BLE001
         return out
@@ -55,17 +58,21 @@ def edgar_evidence(query: str, max_companies: int = 2):
             if cik is None:
                 continue
             log_request("exa_search", note="edgartools")
-            url = (f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany"
-                   f"&CIK={cik}&type=10-K")
+            url = f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={cik}&type=10-K"
             try:
                 fin = co.get_financials()
-                text = (f"{name} (SEC EDGAR, CIK {cik}) — parsed financial "
-                        f"statements: {str(fin)[:1200]}")
+                text = f"{name} (SEC EDGAR, CIK {cik}) — parsed financial statements: {str(fin)[:1200]}"
             except Exception:  # noqa: BLE001
                 text = f"{name} (SEC EDGAR, CIK {cik}) — 10-K filings index."
-            out.append({"title": f"{name} SEC EDGAR financials",
-                        "url": url, "text": text[:1500],
-                        "published_date": "", "score": 0})
+            out.append(
+                {
+                    "title": f"{name} SEC EDGAR financials",
+                    "url": url,
+                    "text": text[:1500],
+                    "published_date": "",
+                    "score": 0,
+                }
+            )
     except Exception:  # noqa: BLE001
         return out
     return out
@@ -76,16 +83,15 @@ def _fmp_get(path, params, retries=3):
     params["apikey"] = _FMP_KEY
     for a in range(retries):
         try:
-            r = requests.get(f"https://financialmodelingprep.com{path}",
-                             params=params, timeout=30)
+            r = requests.get(f"https://financialmodelingprep.com{path}", params=params, timeout=30)
             if r.status_code == 200:
                 return r.json()
             if r.status_code in (429, 500, 502, 503):
-                time.sleep(2 ** a)
+                time.sleep(2**a)
                 continue
             return None
         except Exception:  # noqa: BLE001
-            time.sleep(2 ** a)
+            time.sleep(2**a)
     return None
 
 
@@ -102,12 +108,11 @@ def fmp_evidence(query: str, max_companies: int = 2):
         nm = h.get("name", sym)
         if not sym:
             continue
-        prof = (_fmp_get("/stable/profile", {"symbol": sym}) or [{}])
+        prof = _fmp_get("/stable/profile", {"symbol": sym}) or [{}]
         prof = prof[0] if prof else {}
-        inc = (_fmp_get("/stable/income-statement", {"symbol": sym, "limit": 1})
-               or [{}])
+        inc = _fmp_get("/stable/income-statement", {"symbol": sym, "limit": 1}) or [{}]
         inc = inc[0] if inc else {}
-        km = (_fmp_get("/stable/key-metrics-ttm", {"symbol": sym}) or [{}])
+        km = _fmp_get("/stable/key-metrics-ttm", {"symbol": sym}) or [{}]
         km = km[0] if km else {}
         log_request("exa_search", note="fmp.company")
         parts = [f"{nm} ({sym})"]
@@ -116,20 +121,22 @@ def fmp_evidence(query: str, max_companies: int = 2):
         if prof.get("industry"):
             parts.append(f"industry {prof['industry']}")
         if inc.get("revenue"):
-            parts.append(f"FY{inc.get('calendarYear','')} revenue "
-                         f"${inc['revenue']:,}")
+            parts.append(f"FY{inc.get('calendarYear', '')} revenue ${inc['revenue']:,}")
         if inc.get("netIncome") is not None:
             parts.append(f"net income ${inc['netIncome']:,}")
         if km.get("peRatioTTM"):
-            parts.append(f"P/E {round(km['peRatioTTM'],2)}")
+            parts.append(f"P/E {round(km['peRatioTTM'], 2)}")
         if km.get("roeTTM"):
-            parts.append(f"ROE {round(km['roeTTM']*100,1)}%")
-        out.append({
-            "title": f"{nm} financials (Financial Modeling Prep)",
-            "url": prof.get("website") or f"https://financialmodelingprep.com/financial-summary/{sym}",
-            "text": "; ".join(parts) + ". "
-                    + (prof.get("description", "")[:400]),
-            "published_date": str(inc.get("date", "")), "score": 0})
+            parts.append(f"ROE {round(km['roeTTM'] * 100, 1)}%")
+        out.append(
+            {
+                "title": f"{nm} financials (Financial Modeling Prep)",
+                "url": prof.get("website") or f"https://financialmodelingprep.com/financial-summary/{sym}",
+                "text": "; ".join(parts) + ". " + (prof.get("description", "")[:400]),
+                "published_date": str(inc.get("date", "")),
+                "score": 0,
+            }
+        )
     return out
 
 
