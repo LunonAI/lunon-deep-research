@@ -58,6 +58,38 @@ CLEANING_RESISTANT_RULE = (
     "footnote, or the reference list."
 )
 
+# P2-Wave-2.5-E1 (2026-05-23): section-opening framework-recap directive.
+# Calibrated against the #1 reference corpus per p2_artifacts/reference_methodology_deep.md
+# §1 finding: their engine is a framework→population→synthesis loop where
+# each non-first section explicitly recaps the §1 framework before populating
+# new content under identical labelled dimensions. This is a RHETORICAL
+# pattern (not a capacity dial like length / section count) and is the
+# single-variable replacement for the bundled Wave 2.5 push that regressed.
+_SECTION_OPENING_RECAP_RULE = (
+    "SECTION-OPENING FRAMEWORK RECAP (P2-Wave-2.5-E1):\n"
+    "Every section AFTER the first must open with a one-to-two-sentence "
+    "recap of the framework, taxonomy, dimensions, or analytical spine "
+    "established in §1 (or the most recent framework-introducing section), "
+    "and then state explicitly what this new section ADDS by populating "
+    "that framework with new entities, evidence, or scenarios.\n\n"
+    "Acceptable opening templates (EN):\n"
+    "- 'Building on the framework introduced in §1, this section populates...'\n"
+    "- 'Applied to the dimensions set out above, the present chapter examines...'\n"
+    "- 'Under the rubric from §1, this section operationalises...'\n"
+    "- 'Using the taxonomy established above, this section catalogues...'\n\n"
+    "Acceptable opening templates (ZH):\n"
+    "- '沿用第一节框架，本节具体分析...'\n"
+    "- '在前述维度下，本章考察...'\n"
+    "- '应用上一节的分类，本节对...进行操作化'\n"
+    "- '依据前述框架，本节将...'\n\n"
+    "Forbidden opening patterns: stating the section topic with no link "
+    "to prior framework (the judge reads this as disconnected exposition), "
+    "or a pure summary-of-prior-section recap with no statement of NEW "
+    "value (reads as filler). The first section (or article opening) is "
+    "EXEMPT — it establishes the framework rather than recapping it."
+)
+
+
 _INSIGHT_MIN = (
     "INSIGHT ELEMENTS — TIGHT ARCHETYPE-CONDITIONAL POLICY:\n"
     "Do NOT add forward-looking projections, scenario tables, confidence "
@@ -203,7 +235,7 @@ def writer_system(
     middle_rules = [_NUMBERING_RULE]
     if include_dedup:
         middle_rules.append(_DEDUP_RULE)
-    middle_rules.extend([_INSIGHT_MIN, CLEANING_RESISTANT_RULE])
+    middle_rules.extend([_INSIGHT_MIN, CLEANING_RESISTANT_RULE, _SECTION_OPENING_RECAP_RULE])
     middle_block = "\n\n".join(middle_rules)
 
     return (
