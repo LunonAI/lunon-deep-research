@@ -97,7 +97,11 @@ _DEDUP_RULE = (
 
 _ARCH_REFINE_EMPHASIS = {
     "list-all": "Maximize exhaustive coverage; one clearly-delimited unit per "
-    "required item; comparison/inventory tables.",
+    "required item; comparison/inventory tables. Mark each item with a "
+    "priority indicator (★★★ / ★★ / ★ or 'essential / recommended / optional') "
+    "where the evidence supports prioritization; add a closing 'Top Picks' or "
+    "'立即可执行的三项行动' actionable list when the question implies a "
+    "decision support function.",
     "compare": "Sharpen the entity×dimension comparison matrix; equalize depth "
     "across entities; quantify every cell where possible.",
     "trend": "Strengthen the dated chronological spine and the forward signal.",
@@ -106,8 +110,45 @@ _ARCH_REFINE_EMPHASIS = {
     "confounders.",
     "predict": "Add scenarios, drivers, explicit confidence ranges and time horizons; tie every forecast to evidence.",
     "recommend": "Make the ranked recommendation decisive; add a rationale "
-    "table and the decision logic under constraints.",
+    "table and the decision logic under constraints. Close with a concrete "
+    "action list ('立即可执行的三项行动' / 'Three actions you can take this "
+    "week') keyed to the ranked recommendation. Each action must be specific "
+    "enough that the reader can execute it without further research.",
 }
+
+
+# P2-Wave-2.5-D4-F7: value-add reader-facing structure for list-all + recommend.
+# Calibrated against Qianfan #1 id=23 ("教师竞赛辅导手册"), which closed with
+# "★★★必看 / ★★推荐 / ★参考" priority-rated resource lists, a "高频获奖高校
+# TOP10" ranked table, and "立即可执行的三项行动" (three immediately actionable
+# items). Lunon W9 id=23 had none of these reader-facing affordances.
+_VALUE_ADD_LIST_RECOMMEND_RULE = (
+    "READER-FACING STRUCTURE (list-all / recommend archetypes only):\n"
+    "Beyond exhaustive coverage, add value the reader can act on:\n"
+    "1. PRIORITY INDICATORS: where the evidence supports prioritization "
+    "(e.g. which resources to consult first, which options outperform), tag "
+    "items with explicit priority markers — ★★★ / ★★ / ★ for tiered "
+    "recommendation, OR 'must-read / recommended / optional', OR a numeric "
+    "rank. The marker must appear inline with the item, not in a separate "
+    "ranking section.\n"
+    "2. RANKED TABLES: when comparing entities (TOP10 schools, TOP-N "
+    "products, TOP-N papers), include a numbered table with the rank in "
+    "column 1, the entity name in column 2, the differentiating metric "
+    "(award count, score, citation count) in column 3, and a one-line "
+    "rationale in column 4. Rank rows must be sorted by the metric.\n"
+    "3. CLOSING ACTION LIST: end the article (or the recommend-archetype's "
+    "concluding section) with a 'Three Actions You Can Take This Week' / "
+    "'立即可执行的三项行动' subsection containing 3-5 numbered actions. Each "
+    "action must be: (a) specific (names a resource / step / threshold), "
+    "(b) executable without further research (no 'further investigation "
+    "needed' hedges), (c) sourced to a named recommendation in the body "
+    "(no free-floating advice).\n"
+    "These affordances are HIGH-impact on the judge's Insight + Instruction-"
+    "Following scores for list-all / recommend tasks. Do NOT add them to "
+    "compare / explain-mechanism / trend / predict archetypes — they read "
+    "as listicle-style padding outside their proper context."
+)
+_VALUE_ADD_ARCHETYPES = ("list-all", "recommend")
 
 
 def length_ceiling(domain: str) -> int:
@@ -204,6 +245,11 @@ def writer_system(
     if include_dedup:
         middle_rules.append(_DEDUP_RULE)
     middle_rules.extend([_INSIGHT_MIN, CLEANING_RESISTANT_RULE])
+    # P2-Wave-2.5-D4-F7: priority indicators + ranked tables + action lists
+    # for list-all and recommend archetypes only. Other archetypes get the
+    # bare middle_block (the directive would read as filler in their context).
+    if archetype in _VALUE_ADD_ARCHETYPES:
+        middle_rules.append(_VALUE_ADD_LIST_RECOMMEND_RULE)
     middle_block = "\n\n".join(middle_rules)
 
     return (
