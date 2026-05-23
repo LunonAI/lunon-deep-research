@@ -102,17 +102,26 @@ def test_refiner_emphasis_list_all_mentions_actionable_list():
 
 
 def test_value_add_rule_makes_action_list_conditional():
-    """Greptile follow-up (PR #15): the writer rule's CLOSING ACTION LIST
-    must be CONDITIONAL on a decision-support function, matching the refiner
-    emphasis. Previously the writer demanded the action list unconditionally
-    while the refiner only added it when 'the question implies a decision
-    support function' — purely enumerative list-all tasks (e.g. 'list all
-    Nobel Chemistry laureates 2000-2020') would get an unwanted action list
-    from the writer that the refiner wouldn't reinforce."""
+    """Greptile follow-up (PR #15, round 1): the writer rule's CLOSING ACTION
+    LIST must be CONDITIONAL on a decision-support function, matching the
+    refiner emphasis. Previously the writer demanded the action list
+    unconditionally while the refiner only added it 'when the question
+    implies a decision support function' — purely enumerative list-all tasks
+    (e.g. 'list all Nobel Chemistry laureates 2000-2020') would get an
+    unwanted action list from the writer that the refiner wouldn't reinforce.
+
+    Round 2 follow-up: same CONDITIONAL label applied to RANKED TABLES so
+    item 2 is symmetric with item 3 — both items skip on purely enumerative
+    tasks rather than letting RANKED TABLES manufacture a ranking criterion
+    out of thin air."""
     rule = wr._VALUE_ADD_LIST_RECOMMEND_RULE
-    assert "CONDITIONAL" in rule
+    # Both items 2 and 3 carry the CONDITIONAL label so the writer applies
+    # symmetric skip-logic on purely enumerative tasks.
+    assert rule.count("CONDITIONAL") >= 2
     assert "purely enumerative" in rule
-    assert "Nobel" in rule  # the specific anti-example named
+    assert "Nobel" in rule  # specific anti-example named for both items
+    # Specific anti-pattern: don't manufacture a ranking criterion to fake a TOP-N.
+    assert "do NOT invent a ranking criterion" in rule
 
 
 def test_refiner_emphasis_recommend_mentions_action_list():
