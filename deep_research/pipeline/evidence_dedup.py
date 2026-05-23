@@ -80,6 +80,15 @@ def _normalize_url(url: str) -> str:
     """
     if not url:
         return ""
+    # Some retrieval specialists occasionally emit a list of URLs in a single
+    # `url` field (multi-source merge). Coerce to the first non-empty string
+    # so dedup keeps running rather than crashing the whole pipeline.
+    if isinstance(url, (list, tuple)):
+        url = next((u for u in url if isinstance(u, str) and u.strip()), "")
+        if not url:
+            return ""
+    if not isinstance(url, str):
+        return ""
     try:
         p = urlparse(url.strip())
     except ValueError:
