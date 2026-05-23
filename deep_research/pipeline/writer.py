@@ -72,6 +72,7 @@ def write_opening(plan, prompt, language, archetype, domain, digest, *, task_id=
         language,
         [s.get("title") for s in plan.get("report_toc", [])],
         task_id=task_id,
+        prompt=prompt,
     )
     user = (
         f"PROMPT ({language}):\n{prompt}\n\nREPORT TITLE: "
@@ -113,6 +114,7 @@ def write_section(
         language,
         [s.get("title") for s in plan.get("report_toc", [])],
         task_id=task_id,
+        prompt=prompt,
     )
 
     capel_block = ""
