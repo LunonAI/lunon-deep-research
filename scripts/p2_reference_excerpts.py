@@ -110,22 +110,37 @@ def take_units(text: str, n: int, start_unit: int = 0) -> str:
 
 
 def _middle_excerpt(text: str, n: int) -> str:
-    """Snap the start to the heading nearest the midpoint, then take n units."""
+    """Snap the start to the heading nearest the midpoint, then take n units.
+
+    Greptile follow-up (PR #16, round 2): for ZH-dominated text we now slice
+    directly in CHAR space from the heading offset, bypassing the unit
+    round-trip that was dropping non-CJK chars. Pre-fix path was:
+       best (char-offset, e.g. 20000)
+       → count_units(text[:best]) (mostly cjk_chars // 2, e.g. 7000)
+       → take_units(start_unit=7000) → start_char = 7000 × 2 = 14000
+    For a 75% CJK prefix that's a 5000-char drift — the excerpt started
+    well before the intended heading. The direct char-slice keeps the snap
+    accurate for both EN and ZH paths.
+    """
     total = count_units(text)
     if total <= n * 2:
         # Article too short for a separate middle — take from one-third in.
         return take_units(text, n, start_unit=total // 3)
-    # Find heading offsets (in chars), pick the heading closest to the
-    # char-midpoint, then re-anchor in unit space.
+    # Find heading offsets (in chars) and pick the one closest to the
+    # char-midpoint.
     mid_char = len(text) // 2
     heading_offsets = [m.start() for m in _HEADING.finditer(text)]
     if not heading_offsets:
         return take_units(text, n, start_unit=total // 2)
     best = min(heading_offsets, key=lambda o: abs(o - mid_char))
-    # Convert char-offset to unit-index (same EN/ZH dispatch as count_units).
-    prefix = text[:best]
-    prefix_units = count_units(prefix)
-    return take_units(text, n, start_unit=prefix_units)
+    # ZH path: slice directly in char-space so the heading-snap actually
+    # snaps. 1 unit ≈ 2 CJK chars matches the take_units convention.
+    if _is_mostly_cjk(text):
+        end_char = min(len(text), best + n * 2)
+        return text[best:end_char]
+    # EN path: convert char-offset to word-index via the prefix split count.
+    prefix_words = len(text[:best].split())
+    return take_units(text, n, start_unit=prefix_words)
 
 
 def build_excerpt(body: str) -> dict:
