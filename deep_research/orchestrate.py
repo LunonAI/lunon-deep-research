@@ -46,6 +46,8 @@ def _persist_drift(s, language: str, query: str) -> None:
             "numbering_fix": getattr(s, "numbering_fix_stats", {}),
             "refiner_gate": getattr(s, "refiner_gate_verdict", {}),
             "evidence_dedup": getattr(s, "evidence_dedup_stats", {}),
+            "capel": getattr(s, "capel_stats", {}),
+            "g_dedup_suppressed": getattr(s, "g_dedup_suppressed", False),
         }
         _DRIFT_PATH.parent.mkdir(parents=True, exist_ok=True)
         with _DRIFT_LOCK, _DRIFT_PATH.open("a", encoding="utf-8") as fh:
@@ -132,12 +134,13 @@ def _build_plan_with_persona(query, language, archetype, intents, land, cov, per
 
 
 # ---- Phase 2: full pipeline (W2-W5 + new nodes) ----
-def pipeline(query: str, language: str) -> str:
-    return from_plan(plan_only(query, language), query, language)
+def pipeline(query: str, language: str, task_id: int | None = None) -> str:
+    return from_plan(plan_only(query, language), query, language, task_id=task_id)
 
 
-def from_plan(ctx: dict, query: str, language: str) -> str:
+def from_plan(ctx: dict, query: str, language: str, task_id: int | None = None) -> str:
     s = _state_from_ctx(ctx, query, language)
+    s.task_id = task_id
 
     # New nodes: design_guide → init_format (after architect, before writer)
     s.design_guide = _phase(
@@ -173,7 +176,15 @@ def from_plan(ctx: dict, query: str, language: str) -> str:
 
     # Writer opening + per-section quality loop (W3 + W5)
     s.opening = _phase(
-        "writer_opening", writer.write_opening, s.plan, query, language, s.archetype["archetype"], s.domain, s.digest
+        "writer_opening",
+        writer.write_opening,
+        s.plan,
+        query,
+        language,
+        s.archetype["archetype"],
+        s.domain,
+        s.digest,
+        task_id=s.task_id,
     )
     s.sections, s.section_scores, s.failing_rationales = _phase(
         "writer_sections_loop", _run_section_loop, s, query, language
@@ -270,20 +281,42 @@ def _run_section_loop(s: PipelineState, query, language):
     units = writer.outline_units(plan)
     prior_titles = [u["title"] for u in units]
 
+    # P2-Wave-2-G telemetry: record once (per task) whether the W9-readability
+    # fragile-density auto-suppression of `_DEDUP_RULE` fires. The actual prompt
+    # change is made inside writer_system; this side-channel only mirrors that
+    # decision into drift logs for dev10 attribution.
+    if os.environ.get("DR_CAPEL_G", "off") != "off" and archetype == "explain-mechanism" and s.task_id is not None:
+        try:
+            from .cache import fragile_tasks as _ft
+
+            s.g_dedup_suppressed = bool(_ft.is_fragile_density_task(s.task_id))
+        except Exception:  # noqa: BLE001
+            s.g_dedup_suppressed = False
+
     def process_one(u):
         sid = u["id"]
         # Grounding needs the full (post-dedup) evidence block independent of
         # what `writer.write_section` ultimately fetches internally — keep this
         # call so grounding.check has its own deterministic evidence view.
         ev = bank.for_section(sid)
-        draft_s = _write_with_guide(
-            u, plan, bank, query, language, archetype, domain, prior_titles, s.design_guide, s.scaffold
+        draft_s, stats = _write_with_guide(
+            u,
+            plan,
+            bank,
+            query,
+            language,
+            archetype,
+            domain,
+            prior_titles,
+            s.design_guide,
+            s.scaffold,
+            task_id=s.task_id,
         )
         last_scores = None
         for _ in range(INNER_CAP):
             g = grounding.check(draft_s, ev, language, archetype=archetype)
             if not g["ok"]:
-                draft_s = _write_with_guide(
+                draft_s, stats = _write_with_guide(
                     u,
                     plan,
                     bank,
@@ -294,6 +327,7 @@ def _run_section_loop(s: PipelineState, query, language):
                     prior_titles,
                     s.design_guide,
                     s.scaffold,
+                    task_id=s.task_id,
                     feedback=grounding.feedback_text(g),
                 )
                 continue
@@ -301,7 +335,7 @@ def _run_section_loop(s: PipelineState, query, language):
             last_scores = r
             if r["ok"]:
                 break
-            draft_s = _write_with_guide(
+            draft_s, stats = _write_with_guide(
                 u,
                 plan,
                 bank,
@@ -312,9 +346,10 @@ def _run_section_loop(s: PipelineState, query, language):
                 prior_titles,
                 s.design_guide,
                 s.scaffold,
+                task_id=s.task_id,
                 feedback=inner_loop.feedback_text(r),
             )
-        return sid, u, draft_s, last_scores
+        return sid, u, draft_s, last_scores, stats
 
     order_ix = {u["id"]: i for i, u in enumerate(units)}
     sec_workers = int(os.environ.get("DR_SECTION_WORKERS", "4"))
@@ -323,8 +358,10 @@ def _run_section_loop(s: PipelineState, query, language):
     results.sort(key=lambda r: order_ix.get(r[0], 1e9))
 
     sections, score_summary, failing = [], [], []
-    for sid, u, draft_s, last in results:
+    for sid, u, draft_s, last, stats in results:
         sections.append(draft_s)
+        if stats and (stats.get("n_markers_stripped") or stats.get("n_violations")):
+            s.capel_stats[sid] = stats
         if last:
             score_summary.append(
                 {
@@ -339,8 +376,27 @@ def _run_section_loop(s: PipelineState, query, language):
     return sections, score_summary, failing
 
 
-def _write_with_guide(u, plan, bank, query, language, archetype, domain, prior_titles, guide, scaffold, feedback=""):
-    """writer.write_section + design_guide block + scaffold expected-length."""
+def _write_with_guide(
+    u,
+    plan,
+    bank,
+    query,
+    language,
+    archetype,
+    domain,
+    prior_titles,
+    guide,
+    scaffold,
+    *,
+    task_id: int | None = None,
+    feedback: str = "",
+):
+    """writer.write_section + design_guide block + scaffold expected-length.
+
+    Returns (text, capel_stats). Stats are non-zero only when CAPEL is active
+    (env `DR_CAPEL_G != off`); callers either record them in `s.capel_stats`
+    or discard.
+    """
     expected_tok = 1200
     if scaffold:
         for sec in scaffold.sections:
@@ -361,6 +417,8 @@ def _write_with_guide(u, plan, bank, query, language, archetype, domain, prior_t
         domain=domain,
         prior_titles=prior_titles,
         feedback=(feedback or "") + extra,
+        task_id=task_id,
+        target_tokens=expected_tok,
     )
 
 

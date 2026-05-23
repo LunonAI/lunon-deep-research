@@ -113,3 +113,14 @@ class PipelineState:
     # P2-Wave-1-D: evidence-layer dedup stats {mode, n_before, n_after,
     # d4_collapsed, d4_clusters, d1_collapsed?, d1_eids_embedded?, d1_error?}
     evidence_dedup_stats: dict = field(default_factory=dict)
+    # P2-Wave-2: task id from the harness (used by G's W9-readability cache
+    # for fragile-density conditional dedup-rule suppression). None means the
+    # caller did not provide it (smoke runs, unit tests) — G silently no-ops.
+    task_id: int | None = None
+    # P2-Wave-2-A (CAPEL): per-section marker-stripping telemetry.
+    # {section_id: {n_markers_stripped, n_violations}}.
+    capel_stats: dict = field(default_factory=dict)
+    # P2-Wave-2-G: True when the W9-readability fragile-density heuristic
+    # auto-suppressed `_DEDUP_RULE` for this task. Decision is task-level
+    # (archetype + W9 read score), not per-section, so a single bool suffices.
+    g_dedup_suppressed: bool = False
