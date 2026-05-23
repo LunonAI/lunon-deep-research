@@ -272,8 +272,10 @@ def _run_section_loop(s: PipelineState, query, language):
 
     def process_one(u):
         sid = u["id"]
+        # Grounding needs the full (post-dedup) evidence block independent of
+        # what `writer.write_section` ultimately fetches internally — keep this
+        # call so grounding.check has its own deterministic evidence view.
         ev = bank.for_section(sid)
-        # writer now also sees design_guide via a kwarg appended below
         draft_s = _write_with_guide(
             u, plan, bank, query, language, archetype, domain, prior_titles, s.design_guide, s.scaffold
         )
