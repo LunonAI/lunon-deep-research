@@ -105,6 +105,37 @@ def test_compute_metrics_zh_article_now_has_realistic_length():
     assert m["n_length"] >= 100
 
 
+def test_compute_metrics_zh_opening_analysis_scoped_to_first_400_chars():
+    """Greptile follow-up (PR #16, round 3): the opening-analysis slice for
+    a ZH article must read ~400 CJK chars (200 word-equivalents), NOT
+    `words[:200]` which on .split()-tokenized ZH would span a third of the
+    article.
+
+    Construct a ZH article where a thesis-marker (`！`) appears ONLY past
+    the first 400 chars. The opening flag MUST stay False post-fix because
+    the slice doesn't reach the marker. Pre-fix it would have read further
+    into the article and (often) flagged True."""
+    # >400 CJK chars of plain prose (no sentence-end markers in the first
+    # 400), then a thesis-marker (`！`) safely past the opening window.
+    prefix = "中国高校教师竞赛大赛获奖课程精彩纷呈相当丰富的研究背景与方法分析" * 20
+    assert len(prefix) > 500
+    article = prefix + "！这里是后段的句号触发字符。"
+    m = compute_metrics(article)
+    # head_text only saw the first 400 chars of ZH-dominated content, which
+    # has no sentence-end character → thesis flag stays False.
+    assert m["open_thesis"] is False
+
+
+def test_compute_metrics_en_opening_analysis_uses_word_slice():
+    """EN articles still use the latin-word slice — the CJK path only
+    engages on ZH-dominated content. Counter-test to the ZH-only fix."""
+    # 200 EN words with a period in the FIRST word (so head_text has it).
+    en_text = "Insight. " + " ".join(f"word{i}" for i in range(200))
+    m = compute_metrics(en_text)
+    # Opening contains a period → thesis flag is True for EN path.
+    assert m["open_thesis"] is True
+
+
 def test_compute_metrics_hedge_per_1k_uses_n_length():
     """hedge_per_1k must use n_length so ZH and EN articles are comparable.
     With .split() denominator a ZH article would over-report hedge density
