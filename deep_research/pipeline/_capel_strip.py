@@ -21,9 +21,13 @@ import re
 # avoid colliding with markdown-like patterns or sentinel angle-bracket
 # constructs the writer might legitimately emit.
 _MARKER_RE = re.compile(r"<\d{1,5}>")
-# Two markers with only whitespace between them = violation (paper's hard
-# rule: an intervening content token is required between markers).
-_BACK_TO_BACK_RE = re.compile(r"<\d{1,5}>\s*<\d{1,5}>")
+# Back-to-back violation: a marker IMMEDIATELY followed (whitespace-only OK)
+# by another marker. The lookahead keeps matches overlapping so that a run
+# of N consecutive markers produces N-1 violations rather than ⌊N/2⌋ (which
+# is what a non-lookahead `<…><…>` pattern returns under `findall`'s
+# non-overlapping semantics). Accurate counts matter for the dev10 gate
+# criterion (`marker-violation rate < 5%`).
+_BACK_TO_BACK_RE = re.compile(r"<\d{1,5}>(?=\s*<\d{1,5}>)")
 # Collapse runs of >=2 whitespace left after removing adjacent markers.
 _DOUBLED_WS_RE = re.compile(r"[ \t]{2,}")
 
@@ -33,8 +37,8 @@ def strip_capel_markers(text: str) -> tuple[str, dict]:
 
     Returns (stripped_text, stats):
         n_markers_stripped: total markers removed.
-        n_violations: count of back-to-back marker pairs (no intervening
-            token) — a model-compliance metric, not a fatal condition.
+        n_violations: count of back-to-back marker positions (no intervening
+            content token). Overlap-aware: `<5><4><3>` reports 2 violations.
     """
     if not text:
         return text, {"n_markers_stripped": 0, "n_violations": 0}
@@ -42,8 +46,10 @@ def strip_capel_markers(text: str) -> tuple[str, dict]:
     # Replace each marker with a single space — handles `the<899>quick`
     # (no surrounding whitespace) without gluing the words together.
     stripped, n_stripped = _MARKER_RE.subn(" ", text)
-    # Collapse any runs of horizontal whitespace introduced by adjacent
-    # marker stripping. Newlines are preserved so paragraph structure is
-    # untouched.
-    stripped = _DOUBLED_WS_RE.sub(" ", stripped)
+    # Only collapse whitespace runs that THIS strip introduced. When no
+    # markers were present we MUST return the original text verbatim so
+    # legitimate double-spaces (rare but possible in code blocks, indented
+    # quotes) survive untouched.
+    if n_stripped:
+        stripped = _DOUBLED_WS_RE.sub(" ", stripped)
     return stripped, {"n_markers_stripped": n_stripped, "n_violations": n_violations}

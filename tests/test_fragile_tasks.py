@@ -118,3 +118,69 @@ def test_corrupt_lines_skipped(monkeypatch, tmp_path):
 
     assert fragile_tasks.is_fragile_density_task(56) is True
     assert fragile_tasks.is_fragile_density_task(29) is True
+
+
+def test_repo_snapshot_is_default_when_no_env_override(monkeypatch):
+    """With no DR_W9_RESULTS set, the repo-local snapshot must load and
+    id=56 (W9 read=0.585) must trigger G's predicate. Guards against the
+    Greptile-flagged regression where a developer home-directory path
+    would silently disable G everywhere except the author's machine.
+    """
+    monkeypatch.delenv("DR_W9_RESULTS", raising=False)
+    fragile_tasks._reset_for_tests()
+    cache = fragile_tasks.load_w9_readability()
+    assert len(cache) >= 80  # snapshot covers all 89 W9 tasks
+    assert 56 in cache
+    assert cache[56] >= 0.50
+    assert fragile_tasks.is_fragile_density_task(56) is True
+
+
+def test_env_override_takes_precedence_over_snapshot(monkeypatch, tmp_path):
+    """Power users / tests can point at any DRB-format raw_results.jsonl."""
+    p = tmp_path / "raw_results.jsonl"
+    # Snapshot has id=56 at 0.585 → fragile. Override flips it to 0.40 →
+    # NOT fragile. If override is honored, predicate returns False.
+    p.write_text(json.dumps({"id": 56, "readability": 0.40}) + "\n", encoding="utf-8")
+    monkeypatch.setenv("DR_W9_RESULTS", str(p))
+    fragile_tasks._reset_for_tests()
+
+    assert fragile_tasks.is_fragile_density_task(56) is False
+
+
+def test_warning_emitted_when_flag_on_but_cache_empty(monkeypatch, tmp_path, capsys):
+    """G enabled + cache empty must produce a stderr warning so dev10
+    operators notice instead of seeing silent g_dedup_suppressed=false.
+    """
+    monkeypatch.setenv("DR_W9_RESULTS", str(tmp_path / "nope.jsonl"))
+    monkeypatch.setenv("DR_CAPEL_G", "on")
+    fragile_tasks._reset_for_tests()
+
+    fragile_tasks.load_w9_readability()
+    captured = capsys.readouterr()
+    assert "DR_CAPEL_G" in captured.err
+    assert "empty" in captured.err.lower()
+
+
+def test_no_warning_when_flag_off(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("DR_W9_RESULTS", str(tmp_path / "nope.jsonl"))
+    monkeypatch.delenv("DR_CAPEL_G", raising=False)
+    fragile_tasks._reset_for_tests()
+
+    fragile_tasks.load_w9_readability()
+    captured = capsys.readouterr()
+    assert captured.err == ""
+
+
+def test_warning_emitted_once_per_session(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("DR_W9_RESULTS", str(tmp_path / "nope.jsonl"))
+    monkeypatch.setenv("DR_CAPEL_G", "on")
+    fragile_tasks._reset_for_tests()
+
+    fragile_tasks.load_w9_readability()
+    first = capsys.readouterr().err
+    # Second call from a different code path (e.g. another task) must NOT
+    # re-emit. _reset_for_tests would re-arm; we do not call it.
+    fragile_tasks.load_w9_readability()
+    second = capsys.readouterr().err
+    assert "DR_CAPEL_G" in first
+    assert second == ""

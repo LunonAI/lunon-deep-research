@@ -295,6 +295,21 @@ def _run_section_loop(s: PipelineState, query, language):
 
     def process_one(u):
         sid = u["id"]
+        # Per-section CAPEL telemetry: sum strip + violation counts across
+        # every writer call this section sees (initial draft + grounding/
+        # inner-loop retries). Recording only the final attempt's stats would
+        # hide violations the model emitted on prior retries — dev10's
+        # `marker-violation rate < 5%` gate must reflect the full generation
+        # cost, not just the accepted draft.
+        agg_stats = {"n_markers_stripped": 0, "n_violations": 0, "n_calls": 0}
+
+        def _accum(local_stats: dict) -> None:
+            if not local_stats:
+                return
+            agg_stats["n_markers_stripped"] += int(local_stats.get("n_markers_stripped", 0))
+            agg_stats["n_violations"] += int(local_stats.get("n_violations", 0))
+            agg_stats["n_calls"] += 1
+
         # Grounding needs the full (post-dedup) evidence block independent of
         # what `writer.write_section` ultimately fetches internally — keep this
         # call so grounding.check has its own deterministic evidence view.
@@ -312,6 +327,7 @@ def _run_section_loop(s: PipelineState, query, language):
             s.scaffold,
             task_id=s.task_id,
         )
+        _accum(stats)
         last_scores = None
         for _ in range(INNER_CAP):
             g = grounding.check(draft_s, ev, language, archetype=archetype)
@@ -330,6 +346,7 @@ def _run_section_loop(s: PipelineState, query, language):
                     task_id=s.task_id,
                     feedback=grounding.feedback_text(g),
                 )
+                _accum(stats)
                 continue
             r = inner_loop.score_section(draft_s, spec, language, u["title"])
             last_scores = r
@@ -349,7 +366,8 @@ def _run_section_loop(s: PipelineState, query, language):
                 task_id=s.task_id,
                 feedback=inner_loop.feedback_text(r),
             )
-        return sid, u, draft_s, last_scores, stats
+            _accum(stats)
+        return sid, u, draft_s, last_scores, agg_stats
 
     order_ix = {u["id"]: i for i, u in enumerate(units)}
     sec_workers = int(os.environ.get("DR_SECTION_WORKERS", "4"))

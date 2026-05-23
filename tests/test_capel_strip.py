@@ -24,14 +24,30 @@ def test_well_formed_countdown_strips_cleanly():
 
 
 def test_back_to_back_markers_flagged_as_violation():
-    # `<5><4>` with no intervening token = violation.
+    # `<5><4>` with no intervening token = exactly 1 violation.
     text = "Word1 <5><4> Word2 <3>Word3<2>Word4<1>Word5<0>"
     out, stats = strip_capel_markers(text)
-    assert stats["n_violations"] >= 1
+    assert stats["n_violations"] == 1
     assert stats["n_markers_stripped"] == 6
     # The two violating markers still get stripped; the output is content-only.
     assert "<" not in out
     assert "Word1" in out and "Word5" in out
+
+
+def test_triple_marker_run_reports_two_violations():
+    # `<5><4><3>` = three markers, no intervening content. The overlapping
+    # lookahead counter must report n-1 = 2 violations, not 1 (the non-
+    # overlapping `<…><…>` pattern would consume `<5><4>` and miss the
+    # `<4><3>` adjacency). Greptile-flagged regression guard.
+    text = "alpha <5><4><3> beta <2>gamma<1>delta<0>"
+    _, stats = strip_capel_markers(text)
+    assert stats["n_violations"] == 2
+
+
+def test_quadruple_marker_run_reports_three_violations():
+    text = "<5><4><3><2>only-content<1>here<0>"
+    _, stats = strip_capel_markers(text)
+    assert stats["n_violations"] == 3
 
 
 def test_marker_count_with_whitespace_between_violators():
@@ -72,6 +88,26 @@ def test_no_markers_returns_unchanged_text_with_zero_stats():
     assert out == text
     assert stats["n_markers_stripped"] == 0
     assert stats["n_violations"] == 0
+
+
+def test_marker_free_input_with_double_spaces_is_left_alone():
+    # Writer output without CAPEL markers MUST be returned verbatim — the
+    # whitespace-collapse pass is only triggered when markers were actually
+    # stripped, so legitimate double spaces (code blocks, indented quotes)
+    # survive untouched. Greptile-flagged contract guard.
+    text = "Indented  paragraph  with  intentional  doubled  spaces."
+    out, stats = strip_capel_markers(text)
+    assert out == text  # bit-identical
+    assert stats["n_markers_stripped"] == 0
+
+
+def test_marker_strip_does_collapse_introduced_doubled_spaces():
+    # When markers ARE stripped and the strip leaves runs of whitespace
+    # (e.g. `alpha <3> beta`), the collapse pass MUST normalize them.
+    text = "alpha <3> beta <2> gamma <1> delta <0> epsilon"
+    out, stats = strip_capel_markers(text)
+    assert "  " not in out
+    assert stats["n_markers_stripped"] == 4
 
 
 def test_marker_with_5_digits_still_recognized():
