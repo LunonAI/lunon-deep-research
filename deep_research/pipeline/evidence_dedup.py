@@ -36,15 +36,19 @@ and the pipeline continues. D4 failures are not anticipated (pure Python).
 
 from __future__ import annotations
 
+import logging
 import re
 from urllib.parse import parse_qsl, urlparse
 
 from .. import llm
 
+_LOG = logging.getLogger(__name__)
+
 _PUNCT_RE = re.compile(r"[^\w\s]+", re.UNICODE)
 _WS_RE = re.compile(r"\s+")
 _DEFAULT_COSINE_THRESHOLD = 0.85
 _EMBED_TEXT_PREFIX_CHARS = 500
+_VALID_MODES = ("off", "url", "url+embedding")
 
 
 def _normalize_url(url: str) -> str:
@@ -192,9 +196,16 @@ def _cosine(a: list[float], b: list[float]) -> float:
 def _d1_embedding_pass(bank, threshold: float = _DEFAULT_COSINE_THRESHOLD) -> dict:
     """Run cosine-similarity dedup on the (post-D4) bank.
 
-    Embeds `source_name + first 500 chars of text` per remaining block.
-    Pairwise cosine — O(n²) but n ≤ 300 in typical W-runs, fast in Python.
-    Threshold ≥ 0.85 by default; tunable for future calibration.
+    Embeds `source_name + first 500 chars of text` per remaining block. The
+    inner loop is **greedy seed-based clustering**, not full single-link or
+    complete-link clustering: each unvisited candidate `j` is compared only
+    against the seed `i`, not against all current cluster members. This
+    means a transitively-similar triple (A↔B = 0.90, B↔C = 0.90,
+    A↔C = 0.84) will only cluster {A, B} and leave C separate. At threshold
+    0.85 this gap is rare and the greedy approach is preferable to
+    single-link clustering's chaining failure mode (where weak transitive
+    links collapse unrelated blocks). Cost is O(n²) over n ≤ 300, fast in
+    pure Python.
     """
     items = list(bank._items.values())
     if len(items) < 2:
@@ -244,9 +255,25 @@ def dedup_bank(bank, mode: str = "off") -> dict:
                             fail-soft: an embeddings API failure leaves the
                             bank at its post-D4 state and the pipeline
                             continues.
+
+    Unknown mode values (typos like ``url+embed`` or ``URL``) log a warning
+    and no-op rather than silently passing — without validation, a typo
+    during a gate experiment could look indistinguishable from a clean
+    "no duplicates found" pass.
     """
     n_before = len(bank._items)
     out: dict = {"mode": mode, "n_before": n_before}
+
+    if mode not in _VALID_MODES:
+        _LOG.warning(
+            "evidence_dedup: unrecognized DR_EVIDENCE_DEDUP=%r (valid: %s) — no-op",
+            mode,
+            ", ".join(_VALID_MODES),
+        )
+        out["n_after"] = n_before
+        out["warning"] = f"unrecognized mode {mode!r}"
+        return out
+
     if mode == "off":
         out["n_after"] = n_before
         return out

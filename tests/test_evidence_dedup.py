@@ -155,6 +155,24 @@ def test_dedup_off_is_noop():
     assert len(bank._items) == 2
 
 
+def test_dedup_unknown_mode_warns_and_noops():
+    """Typo like `url+embed` (instead of `url+embedding`) should LOG a warning
+    AND emit a `warning` field in the stats dict, NOT silently no-op.
+    Without this, a gate-experiment typo would look indistinguishable from
+    a clean 'no dups found' run."""
+    bank = _bank_with(
+        [
+            {"url": "https://a.com/x", "source_name": "A", "text": "t1", "section_ids": ["1"]},
+            {"url": "https://a.com/x", "source_name": "A", "text": "t2", "section_ids": ["1"]},
+        ]
+    )
+    stats = dedup_bank(bank, mode="url+embed")  # intentional typo
+    assert "warning" in stats
+    assert "unrecognized mode" in stats["warning"]
+    assert stats["n_after"] == stats["n_before"]
+    assert len(bank._items) == 2  # bank unchanged
+
+
 def test_dedup_url_collapses_same_url_blocks():
     bank = _bank_with(
         [
