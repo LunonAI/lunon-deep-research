@@ -9,11 +9,6 @@
   reference median word_len by domain, from p0_artifacts/reference_catalog.jsonl.
 - P2-Wave-2-A: CAPEL countdown directive (capel_directive).
 - P2-Wave-2-G: archetype + W9-readability conditional `_DEDUP_RULE` omission.
-- P2-Wave-2.5-D1: length_target() archetype × depth_tier matrix calibrated
-  against the #1 reference leaderboard articles (60-80k words on EN deep/comprehensive
-  tasks; 30-50k char-equivalents on ZH long-form), confident-expert voice
-  replacing paranoid-restraint mode, explicit forbidden-phrases list for
-  evidence-boundary meta-commentary that tanked Insight on W9 ids 23 + 91.
 """
 
 import collections
@@ -48,58 +43,32 @@ _DOMAIN_KEY = {
 
 # ---- Inline-source-name attribution (verbatim from p0_artifacts/cleaner_behavior.md;
 # internal label removed so the term itself does not leak into article text).
-#
-# P2-Wave-2.5-D3-F5 (2026-05-23): `[n]` footnote markers are now ACTIVELY
-# ENCOURAGED alongside inline source names. The pre-D3 rule limited `[n]`
-# to "cost-free pure fact support" — in practice the writer dropped them
-# entirely. Phase A profiler measured the #1 reference corpus at 322 footnotes
-# per article average vs Lunon's 0; the asymmetry signals citation density
-# to the judge regardless of cleaner-strip behavior. The non-negotiable
-# load-bearing rule (#2 below) is retained — every sentence must stand
-# after `[n]` markers are stripped.
 CLEANING_RESISTANT_RULE = (
     "SOURCE ATTRIBUTION (mandatory, non-negotiable):\n"
     '1. Attribute with source NAMES inline as prose — e.g. "according to '
-    'McKinsey 2025", "Gartner\'s 2024 analysis" — for every load-bearing '
-    "claim. Inline names are the primary citation device.\n"
+    'McKinsey 2025", "Gartner\'s 2024 analysis" — never a bare [n]/[^n] for '
+    "anything load-bearing.\n"
     "2. No sentence may be semantically dependent on a citation mark surviving. "
     "Every sentence must read complete after all [n]/[^n] and reference/"
-    "footnote blocks are deleted. This is the LOAD-BEARING rule.\n"
-    "3. ENCOURAGED: alongside the inline source name, append a numbered "
-    "footnote marker `[n]` or `[^n]` after the citing sentence. The judge "
-    "rewards visible citation density. Top-scoring research reports on this "
-    "benchmark routinely run 50-300 footnote markers across the article. "
-    "Aim for >=1 footnote per substantive claim; the inline source name "
-    "carries the semantic load, the `[n]` carries the density signal.\n"
-    "4. RECOMMENDED: include a `## References` or `## 参考文献` section at "
-    "article end mapping each `[n]` to a source name + title + URL. The "
-    "harness strips this section before judge scoring, so it has zero "
-    "downside cost while contributing to perceived rigor inside the prose.\n"
-    "5. Never place a fact, name, date, or figure ONLY inside a citation mark, "
+    "footnote blocks are deleted.\n"
+    "3. Numeric [n] markers are allowed ONLY for pure fact support that is "
+    "cost-free (stripped pre-scoring) — but the sentence must stand without "
+    "them.\n"
+    "4. Never place a fact, name, date, or figure ONLY inside a citation mark, "
     "footnote, or the reference list."
 )
 
 _INSIGHT_MIN = (
-    "ANALYTICAL VOICE — CONFIDENT EXPERT MODE (P2-Wave-2.5-D1):\n"
-    "Write as a domain expert delivering useful synthesis to a sophisticated "
-    "reader. Forward-looking projections, named alternatives, causal chains, "
-    "and quantified uncertainty are REWARDED — include them freely where they "
-    "add value, even when extrapolating beyond the directly cited material. "
-    "When you extrapolate, mark the move briefly inline ('the historical "
-    "pattern suggests', 'on this report's reading', 'beyond the cited "
-    "evidence') — but DO extrapolate. Useful synthesis is the deliverable; "
-    "paranoid restraint is the failure mode.\n\n"
-    "ABSOLUTELY FORBIDDEN — evidence-boundary meta-commentary:\n"
-    "- Never write 'this section's evidence does not cover X' or 'the supplied "
-    "atoms do not establish Y' or 'this report makes no claim about Z'.\n"
-    "- Never write '本节证据未直接命中', '本节证据未涵盖', '本节不作断言', "
-    "'本节不作经验性归纳', or any phrase announcing the report's own "
-    "evidential restraint.\n"
-    "- Never label paragraphs A/B/C by source-quality tier in the visible "
-    "prose. Internal source-discipline never leaks to the reader.\n"
-    "- Never append a 'caveats' or 'limitations' paragraph that exists solely "
-    "to announce uncertainty — the judge reads this as low-Insight prose.\n"
-    "If you cannot make a claim, simply omit it. Do NOT announce the omission."
+    "INSIGHT ELEMENTS — TIGHT ARCHETYPE-CONDITIONAL POLICY:\n"
+    "Do NOT add forward-looking projections, scenario tables, confidence "
+    "intervals, future-dated content, or methodological caveats UNLESS the "
+    "prompt explicitly asks for prediction/forecast OR the task archetype is "
+    "predict, recommend, or trend. For all other archetypes (list-all, "
+    "compare, explain-mechanism), keep the prose grounded in what the sources "
+    "directly support; brevity + relevance > formulaic insight insertion. "
+    "When insight IS appropriate, ground every forward statement in a named "
+    "source and a concrete date or confidence range — never speculate without "
+    "evidential support."
 )
 
 # NEW (W9 diagnostic 2026-05-21): the judge cited "inconsistent section
@@ -126,45 +95,9 @@ _DEDUP_RULE = (
     "across sections is the #1 reader-fatigue complaint."
 )
 
-# P2-Wave-2.5-D3-F6: math-content preservation directive. Fires when the
-# domain is `science` or when the prompt itself contains LaTeX-style math
-# markup. Calibrated against the #1 reference id=56 (auction theory, EN, 80k words)
-# which presents full equations as `$v_i$ drawn from CDF $F_i$ supported on
-# $[\underline{v}_i, \overline{v}_i]$` with display equations for payoff
-# functions. Lunon's W9 id=56 narrated those same constructs in prose
-# ("the inverse equilibrium bid functions ... satisfying a coupled ODE
-# system"), which the judge marked weaker on Comprehensiveness for the
-# math-heavy domain.
-_MATH_PRESERVATION_RULE = (
-    "MATH NOTATION — PRESERVE, DO NOT NARRATE:\n"
-    "This task is in a math-bearing domain (science / math / auction theory / "
-    "physics / quantitative finance / engineering equations). When the source "
-    "material contains mathematical expressions, equations, inequalities, or "
-    "set/measure-theoretic objects, preserve the original LaTeX-style notation "
-    "rather than describing it in prose:\n"
-    "- Inline math: surround with single `$...$` (e.g. `$F_i(v_i)$`, "
-    "`$f \\colon \\mathbb{R}_+ \\to \\mathbb{R}$`).\n"
-    "- Display math: surround with `$$...$$` on its own line.\n"
-    "- Use standard LaTeX macros: `\\mathbb{R}`, `\\mathcal{N}`, `\\sum`, "
-    "`\\int`, `\\partial`, `\\hat{x}`, `\\bar{x}`, `\\underline{x}`, `\\to`, "
-    "`\\Rightarrow`, `\\geq`, `\\leq`, `\\neq`, `\\approx`, `\\sim`, `\\in`, "
-    "`\\subset`, `\\cup`, `\\cap`, `\\forall`, `\\exists`, `\\le`, `\\ge`.\n"
-    "- Number key equations with `\\tag{N}` so they can be cited inline.\n"
-    "Prose narration of math ('the inverse bid function ... satisfies a "
-    "coupled ODE system') is a Comprehensiveness penalty on math-heavy "
-    "questions — the judge rewards explicit mathematical content where "
-    "the source material supplies it. Do NOT invent equations the sources "
-    "do not contain."
-)
-
-
 _ARCH_REFINE_EMPHASIS = {
     "list-all": "Maximize exhaustive coverage; one clearly-delimited unit per "
-    "required item; comparison/inventory tables. Mark each item with a "
-    "priority indicator (★★★ / ★★ / ★ or 'essential / recommended / optional') "
-    "where the evidence supports prioritization; add a closing 'Top Picks' or "
-    "'立即可执行的三项行动' actionable list when the question implies a "
-    "decision support function.",
+    "required item; comparison/inventory tables.",
     "compare": "Sharpen the entity×dimension comparison matrix; equalize depth "
     "across entities; quantify every cell where possible.",
     "trend": "Strengthen the dated chronological spine and the forward signal.",
@@ -173,164 +106,13 @@ _ARCH_REFINE_EMPHASIS = {
     "confounders.",
     "predict": "Add scenarios, drivers, explicit confidence ranges and time horizons; tie every forecast to evidence.",
     "recommend": "Make the ranked recommendation decisive; add a rationale "
-    "table and the decision logic under constraints. Close with a concrete "
-    "action list ('立即可执行的三项行动' / 'Three actions you can take this "
-    "week') keyed to the ranked recommendation. Each action must be specific "
-    "enough that the reader can execute it without further research.",
+    "table and the decision logic under constraints.",
 }
-
-
-# P2-Wave-2.5-D4-F7: value-add reader-facing structure for list-all + recommend.
-# Calibrated against the #1 reference id=23 ("教师竞赛辅导手册"), which closed with
-# "★★★必看 / ★★推荐 / ★参考" priority-rated resource lists, a "高频获奖高校
-# TOP10" ranked table, and "立即可执行的三项行动" (three immediately actionable
-# items). Lunon W9 id=23 had none of these reader-facing affordances.
-_VALUE_ADD_LIST_RECOMMEND_RULE = (
-    "READER-FACING STRUCTURE (list-all / recommend archetypes only):\n"
-    "Beyond exhaustive coverage, add value the reader can act on:\n"
-    "1. PRIORITY INDICATORS — CONDITIONAL: only when the evidence supports "
-    "a natural prioritization basis (e.g. which resources to consult first, "
-    "which options outperform). Skip for purely enumerative list-all tasks "
-    "where no prioritization was requested (e.g. 'list all Nobel Chemistry "
-    "laureates 2000-2020' — do NOT invent a tier criterion to manufacture "
-    "star ratings). When appropriate, tag items with explicit priority "
-    "markers — ★★★ / ★★ / ★ for tiered recommendation, OR 'must-read / "
-    "recommended / optional', OR a numeric rank. The marker must appear "
-    "inline with the item, not in a separate ranking section.\n"
-    "2. RANKED TABLES — CONDITIONAL: only when the question implies a "
-    "comparison or ranking task (TOP10 schools, TOP-N products, TOP-N "
-    "papers). Skip for purely enumerative list-all tasks where no "
-    "comparative ranking was requested (e.g. 'list all Nobel Chemistry "
-    "laureates 2000-2020' — do NOT invent a ranking criterion such as "
-    "citation count to manufacture a TOP-N table). When appropriate, "
-    "include a numbered table with the rank in column 1, the entity name "
-    "in column 2, the differentiating metric (award count, score, citation "
-    "count) in column 3, and a one-line rationale in column 4. Rank rows "
-    "must be sorted by the metric.\n"
-    "3. CLOSING ACTION LIST — CONDITIONAL: only when the question implies a "
-    "decision-support function (the reader could plausibly act on the "
-    "findings — e.g. 'best resources for X', 'which option should I pick', "
-    "'how should we prepare for Y'). Skip this section for purely "
-    "enumerative list-all tasks (e.g. 'list all Nobel Chemistry laureates "
-    "2000-2020' — historical enumeration with no actionable angle). When "
-    "appropriate, end with a 'Three Actions You Can Take This Week' / "
-    "'立即可执行的三项行动' subsection containing 3-5 numbered actions. Each "
-    "action must be: (a) specific (names a resource / step / threshold), "
-    "(b) executable without further research (no 'further investigation "
-    "needed' hedges), (c) sourced to a named recommendation in the body "
-    "(no free-floating advice).\n"
-    "These affordances are HIGH-impact on the judge's Insight + Instruction-"
-    "Following scores for list-all / recommend tasks. Do NOT add them to "
-    "compare / explain-mechanism / trend / predict archetypes — they read "
-    "as listicle-style padding outside their proper context."
-)
-_VALUE_ADD_ARCHETYPES = ("list-all", "recommend")
 
 
 def length_ceiling(domain: str) -> int:
-    """LEGACY — domain median word_len from reference_catalog.jsonl.
-
-    Pre-Wave-2.5-D1 length governor. Kept for backward-compat (existing callers
-    in init_format + writer_system continue to receive the same value when no
-    depth_tier is supplied). New code should call `length_target()` instead,
-    which accepts depth_tier and archetype.
-    """
     key = _DOMAIN_KEY.get(domain, "_overall")
     return _MED.get(key, _MED["_overall"])
-
-
-# P2-Wave-2.5-D1 length target matrix. Multipliers calibrated against the
-# the #1 reference leaderboard sample (reference-dr-questions/, 10 articles analyzed
-# 2026-05-23, full data in p2_artifacts/reference_findings.md §F1).
-#
-# Observed the reference article lengths (in words for EN, in characters for ZH):
-#   id=56 EN deep / explain-mechanism / research:   80,243 words  ≈ 8.5× our W9
-#   id=89 EN comprehensive / list-all / theory:     79,013 words  ≈ paired W9 absent
-#   id=91 EN comprehensive / list-all / pop-culture: 68,633 words  ≈ 4.4× our W9
-#   id=20 ZH deep / explain-mechanism / technical:  ~48,000 CJK chars (≈ 24k word-eq)
-#   id=23 ZH deep / list-all-recommend / education:  ~33,000 CJK chars (≈ 16k word-eq)
-#   id=8  ZH standard / explain-mechanism / science: ~26,000 CJK chars (≈ 13k word-eq)
-#
-# A "word-equivalent" for ZH is approximated as `n_cjk_chars / 2` since two
-# CJK characters routinely encode the semantic load of one English word.
-#
-# Multipliers below produce realistic targets against the EN reference median
-# of ~9,000 words (from p0_artifacts/reference_catalog.jsonl _overall median).
-# ZH consumers of `length_target()` should multiply by ~0.6 again to convert
-# the word-target into a CJK-char-target (handled at the call site).
-_DEPTH_TIER_MULTIPLIER = {
-    # compact: tightly-scoped questions, "how do I" recommend, short list-all.
-    # the reference id=23 if interpreted at character-level lands here.
-    "compact": 1.5,
-    # standard: typical W9 task — focused question with clear scope.
-    # Roughly matches our prior "domain median × 1.0" governor.
-    "standard": 2.0,
-    # deep: explicit research / explain-mechanism / multi-entity compare.
-    # Targets ~25-30k words to align with the reference ZH deep tasks.
-    "deep": 3.5,
-    # comprehensive: open-ended research review / canonical-survey questions.
-    # Targets 50-70k words to align with the reference EN comprehensive (id=56, 89, 91).
-    "comprehensive": 6.5,
-}
-
-# Archetype × default depth-tier mapping. The architect MAY override per task
-# by emitting `report_depth_tier` in its plan output; this dict is the fallback
-# when the architect doesn't specify (legacy plans or short-prompt smoke runs).
-_ARCH_DEFAULT_DEPTH = {
-    "list-all": "deep",
-    "compare": "deep",
-    "explain-mechanism": "deep",
-    "predict": "standard",
-    "trend": "standard",
-    "recommend": "standard",
-}
-
-_VALID_DEPTH_TIERS = tuple(_DEPTH_TIER_MULTIPLIER.keys())
-
-
-def resolve_depth_tier(archetype: str | None, plan_depth_tier: str | None = None) -> str:
-    """Pick the depth tier for this task.
-
-    `plan_depth_tier` wins if it's a known tier (architect-emitted). Otherwise
-    we fall back to archetype default. Unknown archetype → "standard".
-    """
-    if plan_depth_tier and plan_depth_tier in _VALID_DEPTH_TIERS:
-        return plan_depth_tier
-    return _ARCH_DEFAULT_DEPTH.get(archetype or "", "standard")
-
-
-def length_target(
-    domain: str,
-    *,
-    archetype: str | None = None,
-    depth_tier: str | None = None,
-    language: str = "en",
-) -> int:
-    """Article-level target word count (or CJK-char count for ZH).
-
-    Args:
-      domain: runtime domain string (`finance`, `health`, `science`, `default`).
-      archetype: optional archetype for fallback depth-tier resolution.
-      depth_tier: explicit tier override; one of compact/standard/deep/
-        comprehensive. When supplied, archetype is ignored for tier selection.
-      language: `en` keeps the value in words; `zh` converts to CJK-char-equiv
-        via the 1 word ≈ 2 CJK chars heuristic.
-
-    The number returned is a SOFT target — actual scoring is judge-driven and
-    longer articles routinely win at the top of the leaderboard. The writer
-    is told to "write to the depth the question demands" rather than hit this
-    number exactly.
-    """
-    base = length_ceiling(domain)
-    tier = resolve_depth_tier(archetype, depth_tier)
-    target_words = int(base * _DEPTH_TIER_MULTIPLIER[tier])
-    if language == "zh":
-        # CJK char-equivalent = 2 × words. Round to nearest 1000 for cleaner
-        # display in writer prompts.
-        target = int(round(target_words * 2, -3))
-    else:
-        target = int(round(target_words, -3))
-    return target
 
 
 def capel_directive(target_tokens: int) -> str:
@@ -380,44 +162,6 @@ def opening_directive() -> str:
     )
 
 
-# P2-Wave-2.5-D3 Greptile follow-up (PR #14): `finance` added so quantitative
-# finance tasks fire the math-preservation rule via the domain path (without
-# requiring LaTeX detection in the prompt). The rule body already advertises
-# "quantitative finance / engineering equations" coverage; this aligns the
-# domain tuple with the advertised behavior.
-_MATH_DOMAINS = ("science", "finance")
-# Heuristic: the prompt or any TOC title contains LaTeX-style math markup.
-# Three independent matchers to balance recall + precision against the
-# currency false-positive ("$5 vs $10 per unit"):
-#   1) `$...$` whose inner content has a LaTeX-specific char (`_` subscript,
-#      `^` superscript, `\\` macro, `{}` group). Catches `$F_i$`, `$\\sum$`,
-#      `$\\{x \\in \\mathbb{R}\\}$`.
-#   2) `$ident(args)$` function-call form: starts with letter, contains
-#      parentheses. Catches `$f(x)$`, `$P(X)$`, `$g(y, z)$`. Avoids `$5...$`
-#      because the inner must start with alpha.
-#   3) Bare LaTeX macros (`\\mathbb`, `\\int`, etc.) NOT wrapped in `$...$`.
-_MATH_MARKUP_RE = re.compile(
-    r"\$[^$\n]*[_^{}\\][^$\n]*\$"
-    r"|\$[A-Za-z_]+\([^$\n]*\)[^$\n]*\$"
-    r"|\\mathbb|\\mathcal|\\partial|\\int|\\sum|\\frac|\\Rightarrow"
-    r"|\\to\b",
-)
-
-
-def _is_math_bearing(domain: str, toc_titles: list, prompt: str = "") -> bool:
-    """P2-Wave-2.5-D3-F6: is this a math-heavy task?
-
-    Fires when:
-      - The runtime domain is explicitly math-bearing (`science`), OR
-      - Any TOC title contains LaTeX markup (`$...$`, `\\mathbb`, etc.), OR
-      - The prompt itself contains LaTeX markup.
-    """
-    if domain in _MATH_DOMAINS:
-        return True
-    blob = " ".join([prompt or ""] + [str(t or "") for t in toc_titles])
-    return bool(_MATH_MARKUP_RE.search(blob))
-
-
 def writer_system(
     archetype: str,
     domain: str,
@@ -426,8 +170,6 @@ def writer_system(
     *,
     task_id: int | None = None,
     suppress_dedup: bool = False,
-    depth_tier: str | None = None,
-    prompt: str = "",
 ) -> str:
     """Assemble the writer system prompt.
 
@@ -436,19 +178,9 @@ def writer_system(
     >= 0.50 AND task_id supplied), `_DEDUP_RULE` is omitted. The W9
     cross-reference identifies id=56 as the canonical fragile-density
     case; under the current rule no other W9 task triggers G.
-
-    P2-Wave-2.5-D3-F6: optional math-preservation directive appended when
-    the domain is `science` OR the prompt/TOC contains LaTeX markup. The
-    `prompt` kwarg is used for the LaTeX-detection heuristic; callers
-    without easy access to it may omit (defaults to "") and the directive
-    will still fire on math-bearing domains.
-
-    P2-Wave-2.5-D1: length governor flipped from "be dense, don't pad" to
-    "length serves substance" with archetype × depth_tier targets calibrated
-    against the #1 reference (60-80k words on EN deep/comprehensive). `depth_tier`
-    arg is the architect's plan-level signal; falls back to archetype default
-    when not supplied. See `length_target()` for the multiplier matrix.
     """
+    ceil = length_ceiling(domain)
+
     # P2-Wave-2-G auto-fire. Fail-soft when the W9 cache is missing
     # (cache.fragile_tasks returns False) so engine still runs cleanly on
     # machines without the DRB results tree.
@@ -472,46 +204,16 @@ def writer_system(
     if include_dedup:
         middle_rules.append(_DEDUP_RULE)
     middle_rules.extend([_INSIGHT_MIN, CLEANING_RESISTANT_RULE])
-    # P2-Wave-2.5-D3-F6: math-preservation rule fires when the domain is
-    # `science` / `finance` OR the prompt/TOC contains LaTeX markup.
-    if _is_math_bearing(domain, toc_titles, prompt):
-        middle_rules.append(_MATH_PRESERVATION_RULE)
-    # P2-Wave-2.5-D4-F7: reader-facing value-add (priority indicators,
-    # ranked tables, action lists) fires only on list-all + recommend
-    # archetypes. Other archetypes get the bare middle_block (the
-    # directive reads as filler outside its proper context).
-    if archetype in _VALUE_ADD_ARCHETYPES:
-        middle_rules.append(_VALUE_ADD_LIST_RECOMMEND_RULE)
     middle_block = "\n\n".join(middle_rules)
-
-    # P2-Wave-2.5-D1 length governor: archetype × depth_tier soft target.
-    # Greptile follow-up (PR #12): benchmark range is unit-aware so ZH and EN
-    # prompts don't carry contradictory signals (a ZH comprehensive task
-    # writing 117k CJK chars previously saw both "30,000-80,000" and "117,000"
-    # numbers in the same prompt block).
-    tier = resolve_depth_tier(archetype, depth_tier)
-    target = length_target(domain, archetype=archetype, depth_tier=tier, language=language)
-    if language == "zh":
-        length_unit = "CJK characters (≈ words × 2)"
-        benchmark_range = "60,000-160,000"  # 2× the EN word band (CJK heuristic)
-    else:
-        length_unit = "words"
-        benchmark_range = "30,000-80,000"
 
     return (
         f"You are an elite research-report writer. Language: {language}. "
         f"Write partner-grade analytical prose (not bullet dumps), with "
         f"headings/subheadings and comparison tables where they aid the reader."
-        f"\n\nLENGTH SERVES SUBSTANCE (P2-Wave-2.5-D1): write to the depth "
-        f"the question demands. Padding with restatement scores lower; "
-        f"under-covering the topic scores lower. The top-scoring research "
-        f"reports on this benchmark routinely run {benchmark_range} {length_unit} "
-        f"on deep / comprehensive questions — when the question calls for "
-        f"that depth, deliver it. The depth tier for this task is `{tier}`; "
-        f"the soft article-level target is approximately {target:,} "
-        f"{length_unit}. Sections and subsections may run longer or shorter "
-        f"individually so long as the article's substance is appropriate to "
-        f"the question."
+        f"\n\nCONCISENESS IS A FIRST-CLASS GOAL. The benchmark judge scored "
+        f"our prior articles 81% LOSS on Readability for being overlong, "
+        f"repetitive, and structurally inconsistent. Match the reference "
+        f"length conventions; do not pad."
         # AgentCPM-Report (arXiv 2602.06540) verbatim non-redundancy + meta-suppression directives
         f"\n\nYou should ensure that the content you write is not redundant "
         f"with other sections. Each section must advance the report; do NOT "
@@ -524,7 +226,10 @@ def writer_system(
         f"never exceed 3 levels of heading depth (e.g. 1, 1.1, 1.1.1 — never "
         f"1.1.1.1). Skip a subsection rather than break these limits."
         f"\n\n{opening_directive()}\n\n{middle_block}"
-        f"\n\nCover every section of the plan TOC verbatim: "
+        f"\n\nLENGTH GOVERNOR — HARD: target ≈{ceil} words total (EN reference "
+        f"median for this domain). HARD ceiling = {int(ceil * 1.15)} words; "
+        f"exceeding it actively HURTS the score. Be dense, not padded.\n\n"
+        f"Cover every section of the plan TOC verbatim: "
         f"{json.dumps(toc_titles, ensure_ascii=False)[:2000]}"
     )
 
@@ -647,21 +352,9 @@ def check_insight_minimums(text: str) -> dict:
 
 def citation_strip_audit(text: str) -> dict:
     """Item 19 auditor: strip [n]/[^n] + reference blocks; the body must remain
-    semantically complete and carry inline source NAMES.
-
-    P2-Wave-2.5-D3 Greptile follow-up (PR #14): retention is computed against
-    the body WITHOUT the References section (in both numerator and denominator)
-    so that F5's encouraged References-appendix doesn't dominate the retention
-    figure. The audit is really asking "does the body prose survive `[n]`
-    strip?" — the size of the references appendix is irrelevant to that
-    question and was previously dragging articles below the 0.9 threshold
-    purely on bibliography length. After this change the denominator is the
-    body-only character count, so retention reflects only the `[n]`-mark
-    contribution.
-    """
-    refs_pattern = r"\n#+\s*(References|参考文献|Sources)[\s\S]*$"
-    body_only = re.sub(refs_pattern, "", text, flags=re.I)
-    stripped = re.sub(r"\[\^?\d+\]", "", body_only)
+    semantically complete and carry inline source NAMES."""
+    stripped = re.sub(r"\[\^?\d+\]", "", text)
+    stripped = re.sub(r"\n#+\s*(References|参考文献|Sources)[\s\S]*$", "", stripped, flags=re.I)
     has_inline_names = bool(
         re.search(
             r"(according to|per |报告|estimates|analysis|数据|Source:|"
@@ -669,11 +362,9 @@ def citation_strip_audit(text: str) -> dict:
             stripped,
         )
     )
-    # crude completeness proxy: stripping `[n]` markers shouldn't drop body
-    # chars by more than ~10%. With references excluded from the denominator,
-    # a body with 300 markers in ~250k chars sees ~0.5% reduction — well
-    # above the 0.9 threshold. Threshold unchanged; only the denominator scope.
-    retention = len(stripped) / max(1, len(body_only))
+    # crude completeness proxy: stripping changed <8% of chars (source-name prose
+    # survives; bracket-dependent prose collapses)
+    retention = len(stripped) / max(1, len(text))
     return {
         "ok": has_inline_names and retention > 0.9,
         "retention": round(retention, 3),

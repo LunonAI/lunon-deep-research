@@ -31,16 +31,6 @@ def _capel_g_on() -> bool:
     return os.environ.get("DR_CAPEL_G", "on") != "off"
 
 
-# P2-Wave-2.5-D1 Greptile follow-up (PR #12): hard cap for a single writer
-# LLM call. Opus 4.7's per-call output budget is comfortably > 16k tokens with
-# the extended-output beta; 16000 leaves headroom for system prompt overhead
-# and matches the SECTION_BUDGET_CEILING in init_format.py (9500 × 1.4 ≈ 13300,
-# well within this cap). Anthropic anthropic_client.py already accepts up to
-# 32000, so this is a conservative middle ground that pairs with the scaffold
-# clamp to guarantee validator-reachable sections.
-WRITER_CALL_TOKEN_CAP = 16_000
-
-
 def outline_units(plan):
     """Flatten the Architect TOC into ordered section units."""
     units = []
@@ -75,19 +65,13 @@ def write_opening(plan, prompt, language, archetype, domain, digest, *, task_id=
     not worth it for such a small target. `task_id` propagates for parity
     with `write_section` but the opening's `_DEDUP_RULE` decision matches
     section behavior (G suppresses there too for consistency).
-
-    P2-Wave-2.5-D1: `report_depth_tier` flows from architect plan → writer_system
-    so the LENGTH SERVES SUBSTANCE directive emits the correct target.
     """
-    depth_tier = plan.get("report_depth_tier")
     sys = wr.writer_system(
         archetype,
         domain,
         language,
         [s.get("title") for s in plan.get("report_toc", [])],
         task_id=task_id,
-        depth_tier=depth_tier,
-        prompt=prompt,
     )
     user = (
         f"PROMPT ({language}):\n{prompt}\n\nREPORT TITLE: "
@@ -129,8 +113,6 @@ def write_section(
         language,
         [s.get("title") for s in plan.get("report_toc", [])],
         task_id=task_id,
-        depth_tier=plan.get("report_depth_tier"),
-        prompt=prompt,
     )
 
     capel_block = ""
@@ -149,30 +131,14 @@ def write_section(
         f"{json.dumps(prior_titles, ensure_ascii=False)}\n\n"
         f"ACCEPTANCE CRITERIA THIS SECTION MUST SATISFY:\n"
         f"{json.dumps(_acs_for_section(plan, sid), ensure_ascii=False)}\n\n"
-        f"EVIDENCE FOR THIS SECTION ONLY (cite by inline source NAME; APPEND "
-        f"a numbered `[n]` marker after each citing sentence — the sentence "
-        f"must remain semantically complete without the marker, but the "
-        f"marker carries the citation-density signal the judge rewards):\n"
+        f"EVIDENCE FOR THIS SECTION ONLY (cite by inline source NAME; you may "
+        f"also add a numeric [n] but the sentence must stand without it):\n"
         f"{json.dumps(ev_view, ensure_ascii=False)[:42000]}\n"
         f"{capel_block}"
     )
     if feedback:
         user += f"\nREVISION FEEDBACK — fix these and integrate the cited evidence inline:\n{feedback}\n"
-    # P2-Wave-2.5-D1 Greptile follow-up (PR #12, second round): wire the
-    # WRITER_CALL_TOKEN_CAP constant into the actual llm.call so the cap
-    # documented in init_format / tests / module-level comments matches
-    # production behavior. Pre-fix the constant existed but the call still
-    # used the legacy literal 7000 — for a section budgeted at
-    # SECTION_BUDGET_CEILING=9500, the validator's 0.7× pass-line is 6650,
-    # within the literal 7000 by only 350 tokens. Any future bump to the
-    # ceiling (e.g. 10001) would push the pass-line above 7000 and
-    # systematically fail validation. Scaling max_tokens with target_tokens
-    # restores the documented relationship.
-    if target_tokens and target_tokens > 0:
-        section_max_tokens = min(WRITER_CALL_TOKEN_CAP, max(7_000, int(target_tokens * 1.4)))
-    else:
-        section_max_tokens = 7_000
-    raw = llm.call("writer", user, system=sys, max_tokens=section_max_tokens, note=f"writer.sec.{sid}")
+    raw = llm.call("writer", user, system=sys, max_tokens=7000, note=f"writer.sec.{sid}")
     if capel_active:
         text, stats = strip_capel_markers(raw)
         return text, stats
