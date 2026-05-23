@@ -16,6 +16,7 @@ from .._env import get, log_usage
 _KEY = get("OPENAI_API_KEY")
 _BASE = (get("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
 _URL = f"{_BASE}/chat/completions"
+_EMBED_URL = f"{_BASE}/embeddings"
 # Thread-safe Session reuses TCP+TLS connections (50-200ms saved per call).
 # Default pool_maxsize=10 was causing "Connection pool is full, discarding"
 # warnings at workers=20 (50+ concurrent calls). Bumped to 100 on BOTH http
@@ -85,3 +86,57 @@ def raw_call(
             continue
         raise RuntimeError(f"OpenAI HTTP {r.status_code}: {r.text[:400]}")
     raise RuntimeError(f"OpenAI {model} failed after {max_retries} retries: {last}")
+
+
+def embed(model: str, texts: list[str], *, max_retries: int = 3, timeout: int = 120, note: str = "", batch: int = 100):
+    """Return one embedding vector per input text. Order preserved.
+
+    Uses OpenAI's `/v1/embeddings` endpoint. Splits long input lists into
+    `batch`-sized chunks to keep payload size bounded; OpenAI's hard limit is
+    higher (~2048 inputs / request) but a smaller batch keeps timeouts
+    tractable and gives finer-grained retry granularity. Each text should be
+    under ~8192 tokens for text-embedding-3-small (we recommend ≤500 chars).
+
+    Retries on 429/5xx with exponential backoff. Raises RuntimeError if any
+    batch exhausts retries — the caller should fail-soft so embedding outages
+    don't break the pipeline.
+    """
+    if not _KEY:
+        raise RuntimeError("OPENAI_API_KEY missing from .env")
+    if not texts:
+        return []
+    headers = {"Authorization": f"Bearer {_KEY}", "Content-Type": "application/json"}
+
+    out: list[list[float]] = []
+    for i in range(0, len(texts), batch):
+        chunk = texts[i : i + batch]
+        # OpenAI rejects empty strings; replace with a single space so the
+        # index ordering still maps cleanly back to caller's list.
+        chunk = [t if (t or "").strip() else " " for t in chunk]
+        payload = {"model": model, "input": chunk}
+        last = ""
+        succeeded = False
+        for attempt in range(max_retries):
+            try:
+                r = _SESSION.post(_EMBED_URL, headers=headers, json=payload, timeout=timeout)
+            except Exception as e:  # noqa: BLE001
+                last = f"{type(e).__name__}: {e}"
+                time.sleep(2**attempt)
+                continue
+            if r.status_code == 200:
+                data = r.json()
+                usage = data.get("usage") or {}
+                log_usage(data.get("model") or model, usage, note=note or "embed")
+                # Sort by `index` to preserve caller's order across batch retries.
+                items = sorted(data.get("data", []), key=lambda x: x.get("index", 0))
+                out.extend([item.get("embedding", []) for item in items])
+                succeeded = True
+                break
+            if r.status_code in (429, 500, 502, 503, 504):
+                last = f"HTTP {r.status_code}: {r.text[:200]}"
+                time.sleep(min(2**attempt * 3, 45))
+                continue
+            raise RuntimeError(f"OpenAI embed HTTP {r.status_code}: {r.text[:400]}")
+        if not succeeded:
+            raise RuntimeError(f"OpenAI embed {model} failed after {max_retries} retries: {last}")
+    return out
