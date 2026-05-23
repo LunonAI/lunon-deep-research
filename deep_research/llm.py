@@ -133,6 +133,27 @@ def extract_json(text):
     raise ValueError(f"No JSON found in response: {text[:300]}")
 
 
+def embed(role: str, texts: list[str], *, note: str = "", max_retries: int = 3, timeout: int = 120, batch: int = 100):
+    """Return one embedding vector per input text. Order preserved.
+
+    Routes by model id like `call()` does, but currently only OpenAI's
+    embeddings endpoint is wired. To add another provider (Cohere/Voyage/etc.),
+    extend `_provider()` (e.g. an `"emb/"` prefix convention) and add a
+    matching client's `embed()` function — the dispatch shape mirrors `call()`.
+    """
+    model = config.model_for(role)
+    if not model:
+        raise RuntimeError(f"embedder role {role!r} has no model configured")
+    # Only OpenAI embeddings are wired today. Identify by model id heuristic:
+    # text-embedding-* is OpenAI's family. Other prefixes are not yet supported.
+    if not model.startswith("text-embedding-"):
+        raise NotImplementedError(
+            f"embed() only supports OpenAI text-embedding-* models today (got {model!r}). "
+            f"To add Cohere/Voyage/etc., extend deep_research/llm.py and a new client module."
+        )
+    return openai_client.embed(model, texts, max_retries=max_retries, timeout=timeout, note=note or role, batch=batch)
+
+
 def call_json(
     role,
     user,
