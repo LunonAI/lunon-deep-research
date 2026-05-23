@@ -22,7 +22,12 @@ from ._capel_strip import strip_capel_markers
 
 
 def _capel_g_on() -> bool:
-    return os.environ.get("DR_CAPEL_G", "off") != "off"
+    # P2-Wave-2 hardcoded post-sanity-4 (2026-05-23: paired ΔO +0.0034 vs B0
+    # on n=3, 0 marker leaks, ΔReadability +0.0213 firing as designed across
+    # both EN+ZH). `DR_CAPEL_G=off` retained as a kill-switch only — set to
+    # disable CAPEL countdown markers + G's W9-readability dedup-rule
+    # suppression in one go (debug / fall-back path).
+    return os.environ.get("DR_CAPEL_G", "on") != "off"
 
 
 def outline_units(plan):

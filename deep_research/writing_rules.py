@@ -189,7 +189,8 @@ def writer_system(
         not suppress_dedup
         and archetype == "explain-mechanism"
         and task_id is not None
-        and os.environ.get("DR_CAPEL_G", "off") != "off"
+        # P2-Wave-2 hardcoded; DR_CAPEL_G=off is now the kill-switch only.
+        and os.environ.get("DR_CAPEL_G", "on") != "off"
     ):
         try:
             from .cache import fragile_tasks as _ft
