@@ -60,6 +60,21 @@ def test_normalize_url_case_insensitive_host():
     assert _normalize_url("HTTPS://NEWS.YCOMBINATOR.com/item") == _normalize_url("https://news.ycombinator.com/item")
 
 
+def test_normalize_url_preserves_path_case():
+    """Per RFC 3986, URL paths are case-sensitive. A CMS that uses mixed-case
+    document IDs like `/Article-XYZ` vs `/article-xyz` is referencing
+    DIFFERENT documents — we must not silently merge them."""
+    assert _normalize_url("https://example.com/Article-XYZ") != _normalize_url("https://example.com/article-xyz")
+
+
+def test_normalize_url_preserves_query_value_case():
+    """Query VALUES are also case-sensitive per RFC. `id=ArticleABC` is a
+    different content-id than `id=articleabc` and must not collide."""
+    assert _normalize_url("https://example.com/page?id=ArticleABC") != _normalize_url(
+        "https://example.com/page?id=articleabc"
+    )
+
+
 # --- _normalize_title ------------------------------------------------------
 
 
