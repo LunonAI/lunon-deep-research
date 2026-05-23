@@ -35,58 +35,60 @@ def _setup_w9(monkeypatch, tmp_path: pathlib.Path) -> None:
 _DEDUP_FINGERPRINT = "CROSS-SECTION NON-REDUNDANCY"
 
 
-def test_default_off_keeps_dedup_rule(monkeypatch, tmp_path):
-    """When DR_CAPEL_G is unset (default off), G never fires."""
+def test_kill_switch_off_keeps_dedup_rule(monkeypatch, tmp_path):
+    """`DR_CAPEL_G=off` is the post-hardcode kill-switch: G never fires."""
     _setup_w9(monkeypatch, tmp_path)
-    monkeypatch.delenv("DR_CAPEL_G", raising=False)
+    monkeypatch.setenv("DR_CAPEL_G", "off")
     sys_prompt = wr.writer_system("explain-mechanism", "default", "en", ["A", "B"], task_id=56)
     assert _DEDUP_FINGERPRINT in sys_prompt
 
 
-def test_flag_on_id_56_triggers_suppression(monkeypatch, tmp_path):
-    """Canonical fragile-density case: id=56 + explain-mechanism + flag on."""
+def test_default_id_56_triggers_suppression(monkeypatch, tmp_path):
+    """Canonical fragile-density case: id=56 + explain-mechanism. Post-hardcode
+    the flag defaults to `on`, so unsetting it must STILL trigger G."""
     _setup_w9(monkeypatch, tmp_path)
-    monkeypatch.setenv("DR_CAPEL_G", "on")
+    monkeypatch.delenv("DR_CAPEL_G", raising=False)
     sys_prompt = wr.writer_system("explain-mechanism", "default", "en", ["A", "B"], task_id=56)
     assert _DEDUP_FINGERPRINT not in sys_prompt
 
 
-def test_flag_on_wrong_archetype_keeps_dedup(monkeypatch, tmp_path):
+def test_default_wrong_archetype_keeps_dedup(monkeypatch, tmp_path):
     """list-all archetype must NOT trigger G even at high readability."""
     _setup_w9(monkeypatch, tmp_path)
-    monkeypatch.setenv("DR_CAPEL_G", "on")
+    monkeypatch.delenv("DR_CAPEL_G", raising=False)
     sys_prompt = wr.writer_system("list-all", "default", "en", ["A", "B"], task_id=29)
     assert _DEDUP_FINGERPRINT in sys_prompt
 
 
-def test_flag_on_low_readability_keeps_dedup(monkeypatch, tmp_path):
+def test_default_low_readability_keeps_dedup(monkeypatch, tmp_path):
     """explain-mechanism task with W9 read below threshold keeps dedup."""
     _setup_w9(monkeypatch, tmp_path)
-    monkeypatch.setenv("DR_CAPEL_G", "on")
+    monkeypatch.delenv("DR_CAPEL_G", raising=False)
     sys_prompt = wr.writer_system("explain-mechanism", "default", "en", ["A", "B"], task_id=91)
     assert _DEDUP_FINGERPRINT in sys_prompt
 
 
 def test_explicit_suppress_dedup_overrides_archetype_and_id(monkeypatch, tmp_path):
-    """suppress_dedup=True forces omission regardless of archetype/id."""
+    """suppress_dedup=True forces omission regardless of archetype/id and
+    works even with the kill-switch on (the explicit arg wins)."""
     _setup_w9(monkeypatch, tmp_path)
-    monkeypatch.delenv("DR_CAPEL_G", raising=False)
+    monkeypatch.setenv("DR_CAPEL_G", "off")  # kill-switch should be overridden
     sys_prompt = wr.writer_system("list-all", "default", "en", ["A", "B"], task_id=91, suppress_dedup=True)
     assert _DEDUP_FINGERPRINT not in sys_prompt
 
 
 def test_no_task_id_no_suppression(monkeypatch, tmp_path):
-    """Missing task_id (e.g. smoke run) MUST NOT trigger G even with flag on."""
+    """Missing task_id (e.g. smoke run) MUST NOT trigger G even at default-on."""
     _setup_w9(monkeypatch, tmp_path)
-    monkeypatch.setenv("DR_CAPEL_G", "on")
+    monkeypatch.delenv("DR_CAPEL_G", raising=False)
     sys_prompt = wr.writer_system("explain-mechanism", "default", "en", ["A", "B"], task_id=None)
     assert _DEDUP_FINGERPRINT in sys_prompt
 
 
 def test_missing_w9_cache_falls_back_to_no_suppression(monkeypatch, tmp_path):
-    """If W9 results file is missing, G silently disables."""
+    """If W9 results file is missing, G silently disables (cache empty)."""
     monkeypatch.setenv("DR_W9_RESULTS", str(tmp_path / "missing.jsonl"))
-    monkeypatch.setenv("DR_CAPEL_G", "on")
+    monkeypatch.delenv("DR_CAPEL_G", raising=False)
     fragile_tasks._reset_for_tests()
     sys_prompt = wr.writer_system("explain-mechanism", "default", "en", ["A", "B"], task_id=56)
     assert _DEDUP_FINGERPRINT in sys_prompt

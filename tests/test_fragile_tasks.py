@@ -147,12 +147,12 @@ def test_env_override_takes_precedence_over_snapshot(monkeypatch, tmp_path):
     assert fragile_tasks.is_fragile_density_task(56) is False
 
 
-def test_warning_emitted_when_flag_on_but_cache_empty(monkeypatch, tmp_path, capsys):
-    """G enabled + cache empty must produce a stderr warning so dev10
+def test_warning_emitted_when_default_on_but_cache_empty(monkeypatch, tmp_path, capsys):
+    """G is hardcoded-on; cache empty must produce a stderr warning so
     operators notice instead of seeing silent g_dedup_suppressed=false.
     """
     monkeypatch.setenv("DR_W9_RESULTS", str(tmp_path / "nope.jsonl"))
-    monkeypatch.setenv("DR_CAPEL_G", "on")
+    monkeypatch.delenv("DR_CAPEL_G", raising=False)  # default "on"
     fragile_tasks._reset_for_tests()
 
     fragile_tasks.load_w9_readability()
@@ -161,9 +161,12 @@ def test_warning_emitted_when_flag_on_but_cache_empty(monkeypatch, tmp_path, cap
     assert "empty" in captured.err.lower()
 
 
-def test_no_warning_when_flag_off(monkeypatch, tmp_path, capsys):
+def test_no_warning_when_kill_switch_off(monkeypatch, tmp_path, capsys):
+    """`DR_CAPEL_G=off` (kill-switch) suppresses the empty-cache warning —
+    operators have intentionally disabled G so silent no-op is expected.
+    """
     monkeypatch.setenv("DR_W9_RESULTS", str(tmp_path / "nope.jsonl"))
-    monkeypatch.delenv("DR_CAPEL_G", raising=False)
+    monkeypatch.setenv("DR_CAPEL_G", "off")
     fragile_tasks._reset_for_tests()
 
     fragile_tasks.load_w9_readability()
@@ -173,7 +176,7 @@ def test_no_warning_when_flag_off(monkeypatch, tmp_path, capsys):
 
 def test_warning_emitted_once_per_session(monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("DR_W9_RESULTS", str(tmp_path / "nope.jsonl"))
-    monkeypatch.setenv("DR_CAPEL_G", "on")
+    monkeypatch.delenv("DR_CAPEL_G", raising=False)  # default "on"
     fragile_tasks._reset_for_tests()
 
     fragile_tasks.load_w9_readability()
