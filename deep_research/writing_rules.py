@@ -328,12 +328,18 @@ def writer_system(
     middle_block = "\n\n".join(middle_rules)
 
     # P2-Wave-2.5-D1 length governor: archetype × depth_tier soft target.
+    # Greptile follow-up (PR #12): benchmark range is unit-aware so ZH and EN
+    # prompts don't carry contradictory signals (a ZH comprehensive task
+    # writing 117k CJK chars previously saw both "30,000-80,000" and "117,000"
+    # numbers in the same prompt block).
     tier = resolve_depth_tier(archetype, depth_tier)
     target = length_target(domain, archetype=archetype, depth_tier=tier, language=language)
     if language == "zh":
         length_unit = "CJK characters (≈ words × 2)"
+        benchmark_range = "60,000-160,000"  # 2× the EN word band (CJK heuristic)
     else:
         length_unit = "words"
+        benchmark_range = "30,000-80,000"
 
     return (
         f"You are an elite research-report writer. Language: {language}. "
@@ -342,7 +348,7 @@ def writer_system(
         f"\n\nLENGTH SERVES SUBSTANCE (P2-Wave-2.5-D1): write to the depth "
         f"the question demands. Padding with restatement scores lower; "
         f"under-covering the topic scores lower. The top-scoring research "
-        f"reports on this benchmark routinely run 30,000-80,000 {length_unit} "
+        f"reports on this benchmark routinely run {benchmark_range} {length_unit} "
         f"on deep / comprehensive questions — when the question calls for "
         f"that depth, deliver it. The depth tier for this task is `{tier}`; "
         f"the soft article-level target is approximately {target:,} "

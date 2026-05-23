@@ -111,7 +111,11 @@ def build(
     return plan
 
 
-_VALID_DEPTH_TIERS = ("compact", "standard", "deep", "comprehensive")
+# P2-Wave-2.5-D1 Greptile follow-up (PR #12): single source of truth for the
+# tier vocabulary lives in `writing_rules._VALID_DEPTH_TIERS` (derived from
+# `_DEPTH_TIER_MULTIPLIER`). Re-importing here so any future tier addition
+# flows into the architect plan-normalization guard automatically.
+from ..writing_rules import _VALID_DEPTH_TIERS  # noqa: E402
 
 
 def _normalize(plan: dict) -> None:
