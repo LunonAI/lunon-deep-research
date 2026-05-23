@@ -40,16 +40,24 @@ AFTER `Generated Article 📖`.
 from __future__ import annotations
 
 import json
+
+# Greptile follow-up (PR #16): paths resolved repo-relative so this script
+# runs from any clone / CI. The W9 raw_results path remains overrideable via
+# DR_W9_RESULTS to support the canonical DRB tree at /home/connor/dev/...
+# on the dev box.
+import os as _os
 import re
 import statistics
 from collections import Counter
 from pathlib import Path
 
-REFERENCE_DIR = Path("/home/connor/dev/lunon-deep-research/reference-dr-questions")
-P1_FINAL = Path("/home/connor/dev/lunon-deep-research/p1_artifacts/p1_final.jsonl")
-W9_RAW = Path("/home/connor/dev/deep_research_bench/results/race/lunon-p1-2026-05-21-final/raw_results.jsonl")
-OUT_MD = Path("/home/connor/dev/lunon-deep-research/p2_artifacts/reference_style_profile.md")
-OUT_JSONL = Path("/home/connor/dev/lunon-deep-research/p2_artifacts/reference_profile.jsonl")
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+REFERENCE_DIR = _REPO_ROOT / "reference-dr-questions"
+P1_FINAL = _REPO_ROOT / "p1_artifacts" / "p1_final.jsonl"
+_DEFAULT_W9 = "/home/connor/dev/deep_research_bench/results/race/lunon-p1-2026-05-21-final/raw_results.jsonl"
+W9_RAW = Path(_os.environ.get("DR_W9_RESULTS", _DEFAULT_W9))
+OUT_MD = _REPO_ROOT / "p2_artifacts" / "reference_style_profile.md"
+OUT_JSONL = _REPO_ROOT / "p2_artifacts" / "reference_profile.jsonl"
 
 # Regex toolkit -------------------------------------------------------------
 
