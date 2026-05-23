@@ -64,7 +64,7 @@ _EMBED_TEXT_PREFIX_CHARS = 500
 _VALID_MODES = ("off", "url", "url+embedding")
 
 
-def _normalize_url(url: str) -> str:
+def _normalize_url(url: object) -> str:
     """Canonicalize a URL for D4 cluster-key comparison.
 
     Per RFC 3986, scheme and host are case-insensitive; path and query
@@ -77,8 +77,30 @@ def _normalize_url(url: str) -> str:
     Also strips: scheme (we re-add https), trailing path slash, all query
     params except `id=` and `q=` (semantic markers for content-id and
     search-query), URL fragment. Returns "" for empty input.
+
+    Annotated `url: object` (not `str`) because retrieval specialists are
+    not strictly typed at the boundary: this function MUST tolerate list /
+    tuple (multi-source URL merge) and other junk types without raising.
     """
     if not url:
+        return ""
+    # Some retrieval specialists occasionally emit a list of URLs in a single
+    # `url` field (multi-source merge). Coerce to the first non-empty string
+    # so dedup keeps running rather than crashing the whole pipeline.
+    if isinstance(url, (list, tuple)):
+        # WARN so future occurrences surface in pipeline logs. The original
+        # crash (W2 sanity-4 id=83, 2026-05-23) was hard to diagnose because
+        # nothing upstream of the AttributeError indicated who emitted the
+        # list — logging here lets the responsible specialist be tracked down
+        # without re-instrumenting.
+        _LOG.warning(
+            "evidence_dedup: list-typed url field coerced to first string entry: %r",
+            url,
+        )
+        url = next((u for u in url if isinstance(u, str) and u.strip()), "")
+        if not url:
+            return ""
+    if not isinstance(url, str):
         return ""
     try:
         p = urlparse(url.strip())

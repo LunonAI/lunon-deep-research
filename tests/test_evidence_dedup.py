@@ -56,6 +56,53 @@ def test_normalize_url_empty_returns_empty():
     assert _normalize_url("") == ""
 
 
+def test_normalize_url_list_input_picks_first_string():
+    """Some retrieval specialists emit a list of URLs in a single `url`
+    field (multi-source merge). Coerce to the first non-empty string
+    rather than crashing the pipeline with `'list' object has no attribute
+    'strip'`. Surfaced on id=83 during W2 sanity-4 (2026-05-23).
+    """
+    out = _normalize_url(["https://Example.com/A", "https://other.com/B"])
+    assert out == _normalize_url("https://example.com/A")
+
+
+def test_normalize_url_list_with_only_empty_strings_returns_empty():
+    assert _normalize_url(["", "   ", ""]) == ""
+
+
+def test_normalize_url_list_input_skips_non_string_entries():
+    out = _normalize_url([None, 123, "https://example.com/x"])
+    assert out == _normalize_url("https://example.com/x")
+
+
+def test_normalize_url_non_string_non_list_returns_empty():
+    """Defensive: dict or int slipping through MUST return "" not raise."""
+    assert _normalize_url({"href": "x"}) == ""
+    assert _normalize_url(42) == ""
+
+
+def test_normalize_url_list_input_logs_warning(caplog):
+    """List-coerce path must emit a WARNING so operators can track down the
+    specialist responsible without re-instrumenting. Greptile PR #10 followup.
+    """
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="deep_research.pipeline.evidence_dedup"):
+        _normalize_url(["https://example.com/A", "https://other.com/B"])
+    assert any("list-typed url" in rec.message for rec in caplog.records)
+
+
+def test_normalize_url_string_input_emits_no_warning(caplog):
+    """The warning is reserved for the list-coerce path — happy-path string
+    inputs MUST NOT spam logs (called millions of times across W-runs).
+    """
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="deep_research.pipeline.evidence_dedup"):
+        _normalize_url("https://example.com/A")
+    assert not caplog.records
+
+
 def test_normalize_url_case_insensitive_host():
     assert _normalize_url("HTTPS://NEWS.YCOMBINATOR.com/item") == _normalize_url("https://news.ycombinator.com/item")
 
