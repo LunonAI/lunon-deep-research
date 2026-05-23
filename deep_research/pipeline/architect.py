@@ -45,7 +45,7 @@ criteria into a STRICT JSON research plan. Output ONLY this JSON object:
  "report_title": str,
  "report_toc": [ {"id": "S1", "title": str,
     "subsections": [ {"id": "S1.1", "title": str} ... 2-5 ],
-    "depth_target": "deep"|"broad", "depth_rationale": str } ... <=8 ],
+    "depth_target": "deep"|"broad", "depth_rationale": str } ... 5-14 ],
  "acceptance_criteria": [ {"id": "AC1", "category":
     "content"|"source"|"structure"|"depth"|"format"|"exclusion",
     "text": str, "rationale": str, "verification": str,
@@ -64,7 +64,21 @@ HARD RULES:
   subsection titles (structural anchoring → instruction-following).
 - 24-32 queries AND 24-32 acceptance_criteria. Every query maps to >=1 TOC
   section. Distribute query `type` to cover all needed analytical functions.
-- report_toc <=8 top-level; each 2-5 subsections. Match the prompt's language."""
+- report_toc has 5-14 top-level sections; each 2-5 subsections. Match the
+  prompt's language.
+
+SECTION COUNT GUIDANCE (P2-Wave-2.5-D2-F4, calibrated against the #1 reference
+leaderboard corpus — top-scoring research reports average 12-14 top-level
+sections; our W9 baseline averaged 3-9, well below the leaderboard envelope):
+- compact / standard scope (focused question, single-entity recommend,
+  short-list list-all): 5-7 top-level sections.
+- deep scope (multi-entity compare, explain-mechanism with full causal
+  chains, 10+ item list-all): 8-12 top-level sections.
+- comprehensive scope (canonical-survey, theoretical research review,
+  open-ended exploration): 12-14 top-level sections.
+Pick the section count that genuinely serves the question. Do not pad with
+"misc" or "appendix"-style filler sections — every section must advance
+analytical coverage."""
 
 
 def build(
