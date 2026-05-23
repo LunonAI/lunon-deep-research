@@ -8,7 +8,11 @@ Distinct from the Architect plan: Architect plans what to RESEARCH; init_format
 plans what the REPORT looks like structurally. The writer fills this scaffold;
 the validator checks against it (every section >= 0.7 of expected length).
 
-Length budgeting respects the per-domain governor (writing_rules.length_ceiling).
+P2-Wave-2.5-D1: length budgeting uses `writing_rules.length_target()` with
+the architect-emitted `report_depth_tier` (compact/standard/deep/comprehensive),
+falling back to archetype-default when the plan doesn't specify. Total target
+tokens are now archetype × depth_tier scaled — see
+p2_artifacts/qianfan_findings.md §F1 for the calibration.
 """
 
 from dataclasses import dataclass
@@ -26,6 +30,7 @@ class InitFormatInput:
     plan: dict  # from architect
     language: str
     domain: str
+    archetype: str = ""
 
 
 @dataclass
@@ -50,11 +55,27 @@ def run(inp: InitFormatInput) -> InitFormatOutput:
     if not toc:
         return InitFormatOutput(scaffold=Scaffold(sections=[], total_target_tokens=0))
 
-    # Domain length governor → median word_len from reference_catalog.jsonl.
-    median_words = wr.length_ceiling(inp.domain)
-    total_tokens = int(median_words / _WORDS_PER_TOKEN)
+    # P2-Wave-2.5-D1 article-level target. The architect MAY emit
+    # `report_depth_tier`; if not, archetype-default applies. ZH adjusts
+    # the unit from words to CJK-char-equivalents inside length_target().
+    plan_tier = inp.plan.get("report_depth_tier")
+    target_units = wr.length_target(
+        inp.domain,
+        archetype=inp.archetype,
+        depth_tier=plan_tier,
+        language=inp.language,
+    )
+    # Convert article-level units back to tokens for the per-section budget.
+    # For EN: units == words. For ZH: units == CJK chars ≈ 2 words.
+    # Tokens ≈ words / _WORDS_PER_TOKEN ≈ 1.33 × words.
+    if inp.language == "zh":
+        equiv_words = target_units / 2
+    else:
+        equiv_words = target_units
+    total_tokens = int(equiv_words / _WORDS_PER_TOKEN)
 
-    # Depth-weighted allocation: 'deep' sections get 1.5x, 'broad' 1.0x.
+    # Depth-weighted per-section allocation: architect's per-section
+    # `depth_target` ("deep" vs "broad") still scales individual section share.
     weights = [1.5 if s.get("depth_target") == "deep" else 1.0 for s in toc]
     weight_sum = sum(weights) or len(toc)
 

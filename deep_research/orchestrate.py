@@ -156,7 +156,14 @@ def from_plan(ctx: dict, query: str, language: str, task_id: int | None = None) 
         ),
     ).guide
     s.scaffold = _phase(
-        "init_format", init_format.run, init_format.InitFormatInput(plan=s.plan, language=language, domain=s.domain)
+        "init_format",
+        init_format.run,
+        init_format.InitFormatInput(
+            plan=s.plan,
+            language=language,
+            domain=s.domain,
+            archetype=s.archetype.get("archetype", ""),
+        ),
     ).scaffold
 
     # Research dispatch (W2)
