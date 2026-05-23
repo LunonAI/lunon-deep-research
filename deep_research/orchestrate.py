@@ -285,7 +285,7 @@ def _run_section_loop(s: PipelineState, query, language):
     # fragile-density auto-suppression of `_DEDUP_RULE` fires. The actual prompt
     # change is made inside writer_system; this side-channel only mirrors that
     # decision into drift logs for dev10 attribution.
-    if os.environ.get("DR_CAPEL_G", "off") != "off" and archetype == "explain-mechanism" and s.task_id is not None:
+    if os.environ.get("DR_CAPEL_G", "on") != "off" and archetype == "explain-mechanism" and s.task_id is not None:
         try:
             from .cache import fragile_tasks as _ft
 

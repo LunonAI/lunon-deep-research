@@ -94,7 +94,10 @@ def _emit_empty_warning_if_active() -> None:
     global _EMPTY_WARNING_EMITTED
     if _EMPTY_WARNING_EMITTED:
         return
-    if os.environ.get("DR_CAPEL_G", "off") == "off":
+    # P2-Wave-2 hardcoded post-sanity-4. The warning fires whenever G *could*
+    # be running (default "on") but the cache loaded empty — that's the
+    # silent-no-op scenario operators need to see. Only "off" suppresses it.
+    if os.environ.get("DR_CAPEL_G", "on") == "off":
         return
     override = os.environ.get("DR_W9_RESULTS", "")
     msg = (
