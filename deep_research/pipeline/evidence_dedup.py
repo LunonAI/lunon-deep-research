@@ -233,7 +233,12 @@ def _build_similarity_pairs_above(embeddings: list[list[float]], threshold: floa
         return [set() for _ in range(n)]
 
     if _NUMPY_AVAILABLE:
-        emb = _np.asarray(embeddings, dtype=_np.float32)
+        # Use float64 (numpy default) to match the pure-Python fallback's
+        # precision exactly. Pairs near the 0.85 threshold could otherwise
+        # cluster differently between backends if float32 quantization tips
+        # them across the boundary — bad for paired-dev10 reproducibility.
+        # Memory cost at n=300 with 1536-dim vectors is ~3.5 MB either way.
+        emb = _np.asarray(embeddings, dtype=_np.float64)
         norms = _np.linalg.norm(emb, axis=1)
         # Guard against zero-norm rows (pathological; doesn't happen with
         # text-embedding-3-small but defensive against future model swaps).
