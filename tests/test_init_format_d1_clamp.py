@@ -68,3 +68,115 @@ def test_min_floor_still_respected():
     out = run(InitFormatInput(plan=_plan("compact", n_sections=14), language="en", domain="default"))
     for sec in out.scaffold.sections:
         assert sec.expected_length_tokens >= 800
+
+
+def test_write_section_uses_writer_call_token_cap(monkeypatch):
+    """P2-Wave-2.5-D1 Greptile follow-up (PR #12, second round): the actual
+    llm.call inside write_section MUST use the WRITER_CALL_TOKEN_CAP constant
+    (scaled with target_tokens), not the legacy literal 7000. Pre-fix the
+    constant existed but the call used a hardcoded 7000 → real safety
+    margin was only 350 tokens vs validator pass-line, not the documented
+    16k headroom."""
+    from deep_research.pipeline import writer as writer_mod
+
+    captured: dict = {}
+
+    def fake_llm_call(role, user, *, system="", max_tokens=8000, note="", **kw):
+        captured["max_tokens"] = max_tokens
+        return "stub section text"
+
+    monkeypatch.setattr(writer_mod.llm, "call", fake_llm_call)
+    monkeypatch.setenv("DR_CAPEL_G", "off")  # quiet CAPEL block
+
+    class _StubBank:
+        def for_section(self, sid):
+            return []
+
+    unit = {"id": "S1", "title": "Section", "subs": [], "depth": "deep"}
+    plan = {"report_toc": [{"id": "S1", "title": "Section"}], "acceptance_criteria": []}
+    writer_mod.write_section(
+        unit,
+        plan,
+        _StubBank(),
+        prompt="q",
+        language="en",
+        archetype="explain-mechanism",
+        domain="default",
+        prior_titles=["Section"],
+        target_tokens=SECTION_BUDGET_CEILING,
+    )
+    # Dynamic cap: max(7000, int(9500 * 1.4)) = 13300 — well above the legacy
+    # 7000. Confirms the WRITER_CALL_TOKEN_CAP constant is actually wired
+    # into the llm.call invocation, not just declared in module scope.
+    assert captured["max_tokens"] > 7_000
+    assert captured["max_tokens"] <= WRITER_CALL_TOKEN_CAP
+    assert captured["max_tokens"] == int(SECTION_BUDGET_CEILING * 1.4)
+
+
+def test_write_section_max_tokens_clamped_to_writer_call_cap(monkeypatch):
+    """Very large target_tokens must not exceed WRITER_CALL_TOKEN_CAP — a
+    future SECTION_BUDGET_CEILING bump can't accidentally push max_tokens
+    past Opus's per-call output budget."""
+    from deep_research.pipeline import writer as writer_mod
+
+    captured: dict = {}
+
+    def fake_llm_call(role, user, *, system="", max_tokens=8000, note="", **kw):
+        captured["max_tokens"] = max_tokens
+        return "stub"
+
+    monkeypatch.setattr(writer_mod.llm, "call", fake_llm_call)
+    monkeypatch.setenv("DR_CAPEL_G", "off")
+
+    class _StubBank:
+        def for_section(self, sid):
+            return []
+
+    unit = {"id": "S1", "title": "x", "subs": [], "depth": "deep"}
+    plan = {"report_toc": [{"id": "S1", "title": "x"}], "acceptance_criteria": []}
+    writer_mod.write_section(
+        unit,
+        plan,
+        _StubBank(),
+        prompt="q",
+        language="en",
+        archetype="compare",
+        domain="default",
+        prior_titles=["x"],
+        target_tokens=100_000,  # ridiculously large; clamp engages
+    )
+    assert captured["max_tokens"] == WRITER_CALL_TOKEN_CAP
+
+
+def test_write_section_falls_back_to_7000_when_no_target(monkeypatch):
+    """Smoke runs without target_tokens (unit tests, ad-hoc callers) keep
+    the legacy 7000 cap so backward-compat with non-scaffold callers holds."""
+    from deep_research.pipeline import writer as writer_mod
+
+    captured: dict = {}
+
+    def fake_llm_call(role, user, *, system="", max_tokens=8000, note="", **kw):
+        captured["max_tokens"] = max_tokens
+        return "stub"
+
+    monkeypatch.setattr(writer_mod.llm, "call", fake_llm_call)
+    monkeypatch.setenv("DR_CAPEL_G", "off")
+
+    class _StubBank:
+        def for_section(self, sid):
+            return []
+
+    unit = {"id": "S1", "title": "x", "subs": [], "depth": "broad"}
+    plan = {"report_toc": [{"id": "S1", "title": "x"}], "acceptance_criteria": []}
+    writer_mod.write_section(
+        unit,
+        plan,
+        _StubBank(),
+        prompt="q",
+        language="en",
+        archetype="compare",
+        domain="default",
+        prior_titles=["x"],
+        # target_tokens omitted → fall back to legacy 7000
+    )
+    assert captured["max_tokens"] == 7_000

@@ -154,7 +154,21 @@ def write_section(
     )
     if feedback:
         user += f"\nREVISION FEEDBACK — fix these and integrate the cited evidence inline:\n{feedback}\n"
-    raw = llm.call("writer", user, system=sys, max_tokens=7000, note=f"writer.sec.{sid}")
+    # P2-Wave-2.5-D1 Greptile follow-up (PR #12, second round): wire the
+    # WRITER_CALL_TOKEN_CAP constant into the actual llm.call so the cap
+    # documented in init_format / tests / module-level comments matches
+    # production behavior. Pre-fix the constant existed but the call still
+    # used the legacy literal 7000 — for a section budgeted at
+    # SECTION_BUDGET_CEILING=9500, the validator's 0.7× pass-line is 6650,
+    # within the literal 7000 by only 350 tokens. Any future bump to the
+    # ceiling (e.g. 10001) would push the pass-line above 7000 and
+    # systematically fail validation. Scaling max_tokens with target_tokens
+    # restores the documented relationship.
+    if target_tokens and target_tokens > 0:
+        section_max_tokens = min(WRITER_CALL_TOKEN_CAP, max(7_000, int(target_tokens * 1.4)))
+    else:
+        section_max_tokens = 7_000
+    raw = llm.call("writer", user, system=sys, max_tokens=section_max_tokens, note=f"writer.sec.{sid}")
     if capel_active:
         text, stats = strip_capel_markers(raw)
         return text, stats
