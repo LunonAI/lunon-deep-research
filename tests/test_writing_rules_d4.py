@@ -87,13 +87,46 @@ def test_rule_anti_listicle_padding_clause(monkeypatch):
 
 
 def test_refiner_emphasis_list_all_mentions_priority():
+    """list-all refiner emphasis carries the priority-indicator guidance."""
     emph = wr.refiner_emphasis("list-all")
     assert "priority indicator" in emph or "★★★" in emph
+
+
+def test_refiner_emphasis_list_all_mentions_actionable_list():
+    """Greptile follow-up (PR #15): the refiner emphasis for list-all also
+    references the conditional closing actionable list. Previously the test
+    only checked the priority-indicator clause, so a regression that trimmed
+    the Top-Picks language wouldn't surface."""
+    emph = wr.refiner_emphasis("list-all")
+    assert "Top Picks" in emph or "立即可执行的三项行动" in emph or "actionable list" in emph
+
+
+def test_value_add_rule_makes_action_list_conditional():
+    """Greptile follow-up (PR #15): the writer rule's CLOSING ACTION LIST
+    must be CONDITIONAL on a decision-support function, matching the refiner
+    emphasis. Previously the writer demanded the action list unconditionally
+    while the refiner only added it when 'the question implies a decision
+    support function' — purely enumerative list-all tasks (e.g. 'list all
+    Nobel Chemistry laureates 2000-2020') would get an unwanted action list
+    from the writer that the refiner wouldn't reinforce."""
+    rule = wr._VALUE_ADD_LIST_RECOMMEND_RULE
+    assert "CONDITIONAL" in rule
+    assert "purely enumerative" in rule
+    assert "Nobel" in rule  # the specific anti-example named
 
 
 def test_refiner_emphasis_recommend_mentions_action_list():
     emph = wr.refiner_emphasis("recommend")
     assert "action list" in emph or "立即可执行" in emph
+
+
+def test_refiner_emphasis_recommend_mentions_executable_criterion():
+    """Greptile follow-up (PR #15): the recommend refiner emphasis names the
+    'specific enough to execute without further research' invariant, matching
+    the writer rule's executable-criterion. Regression-guards a trimmed-down
+    refiner that would weaken the dimension match."""
+    emph = wr.refiner_emphasis("recommend")
+    assert "execute" in emph and "further research" in emph
 
 
 def test_refiner_emphasis_compare_unchanged():
