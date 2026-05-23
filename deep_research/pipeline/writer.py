@@ -31,6 +31,16 @@ def _capel_g_on() -> bool:
     return os.environ.get("DR_CAPEL_G", "on") != "off"
 
 
+# P2-Wave-2.5-D1 Greptile follow-up (PR #12): hard cap for a single writer
+# LLM call. Opus 4.7's per-call output budget is comfortably > 16k tokens with
+# the extended-output beta; 16000 leaves headroom for system prompt overhead
+# and matches the SECTION_BUDGET_CEILING in init_format.py (9500 × 1.4 ≈ 13300,
+# well within this cap). Anthropic anthropic_client.py already accepts up to
+# 32000, so this is a conservative middle ground that pairs with the scaffold
+# clamp to guarantee validator-reachable sections.
+WRITER_CALL_TOKEN_CAP = 16_000
+
+
 def outline_units(plan):
     """Flatten the Architect TOC into ordered section units."""
     units = []

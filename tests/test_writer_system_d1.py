@@ -16,12 +16,23 @@ def test_writer_system_no_longer_says_conciseness_is_first_class(monkeypatch):
     assert "LENGTH SERVES SUBSTANCE" in sys
 
 
-def test_writer_system_includes_reference_length_envelope(monkeypatch):
+def test_writer_system_en_includes_word_benchmark_envelope(monkeypatch):
     monkeypatch.setenv("DR_CAPEL_G", "off")
     sys = wr.writer_system("explain-mechanism", "science", "en", ["A", "B"], depth_tier="comprehensive")
-    # The 30k-80k envelope phrase must appear so the writer knows long-form
-    # research is acceptable.
-    assert "30,000-80,000" in sys
+    # EN: 30k-80k WORDS envelope (top-of-leaderboard EN comprehensive band).
+    assert "30,000-80,000 words" in sys
+
+
+def test_writer_system_zh_uses_zh_benchmark_envelope(monkeypatch):
+    """Greptile follow-up (PR #12): ZH must NOT receive the EN-word range —
+    ZH gets a CJK-char band roughly 2× the EN-word band, matching the
+    length_target language doubling. Previously the prompt contained
+    both "30,000-80,000 CJK characters" (EN band reused) AND a numeric
+    target of ~117,000 — directly contradictory."""
+    monkeypatch.setenv("DR_CAPEL_G", "off")
+    sys = wr.writer_system("explain-mechanism", "default", "zh", ["A"], depth_tier="comprehensive")
+    assert "60,000-160,000" in sys  # ZH CJK char band
+    assert "30,000-80,000 words" not in sys  # EN-word band MUST be absent for ZH
 
 
 def test_writer_system_emits_explicit_tier_label(monkeypatch):

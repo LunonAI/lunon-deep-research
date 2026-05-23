@@ -24,6 +24,19 @@ from ..state import Scaffold, ScaffoldSection
 # rough token-per-word factor for English-style writers
 _WORDS_PER_TOKEN = 0.75
 
+# P2-Wave-2.5-D1 Greptile follow-up (PR #12):
+# Per-section expected_length_tokens MUST stay producible inside one writer
+# LLM call. `write_section` scales its `max_tokens` off `target_tokens`, capped
+# at WRITER_CALL_TOKEN_CAP (see writer.py). Validator passes at >=0.7× of
+# expected, so the scaffold target needs `expected <= 0.7 × writer_cap` so a
+# clean first pass can clear validation. With the writer cap at 16,000 tokens
+# this gives a per-section ceiling around 11,000 — but we leave additional
+# headroom and clamp at 9,500 so refiner / corrective passes also fit cleanly.
+# Long-form comprehensive articles get their length from MORE sections, not
+# longer individual sections (matches the reference corpus: 12-14 top-level sections
+# averaging ~6k each on comprehensive tasks, not 6 sections at 13k each).
+SECTION_BUDGET_CEILING = 9_500
+
 
 @dataclass
 class InitFormatInput:
@@ -83,7 +96,18 @@ def run(inp: InitFormatInput) -> InitFormatOutput:
     for i, s in enumerate(toc):
         sid = s.get("id", f"S{i + 1}")
         share = total_tokens * weights[i] / weight_sum
-        expected = max(800, int(share))
+        # P2-Wave-2.5-D1 Greptile follow-up (PR #12): clamp the per-section
+        # expected_length_tokens to a value the writer can actually produce
+        # in a single LLM call. `writer.write_section` scales its `max_tokens`
+        # off `target_tokens` and tops out at WRITER_CALL_TOKEN_CAP. The
+        # validator's 0.7× pass-line therefore needs `expected ≤ cap/0.7` so
+        # a well-behaved generation can clear validation without forcing a
+        # refiner pass. Without the clamp, a comprehensive report with a
+        # deep-weighted section (1.5× weight on a 78k-token total) would
+        # request ~11.7k tokens per section — un-producible under the cap
+        # → systematic revision-pass loops on the very tier this design is
+        # meant to optimise.
+        expected = max(800, min(int(share), SECTION_BUDGET_CEILING))
         sections.append(
             ScaffoldSection(
                 section_id=sid,
