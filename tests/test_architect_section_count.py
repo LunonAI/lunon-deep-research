@@ -29,8 +29,11 @@ def test_system_prompt_includes_depth_tier_section_guidance():
 
 def test_system_prompt_anchors_count_to_reference_envelope():
     """Calibration source (the reference corpus average 12-14) named in the prompt
-    so the LLM understands why the count moved."""
-    assert "the reference" in _SYSTEM or "12-14" in _SYSTEM
+    so the LLM understands why the count moved. Greptile follow-up (PR #13,
+    round 2): both halves asserted independently — pre-fix `or` would let a
+    future edit drop "the reference" attribution while keeping "12-14" and not
+    surface the regression."""
+    assert "the reference" in _SYSTEM and "12-14" in _SYSTEM
 
 
 def test_system_prompt_compact_count_band():
@@ -49,5 +52,7 @@ def test_system_prompt_comprehensive_count_band():
 
 
 def test_system_prompt_warns_against_filler():
-    """The guidance explicitly prohibits 'misc' / 'appendix' filler sections."""
-    assert "filler" in _SYSTEM.lower() or "misc" in _SYSTEM.lower()
+    """The guidance explicitly prohibits 'misc' / 'appendix' filler sections.
+    Greptile follow-up (PR #13, round 2): both signals required so trimming
+    either word doesn't silently weaken the assertion."""
+    assert "filler" in _SYSTEM.lower() and "misc" in _SYSTEM.lower()
