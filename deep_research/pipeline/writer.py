@@ -10,7 +10,8 @@ P2-Wave-2-A wires CAPEL inline countdown markers (writing_rules.capel_directive)
 into each section prompt, then strips them via `_capel_strip.strip_capel_markers`
 before returning. P2-Wave-2-G propagates `task_id` to `writer_system` so the
 W9-readability fragile-density heuristic can omit `_DEDUP_RULE` when appropriate.
-Both are gated by env-var `DR_CAPEL_G` until dev10 validation.
+Both default on post-sanity-4 hardcode; set `DR_CAPEL_G=off` to disable
+(kill-switch for debug / fall-back).
 """
 
 import json

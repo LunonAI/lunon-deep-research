@@ -68,12 +68,34 @@ def test_default_low_readability_keeps_dedup(monkeypatch, tmp_path):
     assert _DEDUP_FINGERPRINT in sys_prompt
 
 
-def test_explicit_suppress_dedup_overrides_archetype_and_id(monkeypatch, tmp_path):
-    """suppress_dedup=True forces omission regardless of archetype/id and
-    works even with the kill-switch on (the explicit arg wins)."""
+def test_explicit_suppress_dedup_overrides_non_firing_case(monkeypatch, tmp_path):
+    """suppress_dedup=True works even when G's auto-fire path would NOT have
+    triggered (list-all archetype + sub-threshold task_id). Verifies the
+    explicit arg is independent of the auto-fire logic."""
     _setup_w9(monkeypatch, tmp_path)
-    monkeypatch.setenv("DR_CAPEL_G", "off")  # kill-switch should be overridden
+    monkeypatch.delenv("DR_CAPEL_G", raising=False)  # default-on; G active
     sys_prompt = wr.writer_system("list-all", "default", "en", ["A", "B"], task_id=91, suppress_dedup=True)
+    assert _DEDUP_FINGERPRINT not in sys_prompt
+
+
+def test_explicit_suppress_redundant_when_g_would_fire(monkeypatch, tmp_path):
+    """When G's auto-fire WOULD have suppressed dedup (explain-mech + id=56),
+    suppress_dedup=True is redundant but harmless — the result is still no
+    `_DEDUP_RULE` in the prompt. Proves the explicit arg composes with auto-fire."""
+    _setup_w9(monkeypatch, tmp_path)
+    monkeypatch.delenv("DR_CAPEL_G", raising=False)  # default-on; G active
+    sys_prompt = wr.writer_system("explain-mechanism", "default", "en", ["A", "B"], task_id=56, suppress_dedup=True)
+    assert _DEDUP_FINGERPRINT not in sys_prompt
+
+
+def test_explicit_suppress_overrides_kill_switch(monkeypatch, tmp_path):
+    """The explicit suppress_dedup=True overrides the kill-switch — even with
+    `DR_CAPEL_G=off` disabling G's auto-fire path, the explicit arg still
+    omits `_DEDUP_RULE`. Critical for callers that want unconditional control
+    regardless of env state."""
+    _setup_w9(monkeypatch, tmp_path)
+    monkeypatch.setenv("DR_CAPEL_G", "off")  # G's auto-fire path fully disabled
+    sys_prompt = wr.writer_system("explain-mechanism", "default", "en", ["A", "B"], task_id=56, suppress_dedup=True)
     assert _DEDUP_FINGERPRINT not in sys_prompt
 
 
