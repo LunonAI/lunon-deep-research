@@ -18,10 +18,10 @@ import os
 from . import assert_phase
 
 
-def run(query: str, language: str) -> dict:
+def run(query: str, language: str, task_id: int | None = None) -> dict:
     assert_phase()
     if os.environ.get("DR_STUB") == "1":
         return {"article": f"[STUB:{language}] {query[:60]}"}
     from .orchestrate import pipeline  # assembled in W1-W5
 
-    return {"article": pipeline(query, language)}
+    return {"article": pipeline(query, language, task_id=task_id)}

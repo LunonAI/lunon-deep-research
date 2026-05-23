@@ -104,10 +104,14 @@ def run(query_file, out, limit=None, only_en=False, only_zh=False, ids=None, wor
 
     def _one(q):
         qid, prompt, lang = q["id"], q["prompt"], q.get("language", "en")
+        try:
+            tid: int | None = int(qid)
+        except (TypeError, ValueError):
+            tid = None
         article = None
         for attempt in range(2):  # one retry on any exception (intermittent
             try:  # malformed LLM JSON or transient API blip)
-                article = deep_research(prompt, lang)["article"]
+                article = deep_research(prompt, lang, task_id=tid)["article"]
                 break
             except Exception as e:  # noqa: BLE001
                 import traceback

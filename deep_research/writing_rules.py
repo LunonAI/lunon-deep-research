@@ -7,10 +7,13 @@
   p0_artifacts/cleaner_behavior.md (obeyed in writer AND refiner).
 - Per-domain length governor (item 21; decision #5) — soft ceiling = EN
   reference median word_len by domain, from p0_artifacts/reference_catalog.jsonl.
+- P2-Wave-2-A: CAPEL countdown directive (capel_directive).
+- P2-Wave-2-G: archetype + W9-readability conditional `_DEDUP_RULE` omission.
 """
 
 import collections
 import json
+import os
 import pathlib
 import re
 import statistics
@@ -112,6 +115,41 @@ def length_ceiling(domain: str) -> int:
     return _MED.get(key, _MED["_overall"])
 
 
+def capel_directive(target_tokens: int) -> str:
+    """P2-Wave-2-A: CAPEL inline countdown markers (arXiv 2508.13805 §3.1-3.3).
+
+    The writer is instructed to emit the section as content interleaved with
+    `<N>`, `<N-1>`, ..., `<0>` markers, one marker per ~content token. The
+    counter forces precise length adherence (paper: 10% → 74.9% exact-match
+    on MT-Bench-LI when applied at full-article scale). Markers are stripped
+    in post-processing via `pipeline._capel_strip.strip_capel_markers`.
+
+    n_markers is derived from target_tokens conservatively (tokens → words
+    ≈ 0.75×) so a 1200-token section emits ~900 markers, keeping the count
+    inside the "reliable counting" envelope the paper flags for current
+    frontier models.
+    """
+    n_markers = max(50, int(target_tokens * 0.75))
+    return (
+        "CAPEL LENGTH CONTROL — INLINE COUNTDOWN MARKERS (arXiv 2508.13805):\n"
+        f"Emit this section's content interleaved with countdown markers. "
+        f"Begin with `<{n_markers}>` immediately followed by one content "
+        f"token (a word in EN, a single character or short token in ZH), "
+        f"then `<{n_markers - 1}>`, then one content token, and so on, "
+        f"decrementing to `<0>` at the section's end. "
+        "Two markers MUST NEVER appear back-to-back — every marker must be "
+        "followed by at least one content token before the next marker. "
+        "Headings, subheadings, and tables are part of the content stream — "
+        "embed markers around their words too. Post-processing strips every "
+        "`<digits>` marker before the section is shown to the judge, so "
+        "write naturally; the markers exist only to enforce the target "
+        f"length of approximately {n_markers} content tokens for this "
+        "section. If you run out of substantive content before reaching "
+        "`<0>`, STOP early rather than padding — under-length is acceptable; "
+        "padding to hit the counter is not."
+    )
+
+
 def opening_directive() -> str:
     return (
         "POSITION-1 OPENING (the first ~200 tokens, hard max ~300; this report "
@@ -124,8 +162,49 @@ def opening_directive() -> str:
     )
 
 
-def writer_system(archetype: str, domain: str, language: str, toc_titles: list) -> str:
+def writer_system(
+    archetype: str,
+    domain: str,
+    language: str,
+    toc_titles: list,
+    *,
+    task_id: int | None = None,
+    suppress_dedup: bool = False,
+) -> str:
+    """Assemble the writer system prompt.
+
+    P2-Wave-2-G: when `suppress_dedup=True` OR the auto-fire heuristic
+    triggers (archetype == "explain-mechanism" AND prior-W9 readability
+    >= 0.50 AND task_id supplied), `_DEDUP_RULE` is omitted. The W9
+    cross-reference identifies id=56 as the canonical fragile-density
+    case; under the current rule no other W9 task triggers G.
+    """
     ceil = length_ceiling(domain)
+
+    # P2-Wave-2-G auto-fire. Fail-soft when the W9 cache is missing
+    # (cache.fragile_tasks returns False) so engine still runs cleanly on
+    # machines without the DRB results tree.
+    auto_suppress = False
+    if (
+        not suppress_dedup
+        and archetype == "explain-mechanism"
+        and task_id is not None
+        and os.environ.get("DR_CAPEL_G", "off") != "off"
+    ):
+        try:
+            from .cache import fragile_tasks as _ft
+
+            auto_suppress = _ft.is_fragile_density_task(task_id)
+        except Exception:  # noqa: BLE001 — never break the caller
+            auto_suppress = False
+    include_dedup = not (suppress_dedup or auto_suppress)
+
+    middle_rules = [_NUMBERING_RULE]
+    if include_dedup:
+        middle_rules.append(_DEDUP_RULE)
+    middle_rules.extend([_INSIGHT_MIN, CLEANING_RESISTANT_RULE])
+    middle_block = "\n\n".join(middle_rules)
+
     return (
         f"You are an elite research-report writer. Language: {language}. "
         f"Write partner-grade analytical prose (not bullet dumps), with "
@@ -145,8 +224,7 @@ def writer_system(archetype: str, domain: str, language: str, toc_titles: list) 
         f"\n\nSTRUCTURAL CAPS — HARD: use 2-7 subsections per major section; "
         f"never exceed 3 levels of heading depth (e.g. 1, 1.1, 1.1.1 — never "
         f"1.1.1.1). Skip a subsection rather than break these limits."
-        f"\n\n{opening_directive()}\n\n{_NUMBERING_RULE}\n\n{_DEDUP_RULE}\n\n"
-        f"{_INSIGHT_MIN}\n\n{CLEANING_RESISTANT_RULE}"
+        f"\n\n{opening_directive()}\n\n{middle_block}"
         f"\n\nLENGTH GOVERNOR — HARD: target ≈{ceil} words total (EN reference "
         f"median for this domain). HARD ceiling = {int(ceil * 1.15)} words; "
         f"exceeding it actively HURTS the score. Be dense, not padded.\n\n"
