@@ -21,8 +21,36 @@ def test_count_cjk_returns_zero_on_pure_english():
     assert count_cjk_chars("Hello world. This is English text only.") == 0
 
 
+def test_middle_excerpt_zh_heading_snap_is_accurate():
+    """Greptile follow-up (PR #16, round 2): for ZH-dominated text the
+    middle excerpt must slice directly in CHAR space from the heading
+    offset, NOT round-trip through unit-space (which dropped non-CJK chars
+    and drifted the start by 5k+ chars on realistic mixed-content articles).
+    """
+    from p2_qianfan_excerpts import _middle_excerpt
+
+    # Construct a ZH article with mixed content: 75% CJK + 25% non-CJK
+    # (punctuation, paragraph breaks, occasional latin). The heading
+    # 'TARGET' sits exactly at the middle; a correct snap puts the excerpt
+    # START at the heading char-offset.
+    chunk = "中国高校教师竞赛全国一等奖课程的研究与分析。" * 50  # ZH body
+    pre = chunk + "\n\n"  # paragraph break
+    target_heading = "## TARGET MIDDLE HEADING\n\n"
+    post = chunk
+    text = pre + target_heading + post
+
+    excerpt = _middle_excerpt(text, n=200)
+    # The excerpt must START at (or very near) the target heading — proving
+    # the snap survived for ZH text. Pre-fix the excerpt started ~5k chars
+    # before the heading.
+    assert "TARGET MIDDLE HEADING" in excerpt[:100]
+
+
 def test_count_cjk_counts_basic_ideographs():
-    # 5 common-use CJK characters.
+    # `你好世界` = 4 CJK Unified Ideographs. `！` is fullwidth punctuation
+    # (U+FF01), correctly EXCLUDED from the count. Greptile follow-up
+    # (PR #16, round 2): pre-fix comment said "5 common-use CJK characters"
+    # which contradicted the (correct) `== 4` assertion.
     assert count_cjk_chars("你好世界！") == 4
 
 
