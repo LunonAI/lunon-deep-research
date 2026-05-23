@@ -46,7 +46,7 @@ criteria into a STRICT JSON research plan. Output ONLY this JSON object:
  "report_depth_tier": "compact"|"standard"|"deep"|"comprehensive",
  "report_toc": [ {"id": "S1", "title": str,
     "subsections": [ {"id": "S1.1", "title": str} ... 2-5 ],
-    "depth_target": "deep"|"broad", "depth_rationale": str } ... <=8 ],
+    "depth_target": "deep"|"broad", "depth_rationale": str } ... 5-14 ],
  "acceptance_criteria": [ {"id": "AC1", "category":
     "content"|"source"|"structure"|"depth"|"format"|"exclusion",
     "text": str, "rationale": str, "verification": str,
@@ -65,7 +65,8 @@ HARD RULES:
   subsection titles (structural anchoring → instruction-following).
 - 24-32 queries AND 24-32 acceptance_criteria. Every query maps to >=1 TOC
   section. Distribute query `type` to cover all needed analytical functions.
-- report_toc <=8 top-level; each 2-5 subsections. Match the prompt's language.
+- report_toc has 5-14 top-level sections; each 2-5 subsections. Match the
+  prompt's language.
 
 DEPTH-TIER CLASSIFICATION (P2-Wave-2.5-D1, calibrated from Qianfan #1 corpus):
 - "compact": tightly-scoped question ("how do I X", short list-all of <10 items,
@@ -81,7 +82,19 @@ DEPTH-TIER CLASSIFICATION (P2-Wave-2.5-D1, calibrated from Qianfan #1 corpus):
   Target ~58k words / ~116k CJK chars. The Qianfan #1 leaderboard's top-scoring
   research reports run 60-80k words on these.
 Pick the SMALLEST tier the question genuinely demands. Comprehensive is for
-true canonical-survey scope; do not default to it."""
+true canonical-survey scope; do not default to it.
+
+SECTION COUNT GUIDANCE (P2-Wave-2.5-D2-F4, calibrated against Qianfan #1
+leaderboard corpus — top-scoring research reports average 12-14 top-level
+sections; our W9 baseline averaged 3-9, well below the leaderboard envelope).
+The depth tier above pins the article-level word target; the bands below
+pin how many sections it should be split across:
+- compact / standard scope: 5-7 top-level sections.
+- deep scope: 8-12 top-level sections.
+- comprehensive scope: 12-14 top-level sections.
+Pick the section count that genuinely serves the question. Do not pad with
+"misc" or "appendix"-style filler sections — every section must advance
+analytical coverage."""
 
 
 def build(
