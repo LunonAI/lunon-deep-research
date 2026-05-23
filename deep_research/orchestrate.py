@@ -162,18 +162,14 @@ def from_plan(ctx: dict, query: str, language: str) -> str:
     s.digest = res["digest"]
     s.tool_calls = res["tool_calls"]
 
-    # P2-Wave-1-D: evidence-layer dedup MUST run BEFORE assign_primary_sections
-    # so primary-tagging operates on the post-dedup bank (otherwise dangling
-    # primary_section_ids end up referencing dropped eids). DR_EVIDENCE_DEDUP
-    # default is "off" — no-op until explicitly flipped to `url` or
-    # `url+embedding` after dev10 verifies the gate.
-    _dedup_mode = os.environ.get("DR_EVIDENCE_DEDUP", "off")
+    # P2-Wave-1-D: evidence-layer dedup. Hardcoded default `url+embedding`
+    # post-validation (Wave-1 D sanity-4 passed 2026-05-23: paired ΔO +0.046 vs
+    # W9, +0.012 vs B0; dedup firing 20-40% of evidence per task with no
+    # gate-verify regressions). DR_EVIDENCE_DEDUP env-var override is kept as
+    # an operational kill-switch (set to "off" or "url" for debug / fall-back
+    # if embeddings API misbehaves) — D1 is also fail-soft internally.
+    _dedup_mode = os.environ.get("DR_EVIDENCE_DEDUP", "url+embedding")
     s.evidence_dedup_stats = _phase("evidence_dedup", evidence_dedup.dedup_bank, s.memory_bank, mode=_dedup_mode)
-
-    # P2-Wave-1-B2: assign primary section per eid for the WebWeaver-style
-    # mode-aware retrieval. Deterministic; no LLM. Always run — when
-    # DR_WEBWEAVER=off the assignment is computed but unused (idempotent).
-    s.memory_bank.assign_primary_sections(s.plan)
 
     # Writer opening + per-section quality loop (W3 + W5)
     s.opening = _phase(
@@ -269,45 +265,17 @@ def _state_from_ctx(ctx, query, language):
     return s
 
 
-def _summarize_section_for_context(sid: str, title: str, draft_text: str, max_words: int = 200) -> dict:
-    """Compact summary of a completed section for the *next* section's writer
-    prompt under DR_WEBWEAVER=serial. First `max_words` words of the draft —
-    no LLM call, deterministic. Bounds the accumulated cross-section context
-    as sections accumulate (n_sections × max_words ≈ 1.5-2k words for typical
-    8-section reports).
-    """
-    words = (draft_text or "").split()
-    return {"sid": sid, "title": title, "summary": " ".join(words[:max_words])}
-
-
 def _run_section_loop(s: PipelineState, query, language):
     plan, bank, spec, archetype, domain = (s.plan, s.memory_bank, s.spec, s.archetype["archetype"], s.domain)
     units = writer.outline_units(plan)
     prior_titles = [u["title"] for u in units]
-    webweaver_mode = os.environ.get("DR_WEBWEAVER", "off")
 
-    def process_one(u, prior_sections=None):
+    def process_one(u):
         sid = u["id"]
-        # Grounding always sees FULL evidence for the section — even in
-        # WebWeaver modes where the *writer* sees placeholders for non-primary
-        # cross-cutting entries. Grounding's job is claim-verification, which
-        # is sharper when it can see source texts in full. This deliberate
-        # asymmetry is safe because the writer's "placeholder" cites are by
-        # source name only; grounding can still verify those source-name
-        # references against the underlying text.
         ev = bank.for_section(sid)
+        # writer now also sees design_guide via a kwarg appended below
         draft_s = _write_with_guide(
-            u,
-            plan,
-            bank,
-            query,
-            language,
-            archetype,
-            domain,
-            prior_titles,
-            s.design_guide,
-            s.scaffold,
-            prior_sections=prior_sections,
+            u, plan, bank, query, language, archetype, domain, prior_titles, s.design_guide, s.scaffold
         )
         last_scores = None
         for _ in range(INNER_CAP):
@@ -325,7 +293,6 @@ def _run_section_loop(s: PipelineState, query, language):
                     s.design_guide,
                     s.scaffold,
                     feedback=grounding.feedback_text(g),
-                    prior_sections=prior_sections,
                 )
                 continue
             r = inner_loop.score_section(draft_s, spec, language, u["title"])
@@ -344,45 +311,14 @@ def _run_section_loop(s: PipelineState, query, language):
                 s.design_guide,
                 s.scaffold,
                 feedback=inner_loop.feedback_text(r),
-                prior_sections=prior_sections,
             )
         return sid, u, draft_s, last_scores
 
     order_ix = {u["id"]: i for i, u in enumerate(units)}
-
-    # Orthogonal axes encoded in DR_WEBWEAVER:
-    #   evidence shaping: off=full | soft/serial=placeholder | hard=omit
-    #   write order:      off/soft=parallel | serial/hard=serial+prior-sections
-    # → off: full + parallel (legacy)
-    # → soft: placeholder + parallel (B1 fallback per WAVE1_DESIGN.md)
-    # → serial: placeholder + serial + prior-sections (B2 primary)
-    # → hard:   omit + serial + prior-sections (aggressive variant)
-    is_serial_mode = webweaver_mode in ("serial", "hard")
-
-    if not is_serial_mode:
-        # Parallel path. `off` is legacy full evidence; `soft` keeps the
-        # ThreadPoolExecutor but the writer renders non-primary evidence as
-        # `see_elsewhere` placeholders (writer.write_section reads
-        # DR_WEBWEAVER directly and calls bank.for_section_pruned). No
-        # prior-section text awareness in this branch — that requires
-        # serial mode by design.
-        sec_workers = int(os.environ.get("DR_SECTION_WORKERS", "4"))
-        with ThreadPoolExecutor(max_workers=sec_workers) as ex:
-            results = list(ex.map(process_one, units))
-        results.sort(key=lambda r: order_ix.get(r[0], 1e9))
-    else:
-        # P2-Wave-1-B2: serial write with prior-section text awareness.
-        # Section N+1 receives compact summaries of sections 1..N in its
-        # writer prompt. `hard` additionally omits non-primary cross-cutting
-        # eids entirely (vs `serial`'s placeholders).
-        units_ordered = sorted(units, key=lambda u: order_ix.get(u["id"], 1e9))
-        results = []
-        prior_sections_acc: list[dict] = []
-        for u in units_ordered:
-            result = process_one(u, prior_sections=list(prior_sections_acc))
-            results.append(result)
-            sid_w, unit_w, draft_w, _ = result
-            prior_sections_acc.append(_summarize_section_for_context(sid_w, unit_w["title"], draft_w))
+    sec_workers = int(os.environ.get("DR_SECTION_WORKERS", "4"))
+    with ThreadPoolExecutor(max_workers=sec_workers) as ex:
+        results = list(ex.map(process_one, units))
+    results.sort(key=lambda r: order_ix.get(r[0], 1e9))
 
     sections, score_summary, failing = [], [], []
     for sid, u, draft_s, last in results:
@@ -401,26 +337,8 @@ def _run_section_loop(s: PipelineState, query, language):
     return sections, score_summary, failing
 
 
-def _write_with_guide(
-    u,
-    plan,
-    bank,
-    query,
-    language,
-    archetype,
-    domain,
-    prior_titles,
-    guide,
-    scaffold,
-    feedback="",
-    prior_sections=None,
-):
-    """writer.write_section + design_guide block + scaffold expected-length.
-
-    P2-Wave-1-B2: forwards `prior_sections` (list of {sid, title, summary})
-    through to `writer.write_section`. Caller is responsible for passing
-    None / [] when running in legacy parallel mode.
-    """
+def _write_with_guide(u, plan, bank, query, language, archetype, domain, prior_titles, guide, scaffold, feedback=""):
+    """writer.write_section + design_guide block + scaffold expected-length."""
     expected_tok = 1200
     if scaffold:
         for sec in scaffold.sections:
@@ -441,7 +359,6 @@ def _write_with_guide(
         domain=domain,
         prior_titles=prior_titles,
         feedback=(feedback or "") + extra,
-        prior_sections=prior_sections,
     )
 
 
