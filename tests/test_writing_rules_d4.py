@@ -115,12 +115,19 @@ def test_value_add_rule_makes_action_list_conditional():
     tasks rather than letting RANKED TABLES manufacture a ranking criterion
     out of thin air."""
     rule = wr._VALUE_ADD_LIST_RECOMMEND_RULE
-    # Both items 2 and 3 carry the CONDITIONAL label so the writer applies
-    # symmetric skip-logic on purely enumerative tasks.
-    assert rule.count("CONDITIONAL") >= 2
+    # All three items (PRIORITY INDICATORS / RANKED TABLES / CLOSING ACTION
+    # LIST) now carry the CONDITIONAL label, applying symmetric skip-logic
+    # for purely enumerative tasks. Pre-round-3 only items 2+3 had it.
+    assert rule.count("CONDITIONAL") >= 3
     assert "purely enumerative" in rule
-    assert "Nobel" in rule  # specific anti-example named for both items
-    # Specific anti-pattern: don't manufacture a ranking criterion to fake a TOP-N.
+    # Nobel anti-example is cited for each item so the LLM sees the same
+    # concrete skip scenario in all three contexts.
+    assert rule.count("Nobel Chemistry") >= 3
+    # Specific anti-patterns named per item:
+    #   item 1: don't manufacture star ratings via invented tier criterion.
+    #   item 2: don't manufacture a ranking criterion to fake a TOP-N.
+    #   item 3: skip the action list on historical enumeration.
+    assert "do NOT invent a tier criterion" in rule
     assert "do NOT invent a ranking criterion" in rule
 
 
