@@ -379,6 +379,22 @@ class NumberingFixOutput:
     skipped_reason: str | None
 
 
+_PRE_FIX_DEEP_NUMERIC_RE = re.compile(r"^(#+)\s+(\d+(?:\.\d+){3,})\s", re.MULTILINE)
+
+
+def count_pre_fix_deep_numeric(text: str) -> int:
+    """P2-Wave-2.5-D2-F3: count writer-emitted heading lines with 4+ numeric
+    levels (e.g. `### 1.8.3.6 Title`) BEFORE renumber_headings strips them.
+
+    The P2-F cross-ref-aware renumber already auto-fixes this by re-assigning
+    new numbers based on markdown depth (max 3 numeric levels). This telemetry
+    surfaces how often the writer attempted the violation, so we can tighten
+    the prompt if the rate stays high. Counts both `###` (depth-3 markdown
+    with depth-4+ numeric) and `####` (depth-4 markdown with depth-5+ numeric).
+    """
+    return len(_PRE_FIX_DEEP_NUMERIC_RE.findall(text))
+
+
 def run(article: str) -> NumberingFixOutput:
     """Run the deterministic post-refiner cleanup in fixed order.
 
@@ -387,11 +403,18 @@ def run(article: str) -> NumberingFixOutput:
       2. Empty-section collapse drops now-empty headings
       3. Renumber rebuilds the heading-number tree AND rewrites cross-refs
          using an old→new heading map (P2-F, was: skip on cross-refs)
+
+    P2-Wave-2.5-D2-F3 adds `pre_fix_deep_numeric` to the cap_violations dict
+    so drift logs surface how often the writer emits 4+-level numeric prefixes
+    despite the writer-prompt's 3-depth cap. The renumber pass auto-fixes them,
+    but the rate is a signal for whether writer prompting is effective.
     """
+    pre_fix_deep_numeric = count_pre_fix_deep_numeric(article)
     a, n_strip = strip_stage_directions(article)
     a, n_collapse = collapse_empty_sections(a)
     a, renum = renumber_headings(a)
     caps = cap_violations(a)
+    caps["pre_fix_deep_numeric"] = pre_fix_deep_numeric
     return NumberingFixOutput(
         article=a,
         stage_directions_removed=n_strip,
