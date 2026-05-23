@@ -43,6 +43,7 @@ criteria into a STRICT JSON research plan. Output ONLY this JSON object:
 {
  "task_analysis": str,
  "report_title": str,
+ "report_depth_tier": "compact"|"standard"|"deep"|"comprehensive",
  "report_toc": [ {"id": "S1", "title": str,
     "subsections": [ {"id": "S1.1", "title": str} ... 2-5 ],
     "depth_target": "deep"|"broad", "depth_rationale": str } ... <=8 ],
@@ -64,7 +65,23 @@ HARD RULES:
   subsection titles (structural anchoring → instruction-following).
 - 24-32 queries AND 24-32 acceptance_criteria. Every query maps to >=1 TOC
   section. Distribute query `type` to cover all needed analytical functions.
-- report_toc <=8 top-level; each 2-5 subsections. Match the prompt's language."""
+- report_toc <=8 top-level; each 2-5 subsections. Match the prompt's language.
+
+DEPTH-TIER CLASSIFICATION (P2-Wave-2.5-D1, calibrated from the #1 reference corpus):
+- "compact": tightly-scoped question ("how do I X", short list-all of <10 items,
+  single-entity recommend). Target ~13k words / ~26k CJK chars.
+- "standard": typical focused question with clear scope. Target ~18k words /
+  ~36k CJK chars.
+- "deep": multi-entity compare, explain-mechanism with full causal chains,
+  multi-faction list-all (12+ items), or any question explicitly asking for
+  "comprehensive analysis" / "detailed report" / "深度研究". Target ~32k words
+  / ~64k CJK chars.
+- "comprehensive": canonical-survey / theoretical-research / open-ended review
+  questions (e.g. "general method for X", "complete analysis of franchise Y").
+  Target ~58k words / ~116k CJK chars. The #1 reference leaderboard's top-scoring
+  research reports run 60-80k words on these.
+Pick the SMALLEST tier the question genuinely demands. Comprehensive is for
+true canonical-survey scope; do not default to it."""
 
 
 def build(
@@ -94,6 +111,9 @@ def build(
     return plan
 
 
+_VALID_DEPTH_TIERS = ("compact", "standard", "deep", "comprehensive")
+
+
 def _normalize(plan: dict) -> None:
     """Attach specialist_role to every query; clamp obvious shape issues."""
     for q in plan.get("queries", []):
@@ -105,3 +125,11 @@ def _normalize(plan: dict) -> None:
     plan.setdefault("acceptance_criteria", [])
     plan.setdefault("report_toc", [])
     plan.setdefault("queries", [])
+    # P2-Wave-2.5-D1: clamp depth_tier to known values; downstream
+    # (writing_rules.resolve_depth_tier) falls back to archetype-default
+    # when missing or invalid.
+    tier = plan.get("report_depth_tier")
+    if not isinstance(tier, str) or tier.lower() not in _VALID_DEPTH_TIERS:
+        plan.pop("report_depth_tier", None)
+    else:
+        plan["report_depth_tier"] = tier.lower()

@@ -65,13 +65,18 @@ def write_opening(plan, prompt, language, archetype, domain, digest, *, task_id=
     not worth it for such a small target. `task_id` propagates for parity
     with `write_section` but the opening's `_DEDUP_RULE` decision matches
     section behavior (G suppresses there too for consistency).
+
+    P2-Wave-2.5-D1: `report_depth_tier` flows from architect plan → writer_system
+    so the LENGTH SERVES SUBSTANCE directive emits the correct target.
     """
+    depth_tier = plan.get("report_depth_tier")
     sys = wr.writer_system(
         archetype,
         domain,
         language,
         [s.get("title") for s in plan.get("report_toc", [])],
         task_id=task_id,
+        depth_tier=depth_tier,
     )
     user = (
         f"PROMPT ({language}):\n{prompt}\n\nREPORT TITLE: "
@@ -113,6 +118,7 @@ def write_section(
         language,
         [s.get("title") for s in plan.get("report_toc", [])],
         task_id=task_id,
+        depth_tier=plan.get("report_depth_tier"),
     )
 
     capel_block = ""
