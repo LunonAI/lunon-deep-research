@@ -389,8 +389,11 @@ def count_pre_fix_deep_numeric(text: str) -> int:
     The P2-F cross-ref-aware renumber already auto-fixes this by re-assigning
     new numbers based on markdown depth (max 3 numeric levels). This telemetry
     surfaces how often the writer attempted the violation, so we can tighten
-    the prompt if the rate stays high. Counts both `###` (depth-3 markdown
-    with depth-4+ numeric) and `####` (depth-4 markdown with depth-5+ numeric).
+    the prompt if the rate stays high. Matches any heading depth (one or more
+    `#` chars — `#`, `##`, `###`, `####`, `#####`, `######`) whose numeric
+    prefix has 4+ dot-separated components (e.g. `1.8.3.6`). The depth-3 case
+    (`### 1.8.3.6`) is the W9 id=91 failure mode; deeper-markdown cases are
+    rarer but the regex catches them too.
     """
     return len(_PRE_FIX_DEEP_NUMERIC_RE.findall(text))
 
