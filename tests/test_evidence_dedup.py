@@ -81,6 +81,28 @@ def test_normalize_url_non_string_non_list_returns_empty():
     assert _normalize_url(42) == ""
 
 
+def test_normalize_url_list_input_logs_warning(caplog):
+    """List-coerce path must emit a WARNING so operators can track down the
+    specialist responsible without re-instrumenting. Greptile PR #10 followup.
+    """
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="deep_research.pipeline.evidence_dedup"):
+        _normalize_url(["https://example.com/A", "https://other.com/B"])
+    assert any("list-typed url" in rec.message for rec in caplog.records)
+
+
+def test_normalize_url_string_input_emits_no_warning(caplog):
+    """The warning is reserved for the list-coerce path — happy-path string
+    inputs MUST NOT spam logs (called millions of times across W-runs).
+    """
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="deep_research.pipeline.evidence_dedup"):
+        _normalize_url("https://example.com/A")
+    assert not caplog.records
+
+
 def test_normalize_url_case_insensitive_host():
     assert _normalize_url("HTTPS://NEWS.YCOMBINATOR.com/item") == _normalize_url("https://news.ycombinator.com/item")
 
