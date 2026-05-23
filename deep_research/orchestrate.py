@@ -59,6 +59,7 @@ from .pipeline import (
     architect,
     criteria_spec,
     design_guide,
+    evidence_dedup,
     grounding,
     init_format,
     inner_loop,
@@ -159,6 +160,14 @@ def from_plan(ctx: dict, query: str, language: str) -> str:
     s.memory_bank = res["memory_bank"]
     s.digest = res["digest"]
     s.tool_calls = res["tool_calls"]
+
+    # P2-Wave-1-D: evidence-layer dedup MUST run BEFORE assign_primary_sections
+    # so primary-tagging operates on the post-dedup bank (otherwise dangling
+    # primary_section_ids end up referencing dropped eids). DR_EVIDENCE_DEDUP
+    # default is "off" — no-op until explicitly flipped to `url` or
+    # `url+embedding` after dev10 verifies the gate.
+    _dedup_mode = os.environ.get("DR_EVIDENCE_DEDUP", "off")
+    s.evidence_dedup_stats = _phase("evidence_dedup", evidence_dedup.dedup_bank, s.memory_bank, mode=_dedup_mode)
 
     # P2-Wave-1-B2: assign primary section per eid for the WebWeaver-style
     # mode-aware retrieval. Deterministic; no LLM. Always run — when

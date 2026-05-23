@@ -110,3 +110,6 @@ class PipelineState:
     numbering_fix_stats: dict = field(default_factory=dict)
     # ART-style refiner gate verdict (plan v3 §3b, Branch B monitor-mode)
     refiner_gate_verdict: dict = field(default_factory=dict)
+    # P2-Wave-1-D: evidence-layer dedup stats {mode, n_before, n_after,
+    # d4_collapsed, d4_clusters, d1_collapsed?, d1_eids_embedded?, d1_error?}
+    evidence_dedup_stats: dict = field(default_factory=dict)
