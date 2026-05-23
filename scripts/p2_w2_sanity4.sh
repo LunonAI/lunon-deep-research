@@ -21,7 +21,14 @@
 
 set -euo pipefail
 
-cd /home/connor/dev/lunon-deep-research
+# Greptile follow-up (PR #16): paths derived relative to the script location
+# so this runs from any clone. The DRB harness path remains overrideable via
+# DRB_REPO (defaults to /home/connor/dev/deep_research_bench on the dev box).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LUNON_REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
+DRB_REPO="${DRB_REPO:-/home/connor/dev/deep_research_bench}"
+
+cd "$LUNON_REPO"
 
 export DRB_PHASE=P1
 export DR_CAPEL_G=on
@@ -49,7 +56,7 @@ echo "[w2-sanity4] DR_EVIDENCE_DEDUP=$DR_EVIDENCE_DEDUP" | tee -a "$LOG"
 echo "[w2-sanity4] ids=83,91,23,29 workers=4" | tee -a "$LOG"
 
 /usr/bin/python3 -m deep_research.adapter \
-  --query-file /home/connor/dev/deep_research_bench/data/prompt_data/query.jsonl \
+  --query-file "$DRB_REPO/data/prompt_data/query.jsonl" \
   --out "$OUT_JSONL" \
   --ids 83,91,23,29 \
   --workers 4 \
@@ -58,22 +65,22 @@ echo "[w2-sanity4] ids=83,91,23,29 workers=4" | tee -a "$LOG"
 echo "[w2-sanity4] adapter done at $(date -Iseconds)" | tee -a "$LOG"
 
 # Stage for harness scoring under the run-tag dir name.
-HARNESS_RAW="/home/connor/dev/deep_research_bench/data/test_data/raw_data/${RUN_TAG}.jsonl"
+HARNESS_RAW="$DRB_REPO/data/test_data/raw_data/${RUN_TAG}.jsonl"
 cp "$OUT_JSONL" "$HARNESS_RAW"
 echo "[w2-sanity4] staged → $HARNESS_RAW" | tee -a "$LOG"
 
 # Hand off to harness RACE eval (GPT-5.5 judge).
 EVAL_LOG="p2_artifacts/w2_sanity4_eval.log"
-cd /home/connor/dev/deep_research_bench
-echo "[w2-sanity4] starting RACE eval at $(date -Iseconds)" | tee "../lunon-deep-research/$EVAL_LOG"
+cd "$DRB_REPO"
+echo "[w2-sanity4] starting RACE eval at $(date -Iseconds)" | tee "$LUNON_REPO/$EVAL_LOG"
 python -u deepresearch_bench_race.py "$RUN_TAG" \
   --raw_data_dir data/test_data/raw_data \
   --max_workers 4 \
   --query_file data/prompt_data/query.jsonl \
   --output_dir "results/race/${RUN_TAG}" \
-  2>&1 | tee -a "../lunon-deep-research/$EVAL_LOG"
-echo "[w2-sanity4] RACE eval done at $(date -Iseconds)" | tee -a "../lunon-deep-research/$EVAL_LOG"
+  2>&1 | tee -a "$LUNON_REPO/$EVAL_LOG"
+echo "[w2-sanity4] RACE eval done at $(date -Iseconds)" | tee -a "$LUNON_REPO/$EVAL_LOG"
 
-cd /home/connor/dev/lunon-deep-research
+cd "$LUNON_REPO"
 echo "[w2-sanity4] complete. analyze with:"
 echo "  python3 scripts/p2_analyze_b0.py ${RUN_TAG}"
