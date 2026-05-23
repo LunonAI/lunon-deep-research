@@ -45,6 +45,7 @@ def _persist_drift(s, language: str, query: str) -> None:
             "tool_calls": s.tool_calls,
             "numbering_fix": getattr(s, "numbering_fix_stats", {}),
             "refiner_gate": getattr(s, "refiner_gate_verdict", {}),
+            "evidence_dedup": getattr(s, "evidence_dedup_stats", {}),
         }
         _DRIFT_PATH.parent.mkdir(parents=True, exist_ok=True)
         with _DRIFT_LOCK, _DRIFT_PATH.open("a", encoding="utf-8") as fh:
