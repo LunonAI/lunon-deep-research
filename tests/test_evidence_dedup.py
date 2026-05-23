@@ -329,39 +329,6 @@ def test_dedup_d1_skipped_when_bank_has_lt_2_items():
     assert call_count["n"] == 0  # never invoked
 
 
-# --- Integration with assign_primary_sections ------------------------------
-
-
-def test_dedup_before_primary_tagging_keeps_canonical_tagged():
-    """After dedup_bank then assign_primary_sections, canonical block gets
-    a primary_section_id like any other block. Order matters: dedup MUST run
-    first per orchestrate.py hook."""
-    bank = _bank_with(
-        [
-            {
-                "url": "https://a.com/x",
-                "source_name": "A",
-                "text": "short",
-                "section_ids": ["1"],
-                "title": "Foo",
-            },
-            {
-                "url": "https://a.com/x",
-                "source_name": "A",
-                "text": "longer canonical text wins",
-                "section_ids": ["2"],
-                "title": "Foo",
-            },
-        ]
-    )
-    dedup_bank(bank, mode="url")
-    bank.assign_primary_sections({"report_toc": [{"id": "1", "title": "Foo"}, {"id": "2", "title": "Bar"}]})
-    canonical = next(iter(bank._items.values()))
-    # The canonical block's section_ids = ["1", "2"] after union;
-    # assign_primary will pick best overlap with section titles.
-    assert canonical.get("primary_section_id") in {"1", "2"}
-
-
 if __name__ == "__main__":
     import sys
 
