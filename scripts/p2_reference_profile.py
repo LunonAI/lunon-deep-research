@@ -230,10 +230,24 @@ def compute_metrics(article: str) -> dict:
     causal = len(_CAUSAL_EN.findall(article)) + len(_CAUSAL_ZH.findall(article))
     quant_ranges = len(_QUANT_RANGE.findall(article))
 
-    # Opening analysis (first 200 words)
-    head_words = words[:200]
-    head_text = " ".join(head_words)
-    head_has_thesis_sentence = bool(re.search(r"[.。!?！？]", head_text)) and len(head_words) > 10
+    # Opening analysis (first ~200 word-equivalents). Greptile follow-up
+    # (PR #16, round 3): pre-fix this used `words[:200]` where
+    # `words = article.split()`. For a ZH article whose content is mostly
+    # non-whitespace-separated CJK characters, .split() yields a handful of
+    # large chunk-tokens per paragraph, so `words[:200]` would span up to
+    # one-third of a long ZH article — the opening flags then reflected the
+    # whole article, not the opening. Fix: dispatch on CJK-density and
+    # slice in the appropriate unit (latin words for EN, CJK chars × 2 for
+    # ZH-dominated text).
+    if n_cjk >= max(50, n_chars // 10):
+        # ZH-dominated: 200 word-equivalents ≈ 400 CJK chars.
+        head_text = article[:400]
+        head_unit_count = n_cjk if n_cjk < 400 else 200
+    else:
+        head_words = words[:200]
+        head_text = " ".join(head_words)
+        head_unit_count = len(head_words)
+    head_has_thesis_sentence = bool(re.search(r"[.。!?！？]", head_text)) and head_unit_count > 10
     head_has_number = bool(re.search(r"\d", head_text))
     head_has_contrarian = bool(_CONTRARIAN_EN.search(head_text) or _CONTRARIAN_ZH.search(head_text))
     head_has_fwd_date = bool(_FORWARD_DATE.search(head_text) or _FWD_ZH.search(head_text))
