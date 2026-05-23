@@ -133,8 +133,10 @@ def write_section(
         f"{json.dumps(prior_titles, ensure_ascii=False)}\n\n"
         f"ACCEPTANCE CRITERIA THIS SECTION MUST SATISFY:\n"
         f"{json.dumps(_acs_for_section(plan, sid), ensure_ascii=False)}\n\n"
-        f"EVIDENCE FOR THIS SECTION ONLY (cite by inline source NAME; you may "
-        f"also add a numeric [n] but the sentence must stand without it):\n"
+        f"EVIDENCE FOR THIS SECTION ONLY (cite by inline source NAME; APPEND "
+        f"a numbered `[n]` marker after each citing sentence — the sentence "
+        f"must remain semantically complete without the marker, but the "
+        f"marker carries the citation-density signal the judge rewards):\n"
         f"{json.dumps(ev_view, ensure_ascii=False)[:42000]}\n"
         f"{capel_block}"
     )

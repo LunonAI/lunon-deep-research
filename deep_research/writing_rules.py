@@ -210,7 +210,12 @@ def opening_directive() -> str:
     )
 
 
-_MATH_DOMAINS = ("science",)
+# P2-Wave-2.5-D3 Greptile follow-up (PR #14): `finance` added so quantitative
+# finance tasks fire the math-preservation rule via the domain path (without
+# requiring LaTeX detection in the prompt). The rule body already advertises
+# "quantitative finance / engineering equations" coverage; this aligns the
+# domain tuple with the advertised behavior.
+_MATH_DOMAINS = ("science", "finance")
 # Heuristic: the prompt or any TOC title contains LaTeX-style math markup.
 # Three independent matchers to balance recall + precision against the
 # currency false-positive ("$5 vs $10 per unit"):
@@ -443,9 +448,21 @@ def check_insight_minimums(text: str) -> dict:
 
 def citation_strip_audit(text: str) -> dict:
     """Item 19 auditor: strip [n]/[^n] + reference blocks; the body must remain
-    semantically complete and carry inline source NAMES."""
-    stripped = re.sub(r"\[\^?\d+\]", "", text)
-    stripped = re.sub(r"\n#+\s*(References|参考文献|Sources)[\s\S]*$", "", stripped, flags=re.I)
+    semantically complete and carry inline source NAMES.
+
+    P2-Wave-2.5-D3 Greptile follow-up (PR #14): retention is computed against
+    the body WITHOUT the References section (in both numerator and denominator)
+    so that F5's encouraged References-appendix doesn't dominate the retention
+    figure. The audit is really asking "does the body prose survive `[n]`
+    strip?" — the size of the references appendix is irrelevant to that
+    question and was previously dragging articles below the 0.9 threshold
+    purely on bibliography length. After this change the denominator is the
+    body-only character count, so retention reflects only the `[n]`-mark
+    contribution.
+    """
+    refs_pattern = r"\n#+\s*(References|参考文献|Sources)[\s\S]*$"
+    body_only = re.sub(refs_pattern, "", text, flags=re.I)
+    stripped = re.sub(r"\[\^?\d+\]", "", body_only)
     has_inline_names = bool(
         re.search(
             r"(according to|per |报告|estimates|analysis|数据|Source:|"
@@ -453,9 +470,11 @@ def citation_strip_audit(text: str) -> dict:
             stripped,
         )
     )
-    # crude completeness proxy: stripping changed <8% of chars (source-name prose
-    # survives; bracket-dependent prose collapses)
-    retention = len(stripped) / max(1, len(text))
+    # crude completeness proxy: stripping `[n]` markers shouldn't drop body
+    # chars by more than ~10%. With references excluded from the denominator,
+    # a body with 300 markers in ~250k chars sees ~0.5% reduction — well
+    # above the 0.9 threshold. Threshold unchanged; only the denominator scope.
+    retention = len(stripped) / max(1, len(body_only))
     return {
         "ok": has_inline_names and retention > 0.9,
         "retention": round(retention, 3),

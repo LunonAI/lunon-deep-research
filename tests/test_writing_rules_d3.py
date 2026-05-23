@@ -101,9 +101,13 @@ def test_is_math_bearing_explicit_science_domain():
     assert wr._is_math_bearing("science", ["A"], "") is True
 
 
-def test_is_math_bearing_finance_domain_only_if_latex_present():
-    # finance isn't a default math-domain — falls back to LaTeX detection.
-    assert wr._is_math_bearing("finance", ["A"], "Use NPV to compare.") is False
+def test_is_math_bearing_finance_domain_unconditional():
+    """Post-PR-#14 Greptile follow-up: `finance` is now in _MATH_DOMAINS, so
+    quantitative finance tasks trigger the math-preservation rule via the
+    domain path even when the prompt contains no LaTeX markup. The rule
+    body has always advertised 'quantitative finance' coverage; this aligns
+    the domain tuple with the advertised behavior."""
+    assert wr._is_math_bearing("finance", ["A"], "Use NPV to compare.") is True
     assert wr._is_math_bearing("finance", ["A"], "Compute $\\sum x_i$.") is True
 
 
