@@ -340,9 +340,22 @@ def _run_section_loop(s: PipelineState, query, language):
 
     order_ix = {u["id"]: i for i, u in enumerate(units)}
 
-    if webweaver_mode == "off":
-        # Legacy parallel path (default). Sections write concurrently and
-        # never see each other — preserved byte-identical to pre-Wave-1.
+    # Orthogonal axes encoded in DR_WEBWEAVER:
+    #   evidence shaping: off=full | soft/serial=placeholder | hard=omit
+    #   write order:      off/soft=parallel | serial/hard=serial+prior-sections
+    # → off: full + parallel (legacy)
+    # → soft: placeholder + parallel (B1 fallback per WAVE1_DESIGN.md)
+    # → serial: placeholder + serial + prior-sections (B2 primary)
+    # → hard:   omit + serial + prior-sections (aggressive variant)
+    is_serial_mode = webweaver_mode in ("serial", "hard")
+
+    if not is_serial_mode:
+        # Parallel path. `off` is legacy full evidence; `soft` keeps the
+        # ThreadPoolExecutor but the writer renders non-primary evidence as
+        # `see_elsewhere` placeholders (writer.write_section reads
+        # DR_WEBWEAVER directly and calls bank.for_section_pruned). No
+        # prior-section text awareness in this branch — that requires
+        # serial mode by design.
         sec_workers = int(os.environ.get("DR_SECTION_WORKERS", "4"))
         with ThreadPoolExecutor(max_workers=sec_workers) as ex:
             results = list(ex.map(process_one, units))
@@ -350,9 +363,8 @@ def _run_section_loop(s: PipelineState, query, language):
     else:
         # P2-Wave-1-B2: serial write with prior-section text awareness.
         # Section N+1 receives compact summaries of sections 1..N in its
-        # writer prompt. Mode ∈ {soft, serial, hard}; the writer-level
-        # evidence shaping (placeholders vs full) is handled by
-        # `bank.for_section_pruned()` inside `writer.write_section`.
+        # writer prompt. `hard` additionally omits non-primary cross-cutting
+        # eids entirely (vs `serial`'s placeholders).
         units_ordered = sorted(units, key=lambda u: order_ix.get(u["id"], 1e9))
         results = []
         prior_sections_acc: list[dict] = []

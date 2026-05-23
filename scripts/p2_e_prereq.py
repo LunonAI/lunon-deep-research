@@ -27,7 +27,6 @@ Outputs:
 from __future__ import annotations
 
 import json
-import os
 import statistics
 import sys
 import time
@@ -54,12 +53,11 @@ def load_w9_articles(ids: list[int]) -> dict[int, dict]:
 def main() -> int:
     # 10 sampled W9 articles balanced EN/ZH across archetypes.
     # Avoid cleaner-failing ZH (5,8,10,12,27,30,33,35,41,48,49) since we want
-    # articles known to be properly-formed end products.
-    sample_ids = [
-        # EN
-        16,  # zh science (wait, 16 is zh per W9; let me re-balance below)
-    ]
-    # Properly balanced selection (5 EN + 5 ZH spanning archetypes, none cleaner-fail):
+    # articles known to be properly-formed end products. Composition:
+    #   EN gate-verify + spread: 56 (explain-mech), 71 (recommend),
+    #                            67 (trend), 88 (explain-mech), 91 (list-all)
+    #   ZH gate-verify + spread: 16 (sw-dev), 20 (sw-dev), 18 (recommend),
+    #                            4 (list-all), 37 (trend)
     sample_ids = [56, 71, 67, 88, 91, 16, 20, 18, 4, 37]
 
     arts = load_w9_articles(sample_ids)
@@ -117,30 +115,30 @@ def main() -> int:
         sigma = statistics.stdev(ds)
         mean = statistics.mean(ds)
         sigmas.append(sigma)
-        print(f"  id={tid:3d}  n=3  mean_delta={mean:+.4f}  σ={sigma:.4f}  range={max(ds)-min(ds):.4f}")
+        print(f"  id={tid:3d}  n=3  mean_delta={mean:+.4f}  σ={sigma:.4f}  range={max(ds) - min(ds):.4f}")
     mean_sigma = statistics.mean(sigmas) if sigmas else 0.0
     max_sigma = max(sigmas) if sigmas else 0.0
     rec_threshold = round(2 * mean_sigma, 4)
-    print(f"\n=== Aggregate ===")
+    print("\n=== Aggregate ===")
     print(f"  Mean σ across tasks: {mean_sigma:.4f}")
     print(f"  Max σ across tasks:  {max_sigma:.4f}")
     print(f"  Recommended DR_REFINER_GATE_THRESHOLD (2 × mean σ): {rec_threshold:.4f}")
     print(f"  Conservative (2 × max σ): {2 * max_sigma:.4f}")
-    print(f"  Current hardcoded threshold: 0.0200")
+    print("  Current hardcoded threshold: 0.0200")
 
     # Write summary doc
     out_md = ROOT / "p2_artifacts" / "e_prereq_result.md"
     with out_md.open("w") as f:
         f.write("# Wave 0 E-prereq — Refiner-Gate Variance Baseline\n\n")
-        f.write(f"**Date:** 2026-05-22\n")
-        f.write(f"**Method:** Self-vs-self `refiner_gate.compare(article, article)` ")
+        f.write("**Date:** 2026-05-22\n")
+        f.write("**Method:** Self-vs-self `refiner_gate.compare(article, article)` ")
         f.write(f"on {len(arts)} W9 articles × 3 calls = {len(raw_lines)} GPT-5.5 calls.\n\n")
         f.write("## Result\n\n")
         f.write(f"- **Mean σ across tasks:** {mean_sigma:.4f}\n")
         f.write(f"- **Max σ across tasks:** {max_sigma:.4f}\n")
         f.write(f"- **Recommended DR_REFINER_GATE_THRESHOLD (2 × mean σ):** {rec_threshold:.4f}\n")
         f.write(f"- **Conservative (2 × max σ):** {2 * max_sigma:.4f}\n")
-        f.write(f"- **Current hardcoded threshold:** 0.0200\n\n")
+        f.write("- **Current hardcoded threshold:** 0.0200\n\n")
         f.write("## Interpretation\n\n")
         if rec_threshold > 0.02:
             f.write(
@@ -163,7 +161,7 @@ def main() -> int:
                 continue
             sigma = statistics.stdev(ds)
             mean = statistics.mean(ds)
-            f.write(f"| {tid} | {mean:+.4f} | {sigma:.4f} | {max(ds)-min(ds):.4f} |\n")
+            f.write(f"| {tid} | {mean:+.4f} | {sigma:.4f} | {max(ds) - min(ds):.4f} |\n")
         f.write("\n## Method note\n\n")
         f.write(
             "Self-vs-self gives a LOWER bound on the gate's noise floor — calls on DIFFERENT inputs "

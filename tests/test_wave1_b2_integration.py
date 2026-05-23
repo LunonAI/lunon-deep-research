@@ -231,6 +231,45 @@ def test_orchestrate_summarize_helper():
     assert out["summary"].split() == [f"word{i}" for i in range(10)]
 
 
+def test_soft_mode_renders_placeholders_without_prior_section_block():
+    """`soft` is the B1 fallback: parallel writes with placeholder evidence
+    but no prior-section text awareness. Writer should see `see_elsewhere`
+    placeholders for non-primary cross-cutting eids AND no PRIOR SECTIONS
+    WRITTEN content block."""
+    bank, plan = _make_bank_and_plan()
+    captured = {}
+
+    def fake_call(role, user, *, system="", **kwargs):
+        captured["user"] = user
+        return "MOCK"
+
+    unit = {"id": "1", "title": "Auction Theory", "subs": [], "depth": "broad"}
+    # soft mode: writer reads mode and prunes evidence, but the orchestrator
+    # is responsible for prior_sections plumbing. With soft+parallel, the
+    # orchestrator NEVER constructs prior_sections, so writer is invoked
+    # with prior_sections=None (the default).
+    with env(DR_WEBWEAVER="soft"), patch("deep_research.pipeline.writer.llm.call", side_effect=fake_call):
+        writer.write_section(
+            unit,
+            plan,
+            bank,
+            prompt="how do auctions work",
+            language="en",
+            archetype="explain-mechanism",
+            domain="default",
+            prior_titles=["Auction Theory", "Game Mechanics"],
+            # prior_sections intentionally omitted — soft mode runs parallel,
+            # the orchestrator never builds the accumulator.
+        )
+    user = captured["user"]
+    # Placeholders ON (writer reads mode and prunes)
+    assert "see_elsewhere" in user
+    # B3 directive ON (mode != off)
+    assert "WAVE-1-B3" in user
+    # PRIOR SECTIONS WRITTEN content block OFF (no prior_sections passed)
+    assert "Central frame:" not in user
+
+
 if __name__ == "__main__":
     import sys
 
