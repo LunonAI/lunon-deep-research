@@ -22,7 +22,15 @@ import statistics
 import sys
 from pathlib import Path
 
-RESULTS_BASE = Path(os.environ.get("DRB_RESULTS_BASE", "/home/connor/dev/deep_research_bench/results/race"))
+_DEFAULT_RESULTS_BASE = "/home/connor/dev/deep_research_bench/results/race"
+RESULTS_BASE = Path(os.environ.get("DRB_RESULTS_BASE") or _DEFAULT_RESULTS_BASE)
+if not RESULTS_BASE.exists():
+    print(
+        f"WARNING: DRB results base not found ({RESULTS_BASE}). "
+        f"Set DRB_RESULTS_BASE to the deep_research_bench/results/race path on your machine. "
+        f"The script will FileNotFoundError shortly.",
+        file=sys.stderr,
+    )
 W9_MODEL = os.environ.get("P2_W9_MODEL", "lunon-p1-2026-05-21-final")
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -73,10 +81,7 @@ def main() -> int:
     print(f"Overlap: {len(common)} ids (cur={len(cur)}, w9={len(w9)})")
 
     # Per-task table
-    print(
-        f"\n{'id':>4} {'lang':>4} | {'ΔO':>8} {'ΔC':>8} {'ΔI':>8} {'ΔIF':>8} {'ΔR':>8} | "
-        f"{'cur_O':>8} {'w9_O':>8}"
-    )
+    print(f"\n{'id':>4} {'lang':>4} | {'ΔO':>8} {'ΔC':>8} {'ΔI':>8} {'ΔIF':>8} {'ΔR':>8} | {'cur_O':>8} {'w9_O':>8}")
     print("-" * 92)
     rows = []
     for tid in common:
@@ -112,7 +117,9 @@ def main() -> int:
     print("\n=== Aggregates (paired Δ across overlap) ===")
     for k, label in [("do", "ΔOverall"), ("dc", "ΔComp"), ("di", "ΔInsight"), ("dif", "ΔInstFollow"), ("dr", "ΔRead")]:
         a = agg(k)
-        print(f"  {label:>12}: mean={a['mean']:+.4f}  median={a['median']:+.4f}  stdev={a['stdev']:.4f}  sign={a['sign_pos']}/{len(rows)}")
+        print(
+            f"  {label:>12}: mean={a['mean']:+.4f}  median={a['median']:+.4f}  stdev={a['stdev']:.4f}  sign={a['sign_pos']}/{len(rows)}"
+        )
 
     # Per-language
     print("\n=== Per-language ===")
@@ -130,12 +137,14 @@ def main() -> int:
     for k, dim_key in [("dc", "comp"), ("di", "insight"), ("dif", "instr"), ("dr", "read")]:
         mean_d = statistics.mean([r[k] for r in rows])
         contribs[dim_key] = mean_d * DIM_WEIGHTS[dim_key]
-        print(f"  {dim_key:>10}: meanΔ={mean_d:+.4f}  ×weight={DIM_WEIGHTS[dim_key]:.3f}  contrib={contribs[dim_key]:+.4f}")
+        print(
+            f"  {dim_key:>10}: meanΔ={mean_d:+.4f}  ×weight={DIM_WEIGHTS[dim_key]:.3f}  contrib={contribs[dim_key]:+.4f}"
+        )
     total = sum(contribs.values())
     raw_o = statistics.mean([r["do"] for r in rows])
     print(f"  TOTAL weighted-ΔO (sum): {total:+.4f}")
     print(f"  Raw ΔO mean (harness):   {raw_o:+.4f}")
-    print(f"  (Discrepancy if any reflects per-task-weight variation; dim weights are means.)")
+    print("  (Discrepancy if any reflects per-task-weight variation; dim weights are means.)")
 
     # §7.2 scenario selection
     raw_o = statistics.mean([r["do"] for r in rows])
