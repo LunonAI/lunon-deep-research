@@ -9,6 +9,15 @@ plans what the REPORT looks like structurally. The writer fills this scaffold;
 the validator checks against it (every section >= 0.7 of expected length).
 
 Length budgeting respects the per-domain governor (writing_rules.length_ceiling).
+
+P2-Wave-2.5 Greptile PR #17 follow-up: SECTION_BUDGET_CEILING clamps per-
+section `expected_length_tokens` so the validator's 0.7× pass-line stays
+reachable inside the writer's single LLM call. Without the clamp, a TOC
+with very few sections (esp. one deep-weighted section) lands the full
+total_tokens budget on one section — exceeding the writer's max_tokens
+hardcoded ceiling and locking that task into the validator/refiner loop.
+This guard originally landed in PR #12 (D1) and is re-applied here so the
+revert doesn't reintroduce the degenerate-TOC failure case.
 """
 
 from dataclasses import dataclass
@@ -19,6 +28,14 @@ from ..state import Scaffold, ScaffoldSection
 
 # rough token-per-word factor for English-style writers
 _WORDS_PER_TOKEN = 0.75
+
+# Per-section budget ceiling: keeps expected_length_tokens inside what
+# `writer.write_section` can produce in one llm.call (currently capped at
+# 7000 tokens). Validator passes at >= 0.7× expected, so ceiling × 0.7 must
+# be <= writer_max_tokens. With writer_max_tokens=7000, max-reachable
+# expected_length_tokens = 7000 / 0.7 = 10000. We use 8000 (15% buffer
+# below that ceiling) so refiner-pass output also fits.
+SECTION_BUDGET_CEILING = 8_000
 
 
 @dataclass
@@ -62,7 +79,11 @@ def run(inp: InitFormatInput) -> InitFormatOutput:
     for i, s in enumerate(toc):
         sid = s.get("id", f"S{i + 1}")
         share = total_tokens * weights[i] / weight_sum
-        expected = max(800, int(share))
+        # Greptile PR #17 follow-up: clamp upper bound so a degenerate TOC
+        # (few sections, esp. one deep-weighted) can't request more tokens
+        # than the writer can produce in a single call. Floor is the pre-
+        # existing 800-token minimum for empty-section detection.
+        expected = max(800, min(int(share), SECTION_BUDGET_CEILING))
         sections.append(
             ScaffoldSection(
                 section_id=sid,
