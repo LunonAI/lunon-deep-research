@@ -35,8 +35,6 @@ from pathlib import Path
 # diagnose future failure modes precisely.
 
 
-_SECTION_HEADER_RE = re.compile(r"^(#{1,3}|^\d+(?:\.\d+)?)\s+\S", re.MULTILINE)
-
 # First-line-of-section-body test: does the section open with a markdown
 # table row (`|...|`), a bulleted list (`- ` / `* ` / `+ `), or a bare
 # heading (`#`)? If yes, the structural gate FAILS — there's no prose
