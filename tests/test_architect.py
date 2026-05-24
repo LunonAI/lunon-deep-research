@@ -182,6 +182,121 @@ def test_normalize_attaches_specialist_role():
     assert plan["queries"][2]["specialist_role"] == "evidence_gatherer"
 
 
+def test_format_retry_feedback_includes_all_shortfalls():
+    """The feedback string must list every specific bound violation so the
+    architect knows exactly what to fix on retry."""
+    audit = {
+        "n_top_sections": 5,
+        "n_subsections_total": 12,
+        "n_seeds_total": 18,
+        "shortfalls": ["top_sections=5<8", "S1.subs=2<3", "S2.1.seeds=1<2"],
+    }
+    feedback = architect._format_retry_feedback(audit)
+    for s in audit["shortfalls"]:
+        assert s in feedback, f"shortfall {s!r} missing from feedback"
+    # Header and instruction must be present.
+    assert "SHORTFALL FEEDBACK" in feedback
+    assert "REGENERATE the FULL plan" in feedback
+    # Summary line must surface the audit counts the architect needs to see.
+    assert "5 top sections" in feedback
+
+
+def _build_good_plan_obj():
+    """Plan that passes every bound — used as a 'retry succeeded' response."""
+    return {
+        "report_toc": [
+            {
+                "id": f"S{i + 1}",
+                "title": f"Sec {i + 1}",
+                "subsections": [
+                    {
+                        "id": f"S{i + 1}.{j + 1}",
+                        "title": f"Sub {i + 1}.{j + 1}",
+                        "depth_seeds": ["seed a", "seed b"],
+                    }
+                    for j in range(3)
+                ],
+                "depth_target": "broad",
+            }
+            for i in range(9)
+        ],
+        "queries": [],
+        "acceptance_criteria": [],
+    }
+
+
+def _build_shallow_plan_obj():
+    """Plan with too few top sections — should trigger the retry."""
+    return {
+        "report_toc": [
+            {
+                "id": "S1",
+                "title": "Only",
+                "subsections": [{"id": "S1.1", "title": "Lonely"}],
+                "depth_target": "broad",
+            }
+        ],
+        "queries": [],
+        "acceptance_criteria": [],
+    }
+
+
+def test_build_skips_retry_when_first_plan_meets_bounds(monkeypatch):
+    """A first plan that passes the audit should NOT trigger a second
+    architect call — the retry is only for fail-soft enforcement."""
+    calls: list[str] = []
+
+    def fake_call_json(*_args, note: str = "", **_kw):
+        calls.append(note)
+        return _build_good_plan_obj()
+
+    monkeypatch.setattr(architect.llm, "call_json", fake_call_json)
+    plan = architect.build("p", "en", "compare", [], {}, [])
+    assert calls == ["architect"], f"unexpected calls: {calls}"
+    assert plan["_outline_audit"]["retry_attempted"] is False
+
+
+def test_build_triggers_retry_when_first_plan_has_shortfalls(monkeypatch):
+    """A shallow first plan must trigger the retry call. The retry's plan
+    (when better) replaces the original."""
+    calls: list[str] = []
+    responses = iter([_build_shallow_plan_obj(), _build_good_plan_obj()])
+
+    def fake_call_json(*_args, note: str = "", **_kw):
+        calls.append(note)
+        return next(responses)
+
+    monkeypatch.setattr(architect.llm, "call_json", fake_call_json)
+    plan = architect.build("p", "en", "compare", [], {}, [])
+    assert calls == ["architect", "architect.retry"], f"unexpected calls: {calls}"
+    assert plan["_outline_audit"]["retry_attempted"] is True
+    # Retry succeeded — final plan should be the deep one.
+    assert plan["_outline_audit"]["n_top_sections"] == 9
+    assert plan["_outline_audit"]["shortfalls"] == []
+    # The original shortfalls are preserved for diagnostics so a dev-run
+    # reader can see what the retry fixed.
+    assert plan["_outline_audit"]["pre_retry_shortfalls"], "pre_retry_shortfalls should be populated"
+
+
+def test_build_keeps_original_when_retry_makes_things_worse(monkeypatch):
+    """Defensive: if the retry returns a plan with MORE shortfalls than the
+    original (LLM mis-cooperating), keep the original. The retry should
+    never make output worse than the first try."""
+    # First plan: 1 top section (shortfall: top_sections=1<8).
+    # Retry plan: 0 top sections (even more shortfalls including subsections=0).
+    worse = {"report_toc": [], "queries": [], "acceptance_criteria": []}
+    responses = iter([_build_shallow_plan_obj(), worse])
+
+    def fake_call_json(*_args, **_kw):
+        return next(responses)
+
+    monkeypatch.setattr(architect.llm, "call_json", fake_call_json)
+    plan = architect.build("p", "en", "compare", [], {}, [])
+    # We kept the original shallow plan (1 top section), not the worse retry.
+    assert plan["_outline_audit"]["n_top_sections"] == 1
+    assert plan["_outline_audit"].get("retry_rejected_for_more_shortfalls") is True
+
+
 def test_normalize_handles_empty_plan():
     """Defensive: an empty plan dict (e.g. LLM returned `{}` somehow) should
     normalize without crashing — sets defaults so downstream nodes see a
