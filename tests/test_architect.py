@@ -62,6 +62,49 @@ def test_normalize_records_shortfall_when_outline_too_shallow():
     assert audit["subsections_missing_seeds"] == 1
 
 
+def test_absent_field_and_explicit_empty_seeds_produce_identical_audit():
+    """Greptile PR #20 issue 2: a pre-#1 plan with absent depth_seeds field
+    and a post-#1 plan with explicit `"depth_seeds": []` are writer-observably
+    identical (both surface an empty list to the writer), so their audit
+    counters must agree. Previously the absent case bumped
+    subsections_missing_seeds but skipped the seed-count shortfall check,
+    while the explicit-empty case did the opposite — making audits across
+    plan vintages incomparable."""
+    plan_absent = {
+        "report_toc": [
+            {
+                "id": "S1",
+                "title": "Sec 1",
+                "subsections": [{"id": "S1.1", "title": "Sub 1.1"}],
+                "depth_target": "broad",
+            }
+        ],
+        "queries": [],
+        "acceptance_criteria": [],
+    }
+    plan_explicit = {
+        "report_toc": [
+            {
+                "id": "S1",
+                "title": "Sec 1",
+                "subsections": [{"id": "S1.1", "title": "Sub 1.1", "depth_seeds": []}],
+                "depth_target": "broad",
+            }
+        ],
+        "queries": [],
+        "acceptance_criteria": [],
+    }
+    architect._normalize(plan_absent)
+    architect._normalize(plan_explicit)
+    a = plan_absent["_outline_audit"]
+    e = plan_explicit["_outline_audit"]
+    assert a["subsections_missing_seeds"] == e["subsections_missing_seeds"] == 1
+    assert a["n_seeds_total"] == e["n_seeds_total"] == 0
+    # Both must surface the same seeds=0<MIN shortfall — the audit is
+    # comparable across plan vintages.
+    assert a["shortfalls"] == e["shortfalls"]
+
+
 def test_normalize_records_shortfall_when_outline_over_bounds():
     """The upper bounds: too many subsections or seeds also record shortfalls
     (Greptile PR #20 issue 1). Without this an architect that emits 10

@@ -171,12 +171,18 @@ def _normalize(plan: dict) -> None:
         for sub in subs:
             seeds = sub.get("depth_seeds")
             if not isinstance(seeds, list):
-                # Backfill so the writer always sees a list (empty is OK;
-                # it tells the writer "no architect guidance — populate as
-                # you see fit"). Pre-#1 plans had no depth_seeds field.
+                # Backfill so the writer always sees a list. Pre-#1 plans
+                # had no depth_seeds field at all; post-#1 plans that flunk
+                # the schema can also arrive here. Both flow into the same
+                # diagnostic path below — see Greptile PR #20 issue 2.
                 sub["depth_seeds"] = []
+                seeds = sub["depth_seeds"]
+            # An absent-field subsection and an explicit `"depth_seeds": []`
+            # subsection are writer-observably identical (writer sees empty
+            # list in both cases). Count them identically in the audit so
+            # diagnostics are comparable across plan vintages.
+            if not seeds:
                 audit["subsections_missing_seeds"] += 1
-                continue
             audit["n_seeds_total"] += len(seeds)
             if len(seeds) < _SEEDS_MIN:
                 audit["shortfalls"].append(f"{sub.get('id')}.seeds={len(seeds)}<{_SEEDS_MIN}")
