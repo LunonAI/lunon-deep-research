@@ -63,6 +63,7 @@ from .pipeline import (
     criteria_spec,
     design_guide,
     evidence_dedup,
+    footnote_normalize,
     grounding,
     init_format,
     inner_loop,
@@ -238,6 +239,21 @@ def from_plan(ctx: dict, query: str, language: str, task_id: int | None = None) 
     if language == "zh":
         zp = _phase("zh_writer_pass", zh_writer_pass.zh_pass, s.article, query)
         s.article = zp["article"]
+
+    # P2-Option-A-#6 (2026-05-23): footnote_normalize runs BEFORE
+    # numbering_fix so the renumber step sees the final article shape
+    # (including the appended `## References` block) when it assigns
+    # H2 numbers. Merges per-section `[^section_id-N]` footnote tokens
+    # into one global `[^1], [^2], ...` block at article end.
+    fno = _phase("footnote_normalize", footnote_normalize.normalize, s.article)
+    s.article = fno.article
+    s.footnote_normalize_stats = {
+        "n_definitions": fno.n_definitions,
+        "n_inline_markers": fno.n_inline_markers,
+        "n_orphans_stripped": fno.n_orphans_stripped,
+        "n_unused_dropped": fno.n_unused_dropped,
+        "n_renumbered": fno.n_renumbered,
+    }
 
     # Deterministic post-edit (plan v3 §2a+2d+2c-validator): stop-list regex,
     # empty-section collapse, heading-tree renumber. NO LLM call. Closes the
