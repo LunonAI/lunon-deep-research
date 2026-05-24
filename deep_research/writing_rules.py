@@ -289,7 +289,10 @@ def writer_system(
         f"\n\nSTRUCTURAL CAPS — HARD: use 2-7 subsections per major section; "
         f"never exceed 3 levels of heading depth (e.g. 1, 1.1, 1.1.1 — never "
         f"1.1.1.1). Skip a subsection rather than break these limits."
-        f"\n\nHEADING-HASH MAPPING — STRICT (P2-Option-A-#2):\n"
+        # Internal label (P2-Option-A-#2) intentionally kept OUT of the
+        # prompt string below — earlier draft had it inline and the LLM
+        # might have treated it as part of the spec or echoed it back.
+        f"\n\nHEADING-HASH MAPPING — STRICT:\n"
         f"- `# Title` (one `#`) — the REPORT TITLE only. Exactly ONE per "
         f"  article. Never numbered.\n"
         f"- `## 1 Section name` (two `##`) — top-level section. Single-digit "
