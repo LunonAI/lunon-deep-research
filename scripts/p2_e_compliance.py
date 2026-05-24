@@ -24,65 +24,119 @@ import re
 from collections.abc import Callable
 from pathlib import Path
 
-# ---- E1: section-opening framework-recap directive ------------------------
+# ---- E1.v2: section-opening framework-recap (table-aware) -----------------
+#
+# v1 (committed earlier today, see git log) tested at 9.2% compliance because
+# the writer chose table-first openings on taxonomy archetypes (id=91 had
+# 0/50 sections with prose-recap because every section opened with a markdown
+# table directly under the heading). v2 splits compliance into a STRUCTURAL
+# gate (first content block must be prose, NOT a table/list) and a SEMANTIC
+# gate (recap-or-new-value vocabulary in the prose). Tracks both so we can
+# diagnose future failure modes precisely.
 
 
 _SECTION_HEADER_RE = re.compile(r"^(#{1,3}|^\d+(?:\.\d+)?)\s+\S", re.MULTILINE)
-# Tokens the writer uses when recapping a previously-established framework.
-# Calibrated against the reference corpus: openings like "Building on the
-# framework introduced in §1...", "Using the dimension matrix from
-# Chapter 1...", "Applied to the rubric set out above, ...".
+
+# First-line-of-section-body test: does the section open with a markdown
+# table row (`|...|`), a bulleted list (`- ` / `* ` / `+ `), or a bare
+# heading (`#`)? If yes, the structural gate FAILS — there's no prose
+# recap paragraph before the data block.
+_TABLE_OR_LIST_LEAD_RE = re.compile(r"^\s*(?:\|[^\n]*\||[-*+]\s+\S|#{1,4}\s+\S)")
+
 _RECAP_TOKENS = re.compile(
-    r"(?:building on|extends? the framework|using the (?:dimension|rubric|matrix)|"
-    r"applied to the (?:framework|rubric|dimensions)|"
-    r"under the (?:framework|rubric)|"
-    r"per the (?:framework|rubric|dimensions)|"
-    r"using the (?:taxonomy|classification)|"
+    r"(?:building on|extends? the (?:framework|rubric|taxonomy|matrix)|"
+    r"using the (?:dimension|rubric|matrix|taxonomy|framework|classification)|"
+    r"applied to the (?:framework|rubric|dimensions|matrix|taxonomy)|"
+    r"under the (?:framework|rubric|taxonomy)|"
+    r"per the (?:framework|rubric|dimensions|taxonomy)|"
     r"with this (?:framework|rubric|taxonomy) in (?:place|hand)|"
+    r"within the framework (?:set out|established|introduced)|"
+    r"(?:returns? to|revisits?) the (?:framework|rubric|dimensions)|"
+    # New-value-statement tokens (the reference's "this section adds/operationalizes")
+    r"this (?:chapter|section) (?:adds|extends|populates|builds|"
+    r"operationalises|operationalizes|catalogues|catalogs|examines|"
+    r"records|maps|measures|operationalise|operationalize)|"
+    r"the present (?:section|chapter)|"
+    # Named-artefact section references (the E1 narrowing post-bonus-audit):
+    r"§\s*\d+(?:\.\d+)?(?:'s|s')?\s+(?:framework|rubric|taxonomy|matrix|"
+    r"dimensions|four-pillar|three-tier|spine|axis)|"
+    r"section\s+\d+(?:\.\d+)?(?:'s|s')?\s+(?:framework|rubric|taxonomy|"
+    r"matrix|dimensions)|"
     # ZH equivalents
     r"沿用|延续上述|应用上一节|遵循前述|依据前述|按前文|"
-    r"在上述框架下|在前述基础上|基于上文|根据第\d+章)",
-    re.IGNORECASE,
-)
-# Where a section opens by stating what the section ADDS (also rewarded).
-_SECTION_PURPOSE_TOKENS = re.compile(
-    r"(?:this (?:chapter|section) (?:adds|extends|populates|builds|operationalises|operationalizes)|"
-    r"本(?:节|章)(?:补充|拓展|添加|建立|应用|延伸|具体化)|"
-    r"the present (?:section|chapter))",
+    r"在(?:上述|前述)(?:框架|维度|分类)下?|在前述基础上|"
+    r"基于(?:上文|前述|第\d+章)|根据第\d+章|"
+    r"本(?:节|章)(?:补充|拓展|添加|建立|应用|延伸|具体化|"
+    r"考察|分析|讨论|研究|记录|测量)|"
+    r"第\s*\d+\s*(?:节|章)(?:的|所述)?(?:框架|维度|分类|分析|结论))",
     re.IGNORECASE,
 )
 
 
 def e1_section_opening_recap(article: str) -> dict:
-    """E1 compliance: each non-§1 section opens with a recap OR explicit
-    purpose statement (the reference rhetorical pattern, methodology_deep §1)."""
-    # Split into sections by H2/H3 headers (Markdown only; numbered prefixes
-    # caught downstream).
+    """E1.v2 compliance: structural + semantic two-gate check.
+
+    A section is COMPLIANT iff:
+      (structural) first non-heading content line is PROSE — not a markdown
+                   table row, not a bulleted list, not another heading.
+      (semantic)   the first 700 chars of section body contain a recap or
+                   new-value-statement token (broadened token set from v1).
+
+    Both gates tracked separately so we can diagnose failure modes:
+      - structural_ok + semantic_ok = compliant (target)
+      - structural_ok only = prose lead but no recap vocab (vocab mismatch)
+      - semantic_ok only = recap vocab buried after a table-first lead
+      - neither = section ignored the directive entirely
+    """
     sections = re.split(r"(?=^#{1,3}\s+\S)", article, flags=re.MULTILINE)
     sections = [s for s in sections if s.strip()]
     if len(sections) < 2:
-        return {"n_sections": len(sections), "n_with_recap": 0, "rate": 0.0, "applicable": False}
-    # Skip first section (it's the article title or §1).
+        return {"n_sections": len(sections), "n_compliant": 0, "rate": 0.0, "applicable": False}
     candidates = sections[1:]
-    n_with_recap = 0
+    n_compliant = 0
+    n_only_structural = 0  # prose-lead but no recap vocab
+    n_only_semantic = 0  # recap vocab but table-first
+    n_neither = 0
     per_section = []
     for s in candidates:
-        head = s[:600]  # first ~600 chars of section
-        has_recap = bool(_RECAP_TOKENS.search(head))
-        has_purpose = bool(_SECTION_PURPOSE_TOKENS.search(head))
-        if has_recap or has_purpose:
-            n_with_recap += 1
+        body = s.split("\n", 1)[1] if "\n" in s else ""
+        body_stripped = body.lstrip("\n").lstrip()
+        # LEVEL 1 structural: first content line must be prose (not table /
+        # list / nested heading).
+        first_line = body_stripped.split("\n", 1)[0] if body_stripped else ""
+        is_data_block_lead = bool(_TABLE_OR_LIST_LEAD_RE.match(first_line))
+        structural_ok = not is_data_block_lead and bool(first_line)
+        # LEVEL 2 semantic: recap-or-purpose vocabulary in first 700 chars
+        # of body.
+        head = body[:700]
+        semantic_ok = bool(_RECAP_TOKENS.search(head))
+        compliant = structural_ok and semantic_ok
+        if compliant:
+            n_compliant += 1
+        elif structural_ok:
+            n_only_structural += 1
+        elif semantic_ok:
+            n_only_semantic += 1
+        else:
+            n_neither += 1
         per_section.append(
             {
                 "header": (s.split("\n", 1)[0] or "")[:80],
-                "has_recap": has_recap,
-                "has_purpose": has_purpose,
+                "structural_ok": structural_ok,
+                "semantic_ok": semantic_ok,
+                "compliant": compliant,
             }
         )
+    n = len(candidates)
     return {
-        "n_sections": len(candidates),
-        "n_with_recap": n_with_recap,
-        "rate": round(n_with_recap / max(1, len(candidates)), 3),
+        "n_sections": n,
+        "n_compliant": n_compliant,
+        "n_only_structural_ok": n_only_structural,
+        "n_only_semantic_ok": n_only_semantic,
+        "n_neither": n_neither,
+        "rate": round(n_compliant / max(1, n), 3),
+        "structural_rate": round((n_compliant + n_only_structural) / max(1, n), 3),
+        "semantic_rate": round((n_compliant + n_only_semantic) / max(1, n), 3),
         "applicable": True,
         "per_section": per_section,
     }
@@ -136,8 +190,22 @@ def main() -> None:
 
     print(f"[compliance] {args.experiment}: mean compliance rate = {aggregate['mean_rate']}")
     for r in rows:
-        if r.get("applicable"):
-            print(f"  id={r['task_id']:>3}  rate={r['rate']:>5.2f}  sections={r['n_with_recap']}/{r['n_sections']}")
+        if not r.get("applicable"):
+            continue
+        # v2 surfaces structural + semantic separately so we can diagnose
+        # failure mode (table-first vs vocab-mismatch).
+        if "structural_rate" in r:
+            print(
+                f"  id={r['task_id']:>3}  compliant={r['rate']:>5.2f}  "
+                f"struct={r['structural_rate']:>5.2f}  "
+                f"sem={r['semantic_rate']:>5.2f}  "
+                f"({r['n_compliant']}/{r['n_sections']}; "
+                f"struct-only={r['n_only_structural_ok']}, "
+                f"sem-only={r['n_only_semantic_ok']}, "
+                f"neither={r['n_neither']})"
+            )
+        else:
+            print(f"  id={r['task_id']:>3}  rate={r['rate']:>5.2f}")
 
 
 if __name__ == "__main__":
