@@ -62,6 +62,35 @@ def test_normalize_records_shortfall_when_outline_too_shallow():
     assert audit["subsections_missing_seeds"] == 1
 
 
+def test_normalize_records_shortfall_when_outline_over_bounds():
+    """The upper bounds: too many subsections or seeds also record shortfalls
+    (Greptile PR #20 issue 1). Without this an architect that emits 10
+    subs/section or 8 seeds/sub silently passes the audit even though the
+    output structurally deviates from the corpus calibration."""
+    plan = {
+        "report_toc": [
+            {
+                "id": "S1",
+                "title": "Sec",
+                "subsections": [
+                    {"id": f"S1.{i + 1}", "title": "x", "depth_seeds": []}
+                    # 10 subsections > _SUBSECTIONS_MAX (6).
+                    for i in range(10)
+                ]
+                + [{"id": "S1.over", "title": "x", "depth_seeds": ["a"] * 8}],
+                "depth_target": "broad",
+            }
+        ],
+        "queries": [],
+        "acceptance_criteria": [],
+    }
+    architect._normalize(plan)
+    audit = plan["_outline_audit"]
+    # Both upper-bound shortfalls must surface.
+    assert any(s.endswith(f">{architect._SUBSECTIONS_MAX}") for s in audit["shortfalls"]), audit
+    assert any(s.endswith(f">{architect._SEEDS_MAX}") for s in audit["shortfalls"]), audit
+
+
 def test_normalize_records_no_shortfall_when_outline_meets_bounds():
     """A plan that hits the 8-12 / 3-6 / 2-4 bounds records zero shortfalls."""
     plan = {
