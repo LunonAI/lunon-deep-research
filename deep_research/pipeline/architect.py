@@ -43,10 +43,9 @@ criteria into a STRICT JSON research plan. Output ONLY this JSON object:
 {
  "task_analysis": str,
  "report_title": str,
- "report_depth_tier": "compact"|"standard"|"deep"|"comprehensive",
  "report_toc": [ {"id": "S1", "title": str,
     "subsections": [ {"id": "S1.1", "title": str} ... 2-5 ],
-    "depth_target": "deep"|"broad", "depth_rationale": str } ... 5-14 ],
+    "depth_target": "deep"|"broad", "depth_rationale": str } ... <=8 ],
  "acceptance_criteria": [ {"id": "AC1", "category":
     "content"|"source"|"structure"|"depth"|"format"|"exclusion",
     "text": str, "rationale": str, "verification": str,
@@ -65,36 +64,7 @@ HARD RULES:
   subsection titles (structural anchoring → instruction-following).
 - 24-32 queries AND 24-32 acceptance_criteria. Every query maps to >=1 TOC
   section. Distribute query `type` to cover all needed analytical functions.
-- report_toc has 5-14 top-level sections; each 2-5 subsections. Match the
-  prompt's language.
-
-DEPTH-TIER CLASSIFICATION (P2-Wave-2.5-D1, calibrated from Qianfan #1 corpus):
-- "compact": tightly-scoped question ("how do I X", short list-all of <10 items,
-  single-entity recommend). Target ~13k words / ~26k CJK chars.
-- "standard": typical focused question with clear scope. Target ~18k words /
-  ~36k CJK chars.
-- "deep": multi-entity compare, explain-mechanism with full causal chains,
-  multi-faction list-all (12+ items), or any question explicitly asking for
-  "comprehensive analysis" / "detailed report" / "深度研究". Target ~32k words
-  / ~64k CJK chars.
-- "comprehensive": canonical-survey / theoretical-research / open-ended review
-  questions (e.g. "general method for X", "complete analysis of franchise Y").
-  Target ~58k words / ~116k CJK chars. The Qianfan #1 leaderboard's top-scoring
-  research reports run 60-80k words on these.
-Pick the SMALLEST tier the question genuinely demands. Comprehensive is for
-true canonical-survey scope; do not default to it.
-
-SECTION COUNT GUIDANCE (P2-Wave-2.5-D2-F4, calibrated against Qianfan #1
-leaderboard corpus — top-scoring research reports average 12-14 top-level
-sections; our W9 baseline averaged 3-9, well below the leaderboard envelope).
-The depth tier above pins the article-level word target; the bands below
-pin how many sections it should be split across:
-- compact / standard scope: 5-7 top-level sections.
-- deep scope: 8-12 top-level sections.
-- comprehensive scope: 12-14 top-level sections.
-Pick the section count that genuinely serves the question. Do not pad with
-"misc" or "appendix"-style filler sections — every section must advance
-analytical coverage."""
+- report_toc <=8 top-level; each 2-5 subsections. Match the prompt's language."""
 
 
 def build(
@@ -124,13 +94,6 @@ def build(
     return plan
 
 
-# P2-Wave-2.5-D1 Greptile follow-up (PR #12): single source of truth for the
-# tier vocabulary lives in `writing_rules._VALID_DEPTH_TIERS` (derived from
-# `_DEPTH_TIER_MULTIPLIER`). Re-importing here so any future tier addition
-# flows into the architect plan-normalization guard automatically.
-from ..writing_rules import _VALID_DEPTH_TIERS  # noqa: E402
-
-
 def _normalize(plan: dict) -> None:
     """Attach specialist_role to every query; clamp obvious shape issues."""
     for q in plan.get("queries", []):
@@ -142,11 +105,3 @@ def _normalize(plan: dict) -> None:
     plan.setdefault("acceptance_criteria", [])
     plan.setdefault("report_toc", [])
     plan.setdefault("queries", [])
-    # P2-Wave-2.5-D1: clamp depth_tier to known values; downstream
-    # (writing_rules.resolve_depth_tier) falls back to archetype-default
-    # when missing or invalid.
-    tier = plan.get("report_depth_tier")
-    if not isinstance(tier, str) or tier.lower() not in _VALID_DEPTH_TIERS:
-        plan.pop("report_depth_tier", None)
-    else:
-        plan["report_depth_tier"] = tier.lower()
