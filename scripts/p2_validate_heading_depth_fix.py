@@ -27,7 +27,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from deep_research.pipeline.numbering_fix import run as numbering_fix_run  # noqa: E402
 
-_HEADING_RE = re.compile(r"^(#{1,5})\s+(.+?)\s*$", re.MULTILINE)
+_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
 _LEADING_NUM_RE = re.compile(r"^(\d+(?:\.\d+)*)")
 
 

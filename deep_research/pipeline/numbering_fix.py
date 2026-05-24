@@ -250,10 +250,11 @@ def _normalize_hash_from_number(text: str) -> tuple[str, int]:
         if not num_m:
             return m.group(0)
         num_str = num_m.group().strip().rstrip(".")
-        # dot_count of "1" is 1, "1.1" is 2, "1.1.1" is 3. Target hash depth
-        # is (dot_count + 1) because H1 is reserved for the title.
-        dot_count = num_str.count(".") + 1
-        target_depth = min(dot_count + 1, 4)
+        # Number of segments in the dotted number: "1" → 1, "1.1" → 2,
+        # "1.1.1" → 3. (NOT the literal dot count; that'd be 0/1/2.) Target
+        # hash depth is segments+1 because H1 is reserved for the title.
+        segments = num_str.count(".") + 1
+        target_depth = min(segments + 1, 4)
         if target_depth == len(hashes):
             return m.group(0)
         n_modified += 1
