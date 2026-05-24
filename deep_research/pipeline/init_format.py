@@ -8,11 +8,16 @@ Distinct from the Architect plan: Architect plans what to RESEARCH; init_format
 plans what the REPORT looks like structurally. The writer fills this scaffold;
 the validator checks against it (every section >= 0.7 of expected length).
 
-P2-Wave-2.5-D1: length budgeting uses `writing_rules.length_target()` with
-the architect-emitted `report_depth_tier` (compact/standard/deep/comprehensive),
-falling back to archetype-default when the plan doesn't specify. Total target
-tokens are now archetype × depth_tier scaled — see
-p2_artifacts/reference_findings.md §F1 for the calibration.
+Length budgeting respects the per-domain governor (writing_rules.length_ceiling).
+
+P2-Wave-2.5 Greptile PR #17 follow-up: SECTION_BUDGET_CEILING clamps per-
+section `expected_length_tokens` so the validator's 0.7× pass-line stays
+reachable inside the writer's single LLM call. Without the clamp, a TOC
+with very few sections (esp. one deep-weighted section) lands the full
+total_tokens budget on one section — exceeding the writer's max_tokens
+hardcoded ceiling and locking that task into the validator/refiner loop.
+This guard originally landed in PR #12 (D1) and is re-applied here so the
+revert doesn't reintroduce the degenerate-TOC failure case.
 """
 
 from dataclasses import dataclass
@@ -24,18 +29,13 @@ from ..state import Scaffold, ScaffoldSection
 # rough token-per-word factor for English-style writers
 _WORDS_PER_TOKEN = 0.75
 
-# P2-Wave-2.5-D1 Greptile follow-up (PR #12):
-# Per-section expected_length_tokens MUST stay producible inside one writer
-# LLM call. `write_section` scales its `max_tokens` off `target_tokens`, capped
-# at WRITER_CALL_TOKEN_CAP (see writer.py). Validator passes at >=0.7× of
-# expected, so the scaffold target needs `expected <= 0.7 × writer_cap` so a
-# clean first pass can clear validation. With the writer cap at 16,000 tokens
-# this gives a per-section ceiling around 11,000 — but we leave additional
-# headroom and clamp at 9,500 so refiner / corrective passes also fit cleanly.
-# Long-form comprehensive articles get their length from MORE sections, not
-# longer individual sections (matches the reference corpus: 12-14 top-level sections
-# averaging ~6k each on comprehensive tasks, not 6 sections at 13k each).
-SECTION_BUDGET_CEILING = 9_500
+# Per-section budget ceiling: keeps expected_length_tokens inside what
+# `writer.write_section` can produce in one llm.call (currently capped at
+# 7000 tokens). Validator passes at >= 0.7× expected, so ceiling × 0.7 must
+# be <= writer_max_tokens. With writer_max_tokens=7000, max-reachable
+# expected_length_tokens = 7000 / 0.7 = 10000. We use 8000 (15% buffer
+# below that ceiling) so refiner-pass output also fits.
+SECTION_BUDGET_CEILING = 8_000
 
 
 @dataclass
@@ -43,7 +43,6 @@ class InitFormatInput:
     plan: dict  # from architect
     language: str
     domain: str
-    archetype: str = ""
 
 
 @dataclass
@@ -68,27 +67,11 @@ def run(inp: InitFormatInput) -> InitFormatOutput:
     if not toc:
         return InitFormatOutput(scaffold=Scaffold(sections=[], total_target_tokens=0))
 
-    # P2-Wave-2.5-D1 article-level target. The architect MAY emit
-    # `report_depth_tier`; if not, archetype-default applies. ZH adjusts
-    # the unit from words to CJK-char-equivalents inside length_target().
-    plan_tier = inp.plan.get("report_depth_tier")
-    target_units = wr.length_target(
-        inp.domain,
-        archetype=inp.archetype,
-        depth_tier=plan_tier,
-        language=inp.language,
-    )
-    # Convert article-level units back to tokens for the per-section budget.
-    # For EN: units == words. For ZH: units == CJK chars ≈ 2 words.
-    # Tokens ≈ words / _WORDS_PER_TOKEN ≈ 1.33 × words.
-    if inp.language == "zh":
-        equiv_words = target_units / 2
-    else:
-        equiv_words = target_units
-    total_tokens = int(equiv_words / _WORDS_PER_TOKEN)
+    # Domain length governor → median word_len from reference_catalog.jsonl.
+    median_words = wr.length_ceiling(inp.domain)
+    total_tokens = int(median_words / _WORDS_PER_TOKEN)
 
-    # Depth-weighted per-section allocation: architect's per-section
-    # `depth_target` ("deep" vs "broad") still scales individual section share.
+    # Depth-weighted allocation: 'deep' sections get 1.5x, 'broad' 1.0x.
     weights = [1.5 if s.get("depth_target") == "deep" else 1.0 for s in toc]
     weight_sum = sum(weights) or len(toc)
 
@@ -96,17 +79,10 @@ def run(inp: InitFormatInput) -> InitFormatOutput:
     for i, s in enumerate(toc):
         sid = s.get("id", f"S{i + 1}")
         share = total_tokens * weights[i] / weight_sum
-        # P2-Wave-2.5-D1 Greptile follow-up (PR #12): clamp the per-section
-        # expected_length_tokens to a value the writer can actually produce
-        # in a single LLM call. `writer.write_section` scales its `max_tokens`
-        # off `target_tokens` and tops out at WRITER_CALL_TOKEN_CAP. The
-        # validator's 0.7× pass-line therefore needs `expected ≤ cap/0.7` so
-        # a well-behaved generation can clear validation without forcing a
-        # refiner pass. Without the clamp, a comprehensive report with a
-        # deep-weighted section (1.5× weight on a 78k-token total) would
-        # request ~11.7k tokens per section — un-producible under the cap
-        # → systematic revision-pass loops on the very tier this design is
-        # meant to optimise.
+        # Greptile PR #17 follow-up: clamp upper bound so a degenerate TOC
+        # (few sections, esp. one deep-weighted) can't request more tokens
+        # than the writer can produce in a single call. Floor is the pre-
+        # existing 800-token minimum for empty-section detection.
         expected = max(800, min(int(share), SECTION_BUDGET_CEILING))
         sections.append(
             ScaffoldSection(
