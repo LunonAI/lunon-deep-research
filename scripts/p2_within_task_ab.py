@@ -14,11 +14,13 @@ Workflow:
      blind RACE eval can't surface at this sample size.
 
 Usage:
-  python3 scripts/p2_within_task_ab.py \\
-    --a p2_artifacts/baseline.jsonl \\
-    --b p2_artifacts/experiment.jsonl \\
-    --query-file /home/connor/dev/deep_research_bench/data/prompt_data/query.jsonl \\
-    --out p2_artifacts/ab_result.json
+  # Either set DRB_REPO so --query-file is auto-derived:
+  DRB_REPO=/path/to/deep_research_bench \\
+    python3 scripts/p2_within_task_ab.py \\
+      --a p2_artifacts/baseline.jsonl \\
+      --b p2_artifacts/experiment.jsonl \\
+      --out p2_artifacts/ab_result.json
+  # ...or pass --query-file explicitly.
 
 Cost: ~$1-2 per pair judged (one GPT-5.5 call with both articles as input).
 The judge uses `inner_scorer` role from config.py so the model is the same
@@ -37,6 +39,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -193,14 +196,32 @@ def run_ab(a_path: Path, b_path: Path, queries_path: Path, swap_order: bool = Tr
     return {"n_pairs": len(matched), "per_task": per_task, "tally": tally}
 
 
+def _default_query_file() -> str | None:
+    """Greptile follow-up PR #18: avoid hardcoded /home/connor/... default.
+    Derive query-file from `DRB_REPO` env var (the same pattern the shell
+    pilot scripts use). Returns None if DRB_REPO isn't set so argparse
+    treats the arg as required-with-clear-error instead of silently
+    FileNotFoundError-ing at read time on someone else's machine."""
+    drb_repo = os.environ.get("DRB_REPO")
+    if not drb_repo:
+        return None
+    return str(Path(drb_repo) / "data" / "prompt_data" / "query.jsonl")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--a", required=True, help="baseline articles jsonl")
     ap.add_argument("--b", required=True, help="experiment articles jsonl")
+    _default_qf = _default_query_file()
     ap.add_argument(
         "--query-file",
-        default="/home/connor/dev/deep_research_bench/data/prompt_data/query.jsonl",
-        help="DRB query.jsonl source for prompts",
+        default=_default_qf,
+        required=_default_qf is None,
+        help=(
+            "DRB query.jsonl source for prompts. Defaults to "
+            "$DRB_REPO/data/prompt_data/query.jsonl when DRB_REPO is set; "
+            "otherwise --query-file is required."
+        ),
     )
     ap.add_argument("--out", required=True, help="output JSON path for verdicts + tally")
     ap.add_argument("--no-swap", action="store_true", help="disable position-bias randomization")

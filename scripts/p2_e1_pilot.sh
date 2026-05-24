@@ -10,12 +10,15 @@
 #   4. Structural-sim (free): do metrics move toward Qianfan?
 #   5. A/B judge: same-task pairwise comparison per dim
 #
-# Selection: [56, 91, 23] — 3 Qianfan-folder gate-verify IDs:
-#   - 56 (EN explain-mech): math-heavy, framework-recap structure
-#     most natural here
-#   - 91 (EN list-all): pop-culture taxonomy, recap tests cross-section
-#     coherence
-#   - 23 (ZH list-all/recommend): short-scope ZH, tests ZH recap templates
+# Selection: [56, 91, 14] — 3 Qianfan-folder IDs (E1.v2 re-pilot):
+#   - 56 (EN explain-mech): math-heavy, framework-recap most natural here
+#     (best v1 result: 89% structural / 23% semantic compliance)
+#   - 91 (EN list-all): pop-culture taxonomy with table-first failure mode
+#     (worst v1 result: 38% structural / 0% semantic) — tests v2's
+#     prose-paragraph-then-table mandate
+#   - 14 (ZH strict-tier enumeration): NEW test surface not covered in
+#     v1 — quantum-research teams, exercises broadened ZH vocab regex
+#     without over-fitting v2's fixes to v1's specific failure patterns
 #
 # Cost: ~$65 (3 × ~$8 baseline + 3 × ~$8 experiment + ~$15 A/B judge).
 # Wall-clock: ~35-45 min total.
