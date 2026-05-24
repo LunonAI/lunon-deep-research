@@ -193,6 +193,104 @@ def _has_cross_refs(text: str) -> bool:
     return bool(_CROSS_REF_RE.search(text))
 
 
+# ---------- Pre-renumber: hash-from-number normalization (P2-Option-A-#2) ----------
+#
+# W9 audit (2026-05-23): 99/100 articles had MULTIPLE H1 headings and 100/100
+# had hash-vs-number-depth mismatches. Root cause: the writer's training prior
+# treats `#` as "top-level chapter" (e.g. `# 1. Introduction`), but the rest
+# of the pipeline assumes `#` is reserved for the report TITLE (single `# Foo`
+# at the top, never numbered). `renumber_headings()` walks hashes as the
+# source of depth truth, so a `## 1.1.1` heading gets renumbered as if it
+# were a top-level section (single-digit number), collapsing the article's
+# real depth tree to flat noise.
+#
+# This pre-pass restores hash↔number agreement BEFORE renumber runs by using
+# the leading-number's dot-count as the depth source of truth. The number is
+# the writer's intent (writers number reliably; they hash unreliably).
+#
+# Mapping (dot_count = number.count('.') + 1, so "1" → 1; "1.1" → 2; "1.1.1" → 3):
+#   - heading with NO leading number → unchanged (preserves title + prose-titled headings)
+#   - 1-dot ("1")     → H2 (##)   top-level section
+#   - 2-dot ("1.1")   → H3 (###)  sub-section
+#   - 3+-dot ("1.1.1" or deeper) → H4 (####) sub-sub-section (cap matches renumber spec)
+#
+# Why ONLY rewrite numbered headings: the title and any genuinely H1-prose
+# heading (no number) is left alone, which means an already-correct article
+# (one H1 title, all section headings at proper depth) passes through unchanged.
+# Articles affected by the bug get their depth tree reconstructed without us
+# having to guess at writer intent.
+
+
+def _normalize_hash_from_number(text: str) -> tuple[str, int]:
+    """Rewrite each numbered heading's hash level to match its number depth.
+
+    Returns ``(rewritten_text, n_modified)``. ``n_modified`` counts headings
+    whose hash level changed (an already-correct heading passes through with
+    no rewrite and is not counted). Headings without a leading digit are
+    not touched by the first pass, so the report title (``# Foo`` with no
+    number) is preserved.
+
+    A second pass handles the residual case where the writer prefixes a
+    top-level section with a non-digit label ("S6 实际分红", "Section III",
+    "Part A") that the digit regex misses. If multiple ``#`` headings remain
+    after the first pass, every ``#`` after the first one is demoted to
+    ``##`` — they're necessarily not the title (there's only one title).
+
+    The H4 cap mirrors ``renumber_headings``: a 4-dot number like ``1.1.1.1``
+    gets H4 hashes here, and ``renumber_headings`` then further re-numbers
+    the H4 line to fit the 3-numeric-level tree.
+    """
+    n_modified = 0
+
+    def repl(m: re.Match) -> str:
+        nonlocal n_modified
+        hashes = m.group(1)
+        title = m.group(2)
+        num_m = _LEADING_NUM_RE.match(title)
+        if not num_m:
+            return m.group(0)
+        num_str = num_m.group().strip().rstrip(".")
+        # dot_count of "1" is 1, "1.1" is 2, "1.1.1" is 3. Target hash depth
+        # is (dot_count + 1) because H1 is reserved for the title.
+        dot_count = num_str.count(".") + 1
+        target_depth = min(dot_count + 1, 4)
+        if target_depth == len(hashes):
+            return m.group(0)
+        n_modified += 1
+        return f"{'#' * target_depth} {title}"
+
+    out = _HEADING_RE.sub(repl, text)
+
+    # Second pass: demote stray H1s. After number-based rewrite, any H1
+    # other than the FIRST one is a section the writer mistakenly labelled
+    # `# Foo` (often with a non-digit prefix like "S6" or "Part III"). The
+    # first H1 stays as the report title.
+    h1_positions = [m.start() for m in _HEADING_RE.finditer(out) if len(m.group(1)) == 1]
+    if len(h1_positions) > 1:
+        # Walk the headings; second-and-beyond H1s become H2 (which `renumber`
+        # will then assign a top-section number to). Build the rewrite by
+        # iterating heading match boundaries to keep the rest of the article
+        # untouched.
+        pieces: list[str] = []
+        last_end = 0
+        n_seen_h1 = 0
+        for m in _HEADING_RE.finditer(out):
+            hashes = m.group(1)
+            if len(hashes) != 1:
+                continue
+            n_seen_h1 += 1
+            if n_seen_h1 == 1:
+                continue  # the title — leave it alone
+            pieces.append(out[last_end : m.start()])
+            pieces.append(f"## {m.group(2)}")
+            last_end = m.end()
+            n_modified += 1
+        pieces.append(out[last_end:])
+        out = "".join(pieces)
+
+    return out, n_modified
+
+
 def renumber_headings(text: str) -> tuple[str, dict]:
     """Rebuild a valid numbering tree on all #/##/###/#### headings.
 
@@ -373,6 +471,7 @@ class NumberingFixOutput:
     renumbering_applied: bool
     headings_renumbered: int
     headings_demoted: int
+    headings_hash_normalized: int
     cross_refs_rewritten: int
     cross_refs_orphaned: int
     cap_violations: dict
@@ -382,13 +481,20 @@ class NumberingFixOutput:
 def run(article: str) -> NumberingFixOutput:
     """Run the deterministic post-refiner cleanup in fixed order.
 
-    Order (CRITICAL — see plan v3 §2a):
+    Order (CRITICAL — see plan v3 §2a + P2-Option-A-#2):
       1. Stop-list deletes meta-commentary lines/phrases
-      2. Empty-section collapse drops now-empty headings
-      3. Renumber rebuilds the heading-number tree AND rewrites cross-refs
+      2. Hash-from-number normalization rewrites heading hashes to match
+         the leading-number depth (fixes the 99/100-prevalence writer bug
+         where every numbered heading was emitted one hash-level too shallow,
+         collapsing depth trees to flat noise after the renumber step).
+         RUNS BEFORE collapse so the title's adjacent demoted heading is
+         at a deeper level, letting collapse preserve the title as a parent.
+      3. Empty-section collapse drops now-empty headings
+      4. Renumber rebuilds the heading-number tree AND rewrites cross-refs
          using an old→new heading map (P2-F, was: skip on cross-refs)
     """
     a, n_strip = strip_stage_directions(article)
+    a, n_hashnorm = _normalize_hash_from_number(a)
     a, n_collapse = collapse_empty_sections(a)
     a, renum = renumber_headings(a)
     caps = cap_violations(a)
@@ -399,6 +505,7 @@ def run(article: str) -> NumberingFixOutput:
         renumbering_applied=renum["applied"],
         headings_renumbered=renum["n_renumbered"],
         headings_demoted=renum["n_demoted"],
+        headings_hash_normalized=n_hashnorm,
         cross_refs_rewritten=renum.get("cross_refs_rewritten", 0),
         cross_refs_orphaned=renum.get("cross_refs_orphaned", 0),
         cap_violations=caps,
