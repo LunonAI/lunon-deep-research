@@ -44,8 +44,18 @@ criteria into a STRICT JSON research plan. Output ONLY this JSON object:
  "task_analysis": str,
  "report_title": str,
  "report_toc": [ {"id": "S1", "title": str,
-    "subsections": [ {"id": "S1.1", "title": str} ... 2-5 ],
-    "depth_target": "deep"|"broad", "depth_rationale": str } ... <=8 ],
+    "subsections": [ {"id": "S1.1", "title": str,
+                      "depth_seeds": [str, ...] /* 2-4 specific
+                          claims/entities/data points/comparisons that the
+                          writer must populate as H4 sub-sub-sections under
+                          this H3 subsection. Each seed is one focused
+                          treatment, NOT a section title — write seeds as
+                          short noun phrases or claim fragments, e.g.
+                          "Pegasus Cloth evolution mechanics from V1→V2",
+                          "Mu's Crystal Wall vs. Aiolia's Lightning Plasma
+                           damage ratio". */
+                     } ... 3-6 ],
+    "depth_target": "deep"|"broad", "depth_rationale": str } ... 8-12 ],
  "acceptance_criteria": [ {"id": "AC1", "category":
     "content"|"source"|"structure"|"depth"|"format"|"exclusion",
     "text": str, "rationale": str, "verification": str,
@@ -64,7 +74,15 @@ HARD RULES:
   subsection titles (structural anchoring → instruction-following).
 - 24-32 queries AND 24-32 acceptance_criteria. Every query maps to >=1 TOC
   section. Distribute query `type` to cover all needed analytical functions.
-- report_toc <=8 top-level; each 2-5 subsections. Match the prompt's language."""
+- report_toc 8-12 top-level sections; each top section has 3-6 subsections;
+  each subsection has 2-4 depth_seeds. (Calibrated to the #1-leaderboard
+  Qianfan corpus structural profile: mean 9 top sections, 4 subsections per
+  top section, ~2-3 sub-sub-sections per subsection. A shallower outline
+  produces a shorter, lower-Comprehensiveness article.)
+- depth_seeds are the WRITER'S H4-leaf-section seeds — concrete claims,
+  named entities, data points, or comparisons. Avoid generic seeds like
+  "Background" or "Conclusion"; each seed is a specific substantive payload.
+- Match the prompt's language."""
 
 
 def build(
@@ -85,8 +103,11 @@ def build(
     # Adaptive thinking on, effort=low: the structured prompt does the heavy
     # lifting; medium effort added ~5min/task for no plan-quality gain in the
     # W1 smoke. Latency decision (logged).
+    # Bumped from 16k to 24k tokens to fit the new depth_seeds payload:
+    # 8-12 top sections × 3-6 subsections × 2-4 depth_seeds ≈ 200-450 seeds
+    # per plan, plus the existing 24-32 acceptance_criteria + 24-32 queries.
     plan = llm.call_json(
-        "architect", user, system=_SYSTEM, max_tokens=16000, effort="low", think=True, note="architect"
+        "architect", user, system=_SYSTEM, max_tokens=24000, effort="low", think=True, note="architect"
     )
     if not isinstance(plan, dict):  # B-13 defensive — plan structure is critical
         plan = plan[0] if isinstance(plan, list) and plan and isinstance(plan[0], dict) else {}
@@ -94,8 +115,30 @@ def build(
     return plan
 
 
+# P2-Option-A-#1 calibration (mean of the 10 high-scoring Qianfan articles):
+# 9.0 top sections, 4 subsections/top, 2-3 seeds/sub. The 8-12 / 3-6 / 2-4
+# bounds bracket the natural variation across archetypes. Architect emissions
+# outside these bounds are accepted (no fail-loud) but counted for diagnostics
+# so we can see in telemetry whether the writer is being asked to populate a
+# shallow tree.
+_TOP_SECTIONS_MIN = 8
+_TOP_SECTIONS_MAX = 12
+_SUBSECTIONS_MIN = 3
+_SUBSECTIONS_MAX = 6
+_SEEDS_MIN = 2
+_SEEDS_MAX = 4
+
+
 def _normalize(plan: dict) -> None:
-    """Attach specialist_role to every query; clamp obvious shape issues."""
+    """Attach specialist_role to every query; backfill depth_seeds default;
+    record outline-depth diagnostics for downstream telemetry.
+
+    Fail-soft: a plan that comes back with too-few top sections or missing
+    depth_seeds is NOT rejected — the writer still runs on whatever the
+    architect emitted. We record the shortfall in `plan["_outline_audit"]`
+    so the orchestrate-layer can log it and we can see in dev runs whether
+    the architect is honoring the new contract.
+    """
     for q in plan.get("queries", []):
         t = str(q.get("type", "factual")).strip().lower()
         if t not in TYPE_TO_SPECIALIST:
@@ -105,3 +148,44 @@ def _normalize(plan: dict) -> None:
     plan.setdefault("acceptance_criteria", [])
     plan.setdefault("report_toc", [])
     plan.setdefault("queries", [])
+
+    toc = plan.get("report_toc", [])
+    audit = {
+        "n_top_sections": len(toc),
+        "n_subsections_total": 0,
+        "n_seeds_total": 0,
+        "subsections_missing_seeds": 0,
+        "shortfalls": [],
+    }
+    if len(toc) < _TOP_SECTIONS_MIN:
+        audit["shortfalls"].append(f"top_sections={len(toc)}<{_TOP_SECTIONS_MIN}")
+    if len(toc) > _TOP_SECTIONS_MAX:
+        audit["shortfalls"].append(f"top_sections={len(toc)}>{_TOP_SECTIONS_MAX}")
+    for sec in toc:
+        subs = sec.get("subsections", []) or []
+        audit["n_subsections_total"] += len(subs)
+        if len(subs) < _SUBSECTIONS_MIN:
+            audit["shortfalls"].append(f"{sec.get('id')}.subs={len(subs)}<{_SUBSECTIONS_MIN}")
+        if len(subs) > _SUBSECTIONS_MAX:
+            audit["shortfalls"].append(f"{sec.get('id')}.subs={len(subs)}>{_SUBSECTIONS_MAX}")
+        for sub in subs:
+            seeds = sub.get("depth_seeds")
+            if not isinstance(seeds, list):
+                # Backfill so the writer always sees a list. Pre-#1 plans
+                # had no depth_seeds field at all; post-#1 plans that flunk
+                # the schema can also arrive here. Both flow into the same
+                # diagnostic path below — see Greptile PR #20 issue 2.
+                sub["depth_seeds"] = []
+                seeds = sub["depth_seeds"]
+            # An absent-field subsection and an explicit `"depth_seeds": []`
+            # subsection are writer-observably identical (writer sees empty
+            # list in both cases). Count them identically in the audit so
+            # diagnostics are comparable across plan vintages.
+            if not seeds:
+                audit["subsections_missing_seeds"] += 1
+            audit["n_seeds_total"] += len(seeds)
+            if len(seeds) < _SEEDS_MIN:
+                audit["shortfalls"].append(f"{sub.get('id')}.seeds={len(seeds)}<{_SEEDS_MIN}")
+            if len(seeds) > _SEEDS_MAX:
+                audit["shortfalls"].append(f"{sub.get('id')}.seeds={len(seeds)}>{_SEEDS_MAX}")
+    plan["_outline_audit"] = audit
