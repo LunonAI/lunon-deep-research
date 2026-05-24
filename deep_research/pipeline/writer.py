@@ -156,6 +156,23 @@ def write_section(
         "word treatment of a specific entity, claim, or comparison.\n"
     )
 
+    # P2-Option-A-#7: surface the entity_matrix (when present) to the writer
+    # for list-all/compare archetypes. The matrix is the article's structural
+    # spine; the writer renders it as a table early in the article (typically
+    # in the first or second top section) AND uses it to enforce equal-depth
+    # treatment per entity downstream. Other archetypes don't see the matrix.
+    entity_matrix_block = ""
+    em = plan.get("entity_matrix")
+    if archetype in {"list-all", "compare"} and isinstance(em, dict) and em.get("entities"):
+        entity_matrix_block = (
+            f"\nENTITY MATRIX (article spine for this archetype) — "
+            f"render this as a markdown table near the article start and "
+            f"give EACH entity equal-depth treatment in the downstream "
+            f"sections (no entity dropped, no entity over-weighted vs "
+            f"siblings):\n"
+            f"{json.dumps(em, ensure_ascii=False)}\n"
+        )
+
     user = (
         f"PROMPT ({language}):\n{prompt}\n\n"
         f"You are writing ONLY this section of the report (other sections are "
@@ -165,6 +182,7 @@ def write_section(
         f"{json.dumps(unit['subs'], ensure_ascii=False)}\n"
         f"DEPTH TARGET: {unit['depth']}\n"
         f"{depth_block}"
+        f"{entity_matrix_block}"
         f"REPORT OUTLINE (titles only, for coherence): "
         f"{json.dumps(prior_titles, ensure_ascii=False)}\n\n"
         f"ACCEPTANCE CRITERIA THIS SECTION MUST SATISFY:\n"
