@@ -32,15 +32,31 @@ def _capel_g_on() -> bool:
 
 
 def outline_units(plan):
-    """Flatten the Architect TOC into ordered section units."""
+    """Flatten the Architect TOC into ordered section units.
+
+    Each subsection includes its `depth_seeds` (post-P2-Option-A-#1): 2-4
+    short claim/entity/data-point phrases that the writer should populate
+    as H4 sub-sub-sections under the H3 subsection. Pre-#1 plans had no
+    depth_seeds field — architect._normalize backfills an empty list, which
+    the writer treats as "no architect guidance, populate as you see fit".
+    """
     units = []
     for s in plan.get("report_toc", []):
+        subs = []
+        for sub in s.get("subsections", []) or []:
+            subs.append(
+                {
+                    "id": sub.get("id"),
+                    "title": sub.get("title", ""),
+                    "depth_seeds": sub.get("depth_seeds", []) or [],
+                }
+            )
         units.append(
             {
                 "id": s.get("id"),
                 "title": s.get("title", ""),
                 "level": 1,
-                "subs": s.get("subsections", []),
+                "subs": subs,
                 "depth": s.get("depth_target", "broad"),
             }
         )
@@ -120,13 +136,35 @@ def write_section(
     if capel_active:
         capel_block = "\n\n" + wr.capel_directive(int(target_tokens))
 
+    # SUBSECTIONS payload (P2-Option-A-#1): each subsection carries its
+    # depth_seeds list. The writer renders each subsection as an H3 and
+    # populates each depth_seed as an H4 sub-sub-section. Old plans without
+    # depth_seeds present an empty list, in which case the writer is told
+    # to choose its own H4 leaves (back-compat).
+    has_any_seeds = any(sub.get("depth_seeds") for sub in unit["subs"])
+    depth_block = (
+        "DEPTH POPULATION — REQUIRED:\n"
+        "For each H3 subsection above, render ALSO each of its depth_seeds "
+        "as an H4 sub-sub-section (####). Each H4 leaf = a focused 400-800 "
+        "word treatment of one depth_seed (named entity, claim, data point, "
+        "or comparison). If a subsection has no depth_seeds, pick 2-4 H4 "
+        "leaves yourself based on the prompt + evidence — do not skip the "
+        "depth tier.\n"
+        if has_any_seeds
+        else "DEPTH POPULATION: pick 2-4 H4 sub-sub-sections per H3 subsection "
+        "(architect did not pre-seed them). Each H4 leaf = a focused 400-800 "
+        "word treatment of a specific entity, claim, or comparison.\n"
+    )
+
     user = (
         f"PROMPT ({language}):\n{prompt}\n\n"
         f"You are writing ONLY this section of the report (other sections are "
         f"written separately — do not write them, do not repeat the opening).\n"
         f"SECTION {sid}: {unit['title']}\n"
-        f"SUBSECTIONS: {json.dumps(unit['subs'], ensure_ascii=False)}\n"
+        f"SUBSECTIONS (with depth_seeds for H4 leaves): "
+        f"{json.dumps(unit['subs'], ensure_ascii=False)}\n"
         f"DEPTH TARGET: {unit['depth']}\n"
+        f"{depth_block}"
         f"REPORT OUTLINE (titles only, for coherence): "
         f"{json.dumps(prior_titles, ensure_ascii=False)}\n\n"
         f"ACCEPTANCE CRITERIA THIS SECTION MUST SATISFY:\n"
@@ -138,7 +176,20 @@ def write_section(
     )
     if feedback:
         user += f"\nREVISION FEEDBACK — fix these and integrate the cited evidence inline:\n{feedback}\n"
-    raw = llm.call("writer", user, system=sys, max_tokens=7000, note=f"writer.sec.{sid}")
+    # Bumped from 7000 → 14000 to accommodate the deeper H3→H4 tree the
+    # depth_seeds drive. This is the LLM-call upper bound; in production with
+    # `DR_CAPEL_G=on` (the default) the per-section CAPEL countdown — driven
+    # by `target_tokens` ≈ length_ceiling/0.75/n_top_sections (≈2.5-3.5k tokens
+    # for the typical 8-12-section plan) — is the OPERATIVE per-section cap,
+    # not max_tokens. The 14k headroom matters in three cases: (a) CAPEL
+    # disabled (`DR_CAPEL_G=off`); (b) degenerate TOCs with <=4 sections where
+    # weight-share + `SECTION_BUDGET_CEILING=20_000` push target_tokens past
+    # 7k; (c) refiner-pass output that needs room to grow. The "depth uplift"
+    # PR #20 promises lands primarily via (i) the architect's deeper outline
+    # (more sections × more H3 × explicit depth_seeds payload) and (ii) the
+    # length_ceiling 2.2× bump that lifts the per-section CAPEL target —
+    # NOT primarily via this max_tokens headroom.
+    raw = llm.call("writer", user, system=sys, max_tokens=14000, note=f"writer.sec.{sid}")
     if capel_active:
         text, stats = strip_capel_markers(raw)
         return text, stats

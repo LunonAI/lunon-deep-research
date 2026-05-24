@@ -30,12 +30,17 @@ from ..state import Scaffold, ScaffoldSection
 _WORDS_PER_TOKEN = 0.75
 
 # Per-section budget ceiling: keeps expected_length_tokens inside what
-# `writer.write_section` can produce in one llm.call (currently capped at
-# 7000 tokens). Validator passes at >= 0.7× expected, so ceiling × 0.7 must
-# be <= writer_max_tokens. With writer_max_tokens=7000, max-reachable
-# expected_length_tokens = 7000 / 0.7 = 10000. We use 8000 (15% buffer
-# below that ceiling) so refiner-pass output also fits.
-SECTION_BUDGET_CEILING = 8_000
+# `writer.write_section` can produce in one llm.call. Validator passes at
+# >= 0.7× expected, so ceiling × 0.7 must be <= writer_max_tokens.
+#
+# P2-Option-A-#1 (2026-05-23): writer.max_tokens bumped 7000 → 14000 to
+# accommodate the depth_seeds H4-leaf payload. Matching ceiling = 14000 / 0.7
+# = 20000. Without this re-calibration the per-section CAPEL countdown would
+# still terminate the writer at the pre-#1 token budget (~2500-3900 tokens
+# per section), capping output at ~1500-2200 words/section and structurally
+# preventing the depth_seeds from being populated as H4 leaves regardless of
+# the 14k max_tokens headroom (Greptile PR #20 issue 2).
+SECTION_BUDGET_CEILING = 20_000
 
 
 @dataclass
