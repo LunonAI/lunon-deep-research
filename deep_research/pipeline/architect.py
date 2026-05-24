@@ -22,10 +22,16 @@ TYPE_TO_SPECIALIST = {
 
 # Archetype-specific Architect emphasis (item 16: per-archetype planner template).
 _ARCH_EMPHASIS = {
-    "list-all": "Exhaustive enumeration: a section/subsection or table row per "
-    "required item; bias query mix to factual + comparative.",
-    "compare": "Build an explicit entity×dimension comparison matrix as a core "
-    "section; bias to comparative + factual; equal depth per entity.",
+    "list-all": "Exhaustive enumeration: populate the REQUIRED entity_matrix "
+    "with every prompt-enumerated entity AND the dimensions a reader would "
+    "compare them on. The writer renders the matrix as a table near the "
+    "article's start. Bias query mix to factual + comparative.",
+    "compare": "Build an explicit entity×dimension comparison matrix as the "
+    "article's core deliverable: populate the REQUIRED entity_matrix with "
+    "every entity the prompt asks to compare AND the dimensions of comparison. "
+    "The writer renders this matrix as a table near the article's start AND "
+    "gives each entity equal-depth treatment downstream. Bias to comparative "
+    "+ factual.",
     "trend": "Chronological evolution + current state + forward signal; bias to "
     "trend + causal; demand dated developments.",
     "explain-mechanism": "Causal spine: step-by-step chains showing each "
@@ -43,6 +49,16 @@ criteria into a STRICT JSON research plan. Output ONLY this JSON object:
 {
  "task_analysis": str,
  "report_title": str,
+ "entity_matrix": {                /* REQUIRED for list-all and compare; */
+   "entities": [str, ...],         /* omit (or set to null) for others. */
+   "dimensions": [str, ...]
+ },                                /* 5-20 entities (rows), 4-8 dimensions
+                                      (columns). The article's spine is an
+                                      explicit entity×dimension matrix that
+                                      the writer renders as a table early on
+                                      AND uses to ensure EQUAL depth per
+                                      entity (no entity dropped, no entity
+                                      over-weighted vs siblings).            */
  "report_toc": [ {"id": "S1", "title": str,
     "subsections": [ {"id": "S1.1", "title": str,
                       "depth_seeds": [str, ...] /* 2-4 specific
@@ -82,6 +98,11 @@ HARD RULES:
 - depth_seeds are the WRITER'S H4-leaf-section seeds — concrete claims,
   named entities, data points, or comparisons. Avoid generic seeds like
   "Background" or "Conclusion"; each seed is a specific substantive payload.
+- entity_matrix REQUIRED for list-all and compare archetypes. Populate
+  entities with EVERY entity the prompt names (verbatim where possible),
+  AND choose 4-8 dimensions a reader would compare them across (the
+  "columns" of the table the writer will render). Omit entity_matrix (or
+  set to null) for other archetypes.
 - Match the prompt's language."""
 
 
@@ -111,7 +132,7 @@ def build(
     )
     if not isinstance(plan, dict):  # B-13 defensive — plan structure is critical
         plan = plan[0] if isinstance(plan, list) and plan and isinstance(plan[0], dict) else {}
-    _normalize(plan)
+    _normalize(plan, archetype=archetype)
     return plan
 
 
@@ -128,16 +149,31 @@ _SUBSECTIONS_MAX = 6
 _SEEDS_MIN = 2
 _SEEDS_MAX = 4
 
+# P2-Option-A-#7 entity_matrix bounds (list-all and compare archetypes only).
+# The 5-20 entity range covers the corpus distribution: id=91 Saint Seiya
+# (~15 named entities), id=8 ML materials (~7 method classes), id=20 Streamable
+# HTTP (~5 transport variants). 4-8 dimensions covers a useful comparison
+# table without overwhelming reader cognition.
+_ENTITY_MATRIX_ENTITIES_MIN = 5
+_ENTITY_MATRIX_ENTITIES_MAX = 20
+_ENTITY_MATRIX_DIMENSIONS_MIN = 4
+_ENTITY_MATRIX_DIMENSIONS_MAX = 8
 
-def _normalize(plan: dict) -> None:
+
+def _normalize(plan: dict, *, archetype: str | None = None) -> None:
     """Attach specialist_role to every query; backfill depth_seeds default;
-    record outline-depth diagnostics for downstream telemetry.
+    backfill entity_matrix default for list-all/compare archetypes; record
+    outline-depth diagnostics for downstream telemetry.
 
     Fail-soft: a plan that comes back with too-few top sections or missing
     depth_seeds is NOT rejected — the writer still runs on whatever the
     architect emitted. We record the shortfall in `plan["_outline_audit"]`
     so the orchestrate-layer can log it and we can see in dev runs whether
     the architect is honoring the new contract.
+
+    `archetype` is optional for back-compat with tests that call _normalize
+    directly without a plan-build cycle. When provided, the audit also
+    surfaces entity_matrix shortfalls for list-all/compare archetypes.
     """
     for q in plan.get("queries", []):
         t = str(q.get("type", "factual")).strip().lower()
@@ -188,4 +224,35 @@ def _normalize(plan: dict) -> None:
                 audit["shortfalls"].append(f"{sub.get('id')}.seeds={len(seeds)}<{_SEEDS_MIN}")
             if len(seeds) > _SEEDS_MAX:
                 audit["shortfalls"].append(f"{sub.get('id')}.seeds={len(seeds)}>{_SEEDS_MAX}")
+
+    # P2-Option-A-#7 (2026-05-23): entity_matrix audit + backfill for
+    # list-all and compare archetypes. The matrix is the article's spine
+    # (rendered as a table near the article start) and the writer uses it
+    # to ensure equal-depth treatment per entity.
+    em = plan.get("entity_matrix")
+    if archetype in {"list-all", "compare"}:
+        if not isinstance(em, dict):
+            # Backfill so writer never crashes on `entity_matrix["entities"]`.
+            em = {"entities": [], "dimensions": []}
+            plan["entity_matrix"] = em
+            audit["shortfalls"].append("entity_matrix=missing(required-for-archetype)")
+        ents = em.get("entities") if isinstance(em.get("entities"), list) else None
+        dims = em.get("dimensions") if isinstance(em.get("dimensions"), list) else None
+        if ents is None:
+            em["entities"] = []
+            ents = em["entities"]
+        if dims is None:
+            em["dimensions"] = []
+            dims = em["dimensions"]
+        audit["entity_matrix_entities"] = len(ents)
+        audit["entity_matrix_dimensions"] = len(dims)
+        if len(ents) < _ENTITY_MATRIX_ENTITIES_MIN:
+            audit["shortfalls"].append(f"entity_matrix.entities={len(ents)}<{_ENTITY_MATRIX_ENTITIES_MIN}")
+        if len(ents) > _ENTITY_MATRIX_ENTITIES_MAX:
+            audit["shortfalls"].append(f"entity_matrix.entities={len(ents)}>{_ENTITY_MATRIX_ENTITIES_MAX}")
+        if len(dims) < _ENTITY_MATRIX_DIMENSIONS_MIN:
+            audit["shortfalls"].append(f"entity_matrix.dimensions={len(dims)}<{_ENTITY_MATRIX_DIMENSIONS_MIN}")
+        if len(dims) > _ENTITY_MATRIX_DIMENSIONS_MAX:
+            audit["shortfalls"].append(f"entity_matrix.dimensions={len(dims)}>{_ENTITY_MATRIX_DIMENSIONS_MAX}")
+
     plan["_outline_audit"] = audit
