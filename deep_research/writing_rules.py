@@ -174,9 +174,25 @@ _ARCH_REFINE_EMPHASIS = {
 }
 
 
+# P2-Option-A-#1 length target multiplier. The historical _MED catalog was
+# calibrated to Lunon's W9 outputs (~9k word median); the #1-leaderboard
+# the reference corpus runs ~22k words mean across 100 articles (and ~99k on the
+# explain-mechanism extreme like id=56). 2.2x roughly bridges the gap on the
+# typical task without overshooting the deepest tasks. Per-domain medians
+# remain the relative shape — finance and science still run longer than
+# travel/literature, just at a higher absolute floor.
+_LENGTH_TARGET_MULT = 2.2
+
+
 def length_ceiling(domain: str) -> int:
+    """Per-domain SOFT word target. Bumped 2.2x post-#1 to match reference-corpus
+    structural depth. The writer prompt now frames this as a soft target rather
+    than a hard ceiling — see writer_system below. Callers that want the
+    historical (pre-#1) value should compute `length_ceiling(domain) / 2.2`.
+    """
     key = _DOMAIN_KEY.get(domain, "_overall")
-    return _MED.get(key, _MED["_overall"])
+    raw = _MED.get(key, _MED["_overall"])
+    return int(raw * _LENGTH_TARGET_MULT)
 
 
 def capel_directive(target_tokens: int) -> str:
@@ -274,10 +290,15 @@ def writer_system(
         f"You are an elite research-report writer. Language: {language}. "
         f"Write partner-grade analytical prose (not bullet dumps), with "
         f"headings/subheadings and comparison tables where they aid the reader."
-        f"\n\nCONCISENESS IS A FIRST-CLASS GOAL. The benchmark judge scored "
-        f"our prior articles 81% LOSS on Readability for being overlong, "
-        f"repetitive, and structurally inconsistent. Match the reference "
-        f"length conventions; do not pad."
+        f"\n\nDEPTH BEFORE BREVITY (recalibrated post-#1). Earlier guidance "
+        f"told you to be terse because we were losing Readability points to "
+        f"padding; that was a 9k-word-median calibration. The corpus we now "
+        f"target averages ~22k words and reaches ~80-100k on deep analytical "
+        f"tasks. Match that depth by populating every subsection with H4 "
+        f"leaves (one per depth_seed when provided), each treating a single "
+        f"concrete claim/entity/data point. PADDING (filler sentences, "
+        f"repeated framing, recap-of-recap) still hurts; ADDED LEAVES with "
+        f"new payload do not."
         # AgentCPM-Report (arXiv 2602.06540) verbatim non-redundancy + meta-suppression directives
         f"\n\nYou should ensure that the content you write is not redundant "
         f"with other sections. Each section must advance the report; do NOT "
@@ -286,9 +307,11 @@ def writer_system(
         f"process, your methodology, your evidence sourcing, or your writing "
         f"approach. Output ONLY the report content itself. The reader does "
         f"not see (and is not told) how the report was produced."
-        f"\n\nSTRUCTURAL CAPS — HARD: use 2-7 subsections per major section; "
-        f"never exceed 3 levels of heading depth (e.g. 1, 1.1, 1.1.1 — never "
-        f"1.1.1.1). Skip a subsection rather than break these limits."
+        f"\n\nSTRUCTURAL CAPS — HARD: use 3-6 subsections per major section "
+        f"(post-#1: aligned to the architect's 3-6 subsection bound, which "
+        f"matches the high-scoring-corpus mean of ~4); never exceed 3 levels "
+        f"of heading depth (e.g. 1, 1.1, 1.1.1 — never 1.1.1.1). Skip a "
+        f"subsection rather than break these limits."
         # Internal label (P2-Option-A-#2) intentionally kept OUT of the
         # prompt string below — earlier draft had it inline and the LLM
         # might have treated it as part of the spec or echoed it back.
@@ -306,9 +329,13 @@ def writer_system(
         f"`### 1.2 Bronze Saints` instead. Re-using `#` after the title is "
         f"the single most common heading bug; do not do it."
         f"\n\n{opening_directive()}\n\n{middle_block}"
-        f"\n\nLENGTH GOVERNOR — HARD: target ≈{ceil} words total (EN reference "
-        f"median for this domain). HARD ceiling = {int(ceil * 1.15)} words; "
-        f"exceeding it actively HURTS the score. Be dense, not padded.\n\n"
+        f"\n\nLENGTH TARGET — SOFT: aim for ≈{ceil} words total ({int(ceil * 0.7)}"
+        f"-{int(ceil * 1.4)} acceptable range; this is a calibration band, NOT "
+        f"a hard cap). Run shorter on simple prompts where the evidence is "
+        f"thin; run longer on deep analytical prompts (explain-mechanism, "
+        f"predict, list-all) where the corpus reference articles average "
+        f"~22k+ words. Length comes from POPULATED H4 LEAVES, not from "
+        f"stretching prose.\n\n"
         f"Cover every section of the plan TOC verbatim: "
         f"{json.dumps(toc_titles, ensure_ascii=False)[:2000]}"
     )
