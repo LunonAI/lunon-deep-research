@@ -34,10 +34,12 @@ export DRB_PHASE=P1
 export DR_CAPEL_G=on
 export DR_EVIDENCE_DEDUP=url+embedding
 
-IDS="56,91,23"
-LOG="p2_artifacts/e1_pilot.log"
-BASELINE_JSONL="p2_artifacts/e1_baseline.jsonl"
-EXPERIMENT_JSONL="p2_artifacts/e1_experiment.jsonl"
+# E1.v2 re-pilot selection: keep 56 + 91 (different v1 failure modes) +
+# swap 23 for 14 (ZH strict-tier enumeration; new test surface not in v1).
+IDS="56,91,14"
+LOG="p2_artifacts/e1_v2_pilot.log"
+BASELINE_JSONL="p2_artifacts/e1_v2_baseline.jsonl"
+EXPERIMENT_JSONL="p2_artifacts/e1_v2_experiment.jsonl"
 mkdir -p p2_artifacts
 
 echo "[e1-pilot] launching at $(date -Iseconds)" | tee "$LOG"
@@ -70,14 +72,14 @@ echo "[e1-pilot] === STEP 3: compliance check ===" | tee -a "$LOG"
 /usr/bin/python3 scripts/p2_e_compliance.py \
   --experiment e1_section_opening_recap \
   --jsonl "$EXPERIMENT_JSONL" \
-  --out p2_artifacts/e1_compliance.json \
+  --out p2_artifacts/e1_v2_compliance.json \
   2>&1 | tee -a "$LOG"
 
 # -- Step 4: structural-similarity diff ($0) -------------------------------
 echo "[e1-pilot] === STEP 4: structural-similarity (E1 vs the reference) ===" | tee -a "$LOG"
 /usr/bin/python3 scripts/p2_structural_sim.py \
   --jsonl "$EXPERIMENT_JSONL" \
-  --out p2_artifacts/e1_struct_sim.json \
+  --out p2_artifacts/e1_v2_struct_sim.json \
   2>&1 | tee -a "$LOG"
 
 # -- Step 5: within-task A/B judge -----------------------------------------
@@ -88,13 +90,13 @@ echo "[e1-pilot] === STEP 5: within-task A/B judge ===" | tee -a "$LOG"
   --a "$BASELINE_JSONL" \
   --b "$EXPERIMENT_JSONL" \
   --query-file "$QUERY_FILE" \
-  --out p2_artifacts/e1_ab.json \
+  --out p2_artifacts/e1_v2_ab.json \
   2>&1 | tee -a "$LOG"
 
 echo "[e1-pilot] complete at $(date -Iseconds)" | tee -a "$LOG"
 echo "[e1-pilot] artifacts:"
 echo "  $BASELINE_JSONL"
 echo "  $EXPERIMENT_JSONL"
-echo "  p2_artifacts/e1_compliance.json"
-echo "  p2_artifacts/e1_struct_sim.json"
-echo "  p2_artifacts/e1_ab.json"
+echo "  p2_artifacts/e1_v2_compliance.json"
+echo "  p2_artifacts/e1_v2_struct_sim.json"
+echo "  p2_artifacts/e1_v2_ab.json"
