@@ -22,9 +22,9 @@ Usage:
       --out p2_artifacts/ab_result.json
   # ...or pass --query-file explicitly.
 
-Cost: ~$1-2 per pair judged (one GPT-5.5 call with both articles as input).
-The judge uses `inner_scorer` role from config.py so the model is the same
-GPT-5.5 family used by the harness — pairwise verdicts should correlate with
+Cost: ~$1-2 per pair judged (one call with both articles as input; actual cost
+depends on the model configured for the `inner_scorer` role in config.py).
+The judge uses `inner_scorer` so pairwise verdicts should correlate with
 RACE scores without re-running the full RACE pipeline.
 
 Honest caveat: the judge is the SAME model as the harness judge but called
