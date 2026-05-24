@@ -25,6 +25,14 @@
 
 set -euo pipefail
 
+# Restore the caller's branch if the script exits early (e.g. adapter crash
+# mid-run between the `git checkout main` baseline step and the `git checkout
+# p2/e1-with-ab-toolchain` experiment step). Without this trap, a failure
+# during step 1 strands the repo on `main` and the next invocation has to
+# figure out the branch state manually.
+ORIGINAL_BRANCH="$(git symbolic-ref --short HEAD 2>/dev/null || git rev-parse --short HEAD)"
+trap 'git checkout "$ORIGINAL_BRANCH" 2>/dev/null || true' EXIT
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LUNON_REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
 DRB_REPO="${DRB_REPO:-/home/connor/dev/deep_research_bench}"
