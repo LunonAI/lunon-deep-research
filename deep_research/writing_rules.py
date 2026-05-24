@@ -58,6 +58,70 @@ CLEANING_RESISTANT_RULE = (
     "footnote, or the reference list."
 )
 
+# P2-Wave-2.5-E1.v2 (2026-05-23, post-v1-pilot revision):
+# v1 (committed earlier today) tested at 9.2% compliance on a 3-task pilot.
+# Root cause: writer chose TABLE-FIRST section openings for taxonomy archetypes
+# (id=91 had 0/50 sections with recap because every section opened with a
+# markdown table, not prose). The v1 directive assumed prose openings and
+# silently failed on tables.
+#
+# v2 fixes the structural blind-spot: every section opens with a 1-2 sentence
+# PROSE PARAGRAPH first, even when the section's primary content is a data
+# table. The recap paragraph comes BEFORE the table; the table follows as
+# the populated detail. Tables stand on their own; the prose anchors them
+# to the §1 framework.
+#
+# Calibrated against the #1 reference corpus per p2_artifacts/reference_methodology_deep.md
+# §1 finding (framework→population→synthesis loop) PLUS the bonus-article
+# audit's narrowing that section-number refs ARE acceptable when paired with
+# named artefacts.
+_SECTION_OPENING_RECAP_RULE = (
+    "SECTION-OPENING FRAMEWORK RECAP (P2-Wave-2.5-E1.v2):\n"
+    "EVERY section after the first opens with a 1-2 SENTENCE PROSE PARAGRAPH "
+    "that does two things: (a) recap the framework, taxonomy, dimensions, "
+    "or analytical spine established in §1 (or the most recent framework-"
+    "introducing section), and (b) state what this section ADDS by "
+    "populating that framework with new entities, evidence, or scenarios. "
+    "Only AFTER that prose paragraph may the section's primary content "
+    "(table, list, formula, narrative) appear.\n\n"
+    "Critical: when the section's main content is a markdown table, the "
+    "table does NOT replace the prose recap — the table follows the recap. "
+    "Pattern: prose-paragraph-then-table. NEVER table-first-no-prose.\n\n"
+    "Acceptable opening templates (EN):\n"
+    "- 'Building on the framework introduced in §1, this section populates "
+    "  the [dimension] axis with [entity class]. The table below records...'\n"
+    "- 'Applied to the dimensions set out above, the present chapter examines "
+    "  [entity class] under [scoped criterion]. [table or content follows]'\n"
+    "- 'Under the rubric from §1, this section operationalises [framework "
+    "  concept] for [entity class]; the matrix below shows...'\n"
+    "- 'Using the taxonomy established above, this section catalogues "
+    "  [entity class] across [dimensions]; the table records...'\n\n"
+    "Acceptable opening templates (ZH):\n"
+    "- '沿用第一节框架，本节将...维度具体化为...。下表记录...'\n"
+    "- '在前述维度下，本章考察...，下表显示...'\n"
+    "- '应用上一节的分类，本节对...进行操作化；下表给出...'\n"
+    "- '依据前述框架，本节将...。下表列出...'\n\n"
+    "Section-number references — NARROWING: refs to earlier sections like "
+    "'§1' or '第3节' are GOOD when paired with a named artefact "
+    "('§1's four-pillar framework', '第3节我们已对Iyer节奏维度作过分析'). "
+    "Bare temporal pointers without naming what was at that section "
+    "('as discussed in §1', 'as shown above') are BAD — they read as "
+    "filler. The named artefact is the substantive payload.\n\n"
+    "FORBIDDEN opening patterns:\n"
+    "- Opening with a markdown table (`|...|...|`) or list (`-` / `*`) "
+    "  without a prose recap paragraph first. The section MUST have a "
+    "  prose paragraph BEFORE any data block.\n"
+    "- Stating the section topic with no link to prior framework "
+    "  (disconnected exposition — judge penalises).\n"
+    "- Pure summary-of-prior-section recap with no statement of NEW "
+    "  value (reads as filler).\n"
+    "- Bare 'as discussed in §N' / 'as shown above' references with no "
+    "  named artefact.\n\n"
+    "The FIRST section (or article opening) is EXEMPT from the recap "
+    "requirement — it establishes the framework rather than recapping it."
+)
+
+
 _INSIGHT_MIN = (
     "INSIGHT ELEMENTS — TIGHT ARCHETYPE-CONDITIONAL POLICY:\n"
     "Do NOT add forward-looking projections, scenario tables, confidence "
@@ -203,7 +267,7 @@ def writer_system(
     middle_rules = [_NUMBERING_RULE]
     if include_dedup:
         middle_rules.append(_DEDUP_RULE)
-    middle_rules.extend([_INSIGHT_MIN, CLEANING_RESISTANT_RULE])
+    middle_rules.extend([_INSIGHT_MIN, CLEANING_RESISTANT_RULE, _SECTION_OPENING_RECAP_RULE])
     middle_block = "\n\n".join(middle_rules)
 
     return (
