@@ -177,11 +177,18 @@ def write_section(
     if feedback:
         user += f"\nREVISION FEEDBACK — fix these and integrate the cited evidence inline:\n{feedback}\n"
     # Bumped from 7000 → 14000 to accommodate the deeper H3→H4 tree the
-    # depth_seeds drive. Each section now produces ~8-12k words (≈3 H3
-    # subsections × 3 H4 leaves × ~700 words/leaf + opening prose) vs the
-    # pre-#1 cap of ~5k words/section. With 9 top sections this targets the
-    # ~80-100k total-article word count the high-scoring Qianfan corpus
-    # averages.
+    # depth_seeds drive. This is the LLM-call upper bound; in production with
+    # `DR_CAPEL_G=on` (the default) the per-section CAPEL countdown — driven
+    # by `target_tokens` ≈ length_ceiling/0.75/n_top_sections (≈2.5-3.5k tokens
+    # for the typical 8-12-section plan) — is the OPERATIVE per-section cap,
+    # not max_tokens. The 14k headroom matters in three cases: (a) CAPEL
+    # disabled (`DR_CAPEL_G=off`); (b) degenerate TOCs with <=4 sections where
+    # weight-share + `SECTION_BUDGET_CEILING=20_000` push target_tokens past
+    # 7k; (c) refiner-pass output that needs room to grow. The "depth uplift"
+    # PR #20 promises lands primarily via (i) the architect's deeper outline
+    # (more sections × more H3 × explicit depth_seeds payload) and (ii) the
+    # length_ceiling 2.2× bump that lifts the per-section CAPEL target —
+    # NOT primarily via this max_tokens headroom.
     raw = llm.call("writer", user, system=sys, max_tokens=14000, note=f"writer.sec.{sid}")
     if capel_active:
         text, stats = strip_capel_markers(raw)
