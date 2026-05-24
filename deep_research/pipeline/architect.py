@@ -166,6 +166,8 @@ def _normalize(plan: dict) -> None:
         audit["n_subsections_total"] += len(subs)
         if len(subs) < _SUBSECTIONS_MIN:
             audit["shortfalls"].append(f"{sec.get('id')}.subs={len(subs)}<{_SUBSECTIONS_MIN}")
+        if len(subs) > _SUBSECTIONS_MAX:
+            audit["shortfalls"].append(f"{sec.get('id')}.subs={len(subs)}>{_SUBSECTIONS_MAX}")
         for sub in subs:
             seeds = sub.get("depth_seeds")
             if not isinstance(seeds, list):
@@ -178,4 +180,6 @@ def _normalize(plan: dict) -> None:
             audit["n_seeds_total"] += len(seeds)
             if len(seeds) < _SEEDS_MIN:
                 audit["shortfalls"].append(f"{sub.get('id')}.seeds={len(seeds)}<{_SEEDS_MIN}")
+            if len(seeds) > _SEEDS_MAX:
+                audit["shortfalls"].append(f"{sub.get('id')}.seeds={len(seeds)}>{_SEEDS_MAX}")
     plan["_outline_audit"] = audit
