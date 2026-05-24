@@ -352,9 +352,20 @@ def check_insight_minimums(text: str) -> dict:
 
 def citation_strip_audit(text: str) -> dict:
     """Item 19 auditor: strip [n]/[^n] + reference blocks; the body must remain
-    semantically complete and carry inline source NAMES."""
-    stripped = re.sub(r"\[\^?\d+\]", "", text)
-    stripped = re.sub(r"\n#+\s*(References|参考文献|Sources)[\s\S]*$", "", stripped, flags=re.I)
+    semantically complete and carry inline source NAMES.
+
+    P2-Wave-2.5 Greptile PR #17 follow-up: retention is computed against
+    the body WITHOUT the References section (in both numerator and
+    denominator) so a non-trivial References appendix doesn't artificially
+    suppress retention. The audit asks "does body prose survive `[n]`
+    strip?" — references appendix size is irrelevant to that question.
+    This fix originally landed in PR #14 (D3 footnote relaxation) and was
+    re-applied here so the revert doesn't lose a correctness improvement
+    that's independent of the Wave 2.5 prompt direction.
+    """
+    refs_pattern = r"\n#+\s*(References|参考文献|Sources)[\s\S]*$"
+    body_only = re.sub(refs_pattern, "", text, flags=re.I)
+    stripped = re.sub(r"\[\^?\d+\]", "", body_only)
     has_inline_names = bool(
         re.search(
             r"(according to|per |报告|estimates|analysis|数据|Source:|"
@@ -362,9 +373,10 @@ def citation_strip_audit(text: str) -> dict:
             stripped,
         )
     )
-    # crude completeness proxy: stripping changed <8% of chars (source-name prose
-    # survives; bracket-dependent prose collapses)
-    retention = len(stripped) / max(1, len(text))
+    # crude completeness proxy: `[n]` strip on body-only must not drop >10%
+    # of body chars. With References excluded from both sides, a 300-marker
+    # body in ~250k chars sees ~0.5% reduction — well above the 0.9 gate.
+    retention = len(stripped) / max(1, len(body_only))
     return {
         "ok": has_inline_names and retention > 0.9,
         "retention": round(retention, 3),
