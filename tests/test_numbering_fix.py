@@ -7,6 +7,7 @@ scripts/p2_validate_f.py.
 """
 
 from deep_research.pipeline.numbering_fix import (
+    _normalize_hash_from_number,
     renumber_headings,
 )
 from deep_research.pipeline.numbering_fix import (
@@ -181,6 +182,93 @@ def test_run_no_skip_on_cross_refs_anymore():
     assert nfo.renumbering_applied is True
     assert nfo.skipped_reason is None
     assert nfo.cross_refs_rewritten == 1
+
+
+# --- P2-Option-A-#2: hash-from-number normalization ------------------------
+
+
+def test_hash_norm_passthrough_correct_tree():
+    """A correctly-emitted article (one H1 title, ## sections, ### subs) is
+    untouched by the pre-pass."""
+    text = "# Title\n\n## 1 Intro\n\n## 2 Method\n\n### 2.1 Sub\n\n#### 2.1.1 Deep\n"
+    out, n = _normalize_hash_from_number(text)
+    assert out == text
+    assert n == 0
+
+
+def test_hash_norm_demotes_writer_h1_section_bug():
+    """The 99/100-W9 bug: writer emits `# 1. Section` (H1) for top sections."""
+    text = "# Title\n\n# 1. Intro\n\n## 1.1.1 Scope\n\n# 1.2 Bronze\n"
+    out, n = _normalize_hash_from_number(text)
+    assert n == 3  # all three numbered headings rewritten
+    headings = _extract_headings(out)
+    assert headings[0] == ("#", "Title")  # title preserved
+    assert headings[1] == ("##", "1. Intro")  # 1-dot → H2
+    assert headings[2] == ("####", "1.1.1 Scope")  # 3-dot → H4
+    assert headings[3] == ("###", "1.2 Bronze")  # 2-dot → H3
+
+
+def test_hash_norm_caps_deep_numbers_at_h4():
+    """A 4+-dot number gets capped to H4; renumber later compresses the
+    number to fit the 3-numeric-level tree."""
+    text = "# T\n\n## 1 A\n\n### 1.1 B\n\n#### 1.1.1 C\n\n##### 1.1.1.1 D\n"
+    out, n = _normalize_hash_from_number(text)
+    # Only the H5 line needed rewriting; everything else already correct.
+    assert n == 1
+    headings = _extract_headings(out)
+    assert headings[-1] == ("####", "1.1.1.1 D")
+
+
+def test_hash_norm_skips_unnumbered_headings():
+    """Headings without a leading number are not modified — the report title
+    and any prose-titled sections pass through untouched."""
+    text = "# Title\n\n## Untitled section\n\n### 1.1 Numbered sub\n\n## Another untitled\n"
+    out, n = _normalize_hash_from_number(text)
+    # Only "1.1 Numbered sub" was a numbered-heading mismatch (H3 needed for
+    # a 2-dot number; was already H3 in the input, so n=0).
+    assert n == 0
+    headings = _extract_headings(out)
+    assert headings == [
+        ("#", "Title"),
+        ("##", "Untitled section"),
+        ("###", "1.1 Numbered sub"),
+        ("##", "Another untitled"),
+    ]
+
+
+def test_hash_norm_demotes_stray_h1_with_non_digit_prefix():
+    """Real W9 case (id=2): writer prefixes a top section with `S6` (or
+    `Part A`, `Section III`) — the digit-only number regex misses it, so
+    we need the second-pass stray-H1 demotion to catch it."""
+    text = "# Real Title\n\n# S6 Comparison\n\n# Appendix A\n"
+    out, n = _normalize_hash_from_number(text)
+    # Both stray H1s get demoted to H2.
+    assert n == 2
+    headings = _extract_headings(out)
+    assert headings[0] == ("#", "Real Title")
+    assert headings[1] == ("##", "S6 Comparison")
+    assert headings[2] == ("##", "Appendix A")
+
+
+def test_run_normalization_wired_into_pipeline():
+    """End-to-end: bug-style article goes through run() and emerges with one
+    H1, hash levels matching number depth, and the renumber step then makes
+    the numbers sequential."""
+    text = (
+        "# Saint Seiya Report\n\n"
+        "# 1. Introduction\n\n"
+        "intro body long enough to survive empty-section collapse, talking about cosmos.\n\n"
+        "## 1.1.1 Scope\n\n"
+        "scope body long enough to survive empty-section collapse with content.\n\n"
+        "# 1.2 Bronze\n\n"
+        "bronze body long enough to survive empty-section collapse, talking about pegasus.\n"
+    )
+    nfo = numbering_fix_run(text)
+    headings = _extract_headings(nfo.article)
+    # First heading is the title; nothing else should be H1.
+    assert headings[0][0] == "#"
+    assert all(h[0] != "#" for h in headings[1:]), f"non-title H1 leaked through: {headings}"
+    assert nfo.headings_hash_normalized >= 1
 
 
 if __name__ == "__main__":
