@@ -289,6 +289,22 @@ def writer_system(
         f"\n\nSTRUCTURAL CAPS — HARD: use 2-7 subsections per major section; "
         f"never exceed 3 levels of heading depth (e.g. 1, 1.1, 1.1.1 — never "
         f"1.1.1.1). Skip a subsection rather than break these limits."
+        # Internal label (P2-Option-A-#2) intentionally kept OUT of the
+        # prompt string below — earlier draft had it inline and the LLM
+        # might have treated it as part of the spec or echoed it back.
+        f"\n\nHEADING-HASH MAPPING — STRICT:\n"
+        f"- `# Title` (one `#`) — the REPORT TITLE only. Exactly ONE per "
+        f"  article. Never numbered.\n"
+        f"- `## 1 Section name` (two `##`) — top-level section. Single-digit "
+        f"  number (1, 2, 3, ...).\n"
+        f"- `### 1.1 Sub-section name` (three `###`) — sub-section. Two-dot "
+        f"  number (1.1, 1.2, ...).\n"
+        f"- `#### 1.1.1 Sub-sub-section name` (four `####`) — sub-sub-section "
+        f"  (maximum depth). Three-dot number.\n"
+        f"FORBIDDEN: emitting `# 1. Introduction` or `# 1.2 Bronze Saints` — "
+        f"a numbered chapter is NEVER an H1. Use `## 1 Introduction` and "
+        f"`### 1.2 Bronze Saints` instead. Re-using `#` after the title is "
+        f"the single most common heading bug; do not do it."
         f"\n\n{opening_directive()}\n\n{middle_block}"
         f"\n\nLENGTH GOVERNOR — HARD: target ≈{ceil} words total (EN reference "
         f"median for this domain). HARD ceiling = {int(ceil * 1.15)} words; "
