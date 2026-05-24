@@ -122,17 +122,60 @@ _SECTION_OPENING_RECAP_RULE = (
 )
 
 
+# P2-Option-A-#3 (2026-05-23): _INSIGHT_MIN rewritten to be Insight-positive
+# across ALL archetypes. The previous version (post-W9 over-correction) told
+# the writer to NOT add forward-looking content for list-all/compare/
+# explain-mechanism — a calibration that was right when the judge was hitting
+# us for "paranoid speculation" but wrong now: the high-scoring corpus shows
+# +0.154 raw Insight gap (57% of the total Overall gap weighted), meaning
+# corpus articles densely populate forward-looking framing, contrarian moves,
+# quantified projections, and named alternatives — across ALL archetypes,
+# including those Lunon was being told to suppress. The new rule requires a
+# substantive Insight element at the close of every H4 leaf (the depth_seeds
+# unit from PR #20). "Grounded" stays — every insight element must be tied
+# to a named source / concrete data, not free speculation.
 _INSIGHT_MIN = (
-    "INSIGHT ELEMENTS — TIGHT ARCHETYPE-CONDITIONAL POLICY:\n"
-    "Do NOT add forward-looking projections, scenario tables, confidence "
-    "intervals, future-dated content, or methodological caveats UNLESS the "
-    "prompt explicitly asks for prediction/forecast OR the task archetype is "
-    "predict, recommend, or trend. For all other archetypes (list-all, "
-    "compare, explain-mechanism), keep the prose grounded in what the sources "
-    "directly support; brevity + relevance > formulaic insight insertion. "
-    "When insight IS appropriate, ground every forward statement in a named "
-    "source and a concrete date or confidence range — never speculate without "
-    "evidential support."
+    "INSIGHT DENSITY — REQUIRED CLOSE-OF-LEAF (post-#3):\n"
+    "Every H4 leaf section (#### 1.1.1 Foo) must close with AT LEAST ONE of "
+    "the following four elements. The element is the leaf's analytical "
+    "payoff — not a tacked-on sentence, but the substantive synthesis that "
+    "makes the leaf worth reading:\n"
+    "\n"
+    "  (a) FORWARD-LOOKING IMPLICATION — a stated consequence, follow-on "
+    "      effect, or downstream condition, grounded in a named source and "
+    "      tied to a concrete time horizon (e.g. 'By 2027, Pegasus-class "
+    "      Cloths are likely to undergo a second V-stage revision per the "
+    "      Hades-arc continuity, conditional on canonical resolution of the "
+    "      Cloth-of-Sagittarius reassignment timeline').\n"
+    "\n"
+    "  (b) NAMED CONTRARIAN FRAMING — an explicit alternative to the "
+    "      consensus interpretation, attributed to a specific source or "
+    "      reasoning chain (e.g. 'Despite the standard reading that Marin's "
+    "      Cosmo level is bounded at Silver Saint tier, the Episode G data "
+    "      suggests a Gold-class burst capacity under specific conditions').\n"
+    "\n"
+    "  (c) QUANTIFIED PROJECTION OR CONFIDENCE RANGE — a numeric range, "
+    "      probability, or scoped estimate, with stated assumptions (e.g. "
+    "      '60-75% of the Sanctuary's Silver-tier roster falls within the "
+    "      Mach 2-5 speed band per the 1986-1989 canon; outliers are "
+    "      explicitly the Ophiuchus and Crystal Saint cases').\n"
+    "\n"
+    "  (d) NAMED-ALTERNATIVE COMPARISON — a direct comparison against a "
+    "      named alternative entity, framework, theory, or counterfactual "
+    "      (e.g. 'Whereas Mu's Crystal Wall absorbs kinetic energy radially, "
+    "      Aiolia's Lightning Plasma propagates directionally; the two "
+    "      defensive postures imply opposite tradeoffs at peak intensity').\n"
+    "\n"
+    "GROUNDING RULE (unchanged from prior policy): every element above MUST "
+    "be evidence-backed — name a source, cite a date or named work, or "
+    "ground the projection in stated assumptions. Free speculation without "
+    "evidential support hurts more than absent insight.\n"
+    "\n"
+    "AVOID FORMULAIC INSERTION: do NOT bolt a generic 'looking ahead...' or "
+    "'further research is needed' onto every leaf. The four elements above "
+    "are substantive payoffs; if the available evidence for this leaf does "
+    "not support any of them, the leaf is the wrong choice — pick a "
+    "different depth_seed where the evidence does support a payoff."
 )
 
 # NEW (W9 diagnostic 2026-05-21): the judge cited "inconsistent section
