@@ -36,6 +36,11 @@ _ROLE = {
     "generalist": "GENERALIST. Multi-mode fallback; let the question guide the method.",
 }
 
+# P2-Option-A-#4 (2026-05-23): per-specialist finding ceiling raised from
+# 8-14 to 14-24 to feed the depth_seeds H4-leaf payload from PR #20. With 5
+# specialists each producing 14-24 atoms, total per-task evidence volume
+# reaches ~70-120 atoms — still below the 600-2250 the depth contract wants
+# but a ~2.4× improvement over the pre-#4 floor.
 _EXTRACT_SYSTEM = (
     "You are a research specialist. {role}\nFrom the search results, extract "
     "SOURCED findings that serve the brief. Think briefly if you must, "
@@ -44,15 +49,27 @@ _EXTRACT_SYSTEM = (
     'with concrete numbers/names/dates), "source_name": str (publication/'
     "institution, e.g. 'IEA 2025' — never a bare number), \"url\": str, "
     '"quote": str (verbatim support <=125 chars), "query_ids": [str]}} '
-    "...8-14 findings ]}}. Only findings grounded in the results; reconcile "
+    "...14-24 findings ]}}. Only findings grounded in the results; reconcile "
     "conflicts in the statement; match the brief's language."
 )
+
+# P2-Option-A-#4: per-specialist max search calls and per-search result count.
+# Pre-#4: 5 searches × 5 results × 5 specialists = 125 raw hits → ~40-70
+# extracted atoms per task. Post-#4: 12 × 10 × 5 = 600 raw hits → ~70-120
+# extracted atoms (extraction is the binding constraint after this raise).
+# The AI-Q "<=5 sequential searches per specialist" guideline reflected the
+# original 24-32-query budget; with #4's 48-64 query budget, each specialist
+# is assigned ~10-13 queries and the cap moves to match.
+_MAX_SEARCHES_PER_SPECIALIST = 12
+_RESULTS_PER_SEARCH = 10
 
 
 def _snippet_fallback(results, query_ids):
     """Degrade gracefully: turn raw search hits into evidence atoms."""
     out = []
-    for r in results[:14]:
+    # Cap matches the new _EXTRACT_SYSTEM finding ceiling (14-24); fallback
+    # path should not produce more atoms than the LLM extract path would.
+    for r in results[:24]:
         txt = (r.get("text") or r.get("title") or "").strip()
         if not txt:
             continue
@@ -80,11 +97,13 @@ def research(role: str, queries: list, *, language: str, domain: str, exa_mode: 
     qids = [str(q.get("id")) for q in queries]
 
     results, n = [], 0
-    for q in queries[:5]:  # AI-Q: <=5 sequential searches per specialist
+    for q in queries[:_MAX_SEARCHES_PER_SPECIALIST]:  # bumped to 12 in #4
         qtext = q.get("text") or ""
         if not qtext:
             continue
-        for h in domain_routed.search(qtext, language=language, domain=domain, mode=exa_mode, num_results=5):
+        for h in domain_routed.search(
+            qtext, language=language, domain=domain, mode=exa_mode, num_results=_RESULTS_PER_SEARCH
+        ):
             results.append(
                 {
                     "title": h["title"],
