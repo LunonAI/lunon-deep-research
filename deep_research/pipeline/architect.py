@@ -85,6 +85,75 @@ HARD RULES:
 - Match the prompt's language."""
 
 
+# P2-Option-A-#1 calibration (mean of the 10 high-scoring the reference articles):
+# 9.0 top sections, 4 subsections/top, 2-3 seeds/sub. The 8-12 / 3-6 / 2-4
+# bounds bracket the natural variation across archetypes. Architect emissions
+# outside these bounds are accepted (no fail-loud) but counted for diagnostics
+# so we can see in telemetry whether the writer is being asked to populate a
+# shallow tree.
+#
+# Greptile PR #23 round-2 follow-up (2026-05-25): moved this block above
+# `_format_retry_feedback` so the LLM-facing retry feedback string can
+# reference the same constants the audit uses. Previously the feedback
+# hard-coded "8-12" / "3-6" / "2-4"; if anyone bumped a constant the
+# architect would be coached toward a stale target while the actual code
+# checks rejected the result, with no obvious source of the drift.
+_TOP_SECTIONS_MIN = 8
+_TOP_SECTIONS_MAX = 12
+_SUBSECTIONS_MIN = 3
+_SUBSECTIONS_MAX = 6
+_SEEDS_MIN = 2
+_SEEDS_MAX = 4
+
+
+def _format_retry_feedback(audit: dict) -> str:
+    """Turn `_outline_audit` shortfalls into a feedback string for the
+    architect's retry call. Lists each specific bound violation so the
+    architect knows exactly what to fix, not just that 'something is wrong'.
+
+    Bound numerals are interpolated from the module-level
+    `_TOP_SECTIONS_*` / `_SUBSECTIONS_*` / `_SEEDS_*` constants so the LLM
+    feedback can never drift away from the actual audit-check thresholds.
+    """
+    lines = [
+        "SHORTFALL FEEDBACK — your previous plan did NOT meet the structural contract.",
+        f"It returned {audit['n_top_sections']} top sections "
+        f"(need {_TOP_SECTIONS_MIN}-{_TOP_SECTIONS_MAX}), "
+        f"{audit['n_subsections_total']} total subsections, "
+        f"{audit['n_seeds_total']} total depth_seeds.",
+        "",
+        "Specific bound violations the audit detected:",
+    ]
+    for s in audit.get("shortfalls", []):
+        lines.append(f"  - {s}")
+    lines.extend(
+        [
+            "",
+            "REGENERATE the FULL plan, fixing every shortfall above. The "
+            f"structural contract ({_TOP_SECTIONS_MIN}-{_TOP_SECTIONS_MAX} top "
+            f"sections, {_SUBSECTIONS_MIN}-{_SUBSECTIONS_MAX} subsections each, "
+            f"{_SEEDS_MIN}-{_SEEDS_MAX} depth_seeds each) is the highest-priority "
+            "constraint — it directly drives output depth and "
+            "Comprehensiveness/Insight scores. "
+            f"If you cannot find enough material for {_TOP_SECTIONS_MIN} top "
+            "sections on this prompt, break broader sections into narrower "
+            "ones; if you have too many, merge near-duplicates. Same logic "
+            "for subsections and seeds.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _coerce_to_dict(plan) -> dict:
+    """Defensive shape-fix: ensure we always return a dict from an LLM call
+    that might respond with a list of one dict or some other near-miss."""
+    if isinstance(plan, dict):
+        return plan
+    if isinstance(plan, list) and plan and isinstance(plan[0], dict):
+        return plan[0]
+    return {}
+
+
 def build(
     prompt: str, language: str, archetype: str, intents: list, landscape: dict, coverage_obligations: list
 ) -> dict:
@@ -103,30 +172,89 @@ def build(
     # Adaptive thinking on, effort=low: the structured prompt does the heavy
     # lifting; medium effort added ~5min/task for no plan-quality gain in the
     # W1 smoke. Latency decision (logged).
-    # Bumped from 16k to 24k tokens to fit the new depth_seeds payload:
-    # 8-12 top sections × 3-6 subsections × 2-4 depth_seeds ≈ 200-450 seeds
-    # per plan, plus the existing 24-32 acceptance_criteria + 24-32 queries.
+    # Token budget: 16k → 24k (PR #20: depth_seeds payload of 200-450 seeds).
     plan = llm.call_json(
         "architect", user, system=_SYSTEM, max_tokens=24000, effort="low", think=True, note="architect"
     )
-    if not isinstance(plan, dict):  # B-13 defensive — plan structure is critical
-        plan = plan[0] if isinstance(plan, list) and plan and isinstance(plan[0], dict) else {}
+    plan = _coerce_to_dict(plan)
     _normalize(plan)
+
+    # P2-Option-A-#5 (2026-05-23): outline retry-on-shortfall. The fail-soft
+    # `_outline_audit` from PR #20 was telemetry-only — if the architect
+    # emitted 5 top sections instead of 8-12, the pipeline silently ran with
+    # a shallow plan and the depth contract was structurally unenforceable.
+    # Now: when the audit detects ANY shortfall, send the specific bound
+    # violations back to the architect as feedback and regenerate ONCE.
+    # If the retry still has shortfalls, accept it (cap at 1 retry to bound
+    # cost) and record the persistent gap in `audit.retry_attempted` so a
+    # dev-run reader can see whether the retry path was effective.
+    audit = plan.get("_outline_audit") or {}
+    audit["retry_attempted"] = False
+    audit["pre_retry_shortfalls"] = list(audit.get("shortfalls", []))
+    if audit.get("shortfalls"):
+        retry_user = _format_retry_feedback(audit) + "\n\n" + user
+        retry = llm.call_json(
+            "architect",
+            retry_user,
+            system=_SYSTEM,
+            max_tokens=24000,
+            effort="low",
+            think=True,
+            note="architect.retry",
+        )
+        retry = _coerce_to_dict(retry)
+        # Greptile PR #23 follow-up (2026-05-25): mark `retry_attempted=True`
+        # BEFORE the `if retry:` guard. The LLM was called at this point; if
+        # `_coerce_to_dict` returns `{}` (uncoercible response) the entire
+        # `if retry:` block is skipped, but a dev-run reader scanning
+        # `retry_attempted` should still see the trigger fired. Without this,
+        # a real LLM failure looks identical to "audit had no shortfalls".
+        audit["retry_attempted"] = True
+        # Run the retry through the same _normalize so its audit is computed
+        # the same way; pick whichever plan is structurally better.
+        if retry:
+            _normalize(retry)
+            if _retry_is_better(retry["_outline_audit"], audit):
+                retry["_outline_audit"]["retry_attempted"] = True
+                retry["_outline_audit"]["pre_retry_shortfalls"] = audit["pre_retry_shortfalls"]
+                plan = retry
+            else:
+                # Keep original; record that retry was attempted but rejected.
+                # Greptile PR #23 follow-up: renamed from
+                # `retry_rejected_for_more_shortfalls`. _retry_is_better has
+                # three distinct rejection rules and the empty-retry path
+                # (rule 1, n_top_sections==0) actually produces FEWER
+                # shortfalls than the original — the old name fired on that
+                # path too, misleading anyone reading telemetry about WHY.
+                audit["retry_rejected"] = True
+
     return plan
 
 
-# P2-Option-A-#1 calibration (mean of the 10 high-scoring the reference articles):
-# 9.0 top sections, 4 subsections/top, 2-3 seeds/sub. The 8-12 / 3-6 / 2-4
-# bounds bracket the natural variation across archetypes. Architect emissions
-# outside these bounds are accepted (no fail-loud) but counted for diagnostics
-# so we can see in telemetry whether the writer is being asked to populate a
-# shallow tree.
-_TOP_SECTIONS_MIN = 8
-_TOP_SECTIONS_MAX = 12
-_SUBSECTIONS_MIN = 3
-_SUBSECTIONS_MAX = 6
-_SEEDS_MIN = 2
-_SEEDS_MAX = 4
+def _retry_is_better(retry_audit: dict, orig_audit: dict) -> bool:
+    """Decide whether the retry's plan should replace the original.
+
+    "Better" = strictly closer to the structural contract. We can't just
+    compare shortfall counts: an empty retry plan (n_top_sections=0) has
+    only ONE shortfall (`top_sections=0<8`), while a 1-section original
+    might have one for `top_sections=1<8` plus subsection/seed shortfalls
+    under that one section — so the empty retry would look "better" by
+    raw count even though it's strictly worse content.
+
+    Rules, in order:
+      1. An empty retry (n_top_sections == 0) is never better.
+      2. If retry has strictly FEWER top sections than the original, the
+         retry walked backward — reject it.
+      3. Otherwise, prefer the retry only if it has fewer-or-equal total
+         shortfalls AND at least as many top sections.
+    """
+    if retry_audit.get("n_top_sections", 0) == 0:
+        return False
+    if retry_audit.get("n_top_sections", 0) < orig_audit.get("n_top_sections", 0):
+        return False
+    retry_sf = len(retry_audit.get("shortfalls", []))
+    orig_sf = len(orig_audit.get("shortfalls", []))
+    return retry_sf <= orig_sf
 
 
 def _normalize(plan: dict) -> None:
