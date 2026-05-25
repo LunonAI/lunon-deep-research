@@ -127,6 +127,74 @@ def test_normalize_appends_references_at_article_end():
     assert "Final paragraph." in out.article
 
 
+def test_n_inline_markers_includes_orphans_on_success_path():
+    """Greptile PR #24 round-2 follow-up: `n_inline_markers` is the RAW
+    count of inline markers found in the body, INCLUDING orphans whose
+    token had no matching definition. The prior implementation set it to
+    `n_renum` only — a downstream consumer computing 'orphan rate' as
+    `n_orphans_stripped / n_inline_markers` would then divide by a
+    denominator that excluded the orphans themselves, yielding a
+    nonsensical ratio > 1. The matched subset stays recoverable as
+    `n_inline_markers - n_orphans_stripped`."""
+    article = (
+        "# T\n\n## 1 X\n\n"
+        "Claim A with a real source[^S1-1]. "
+        "Claim B with a missing source[^MISSING-1]. "
+        "Claim C with another missing source[^GHOST-1]. "
+        "Claim D reuses the real source[^S1-1].\n\n"
+        "[^S1-1]: Source A — https://a.example.com\n"
+    )
+    out = footnote_normalize.normalize(article)
+    # 4 inline markers in the body: 2 matched (both → [^S1-1]) + 2 orphans.
+    assert out.n_inline_markers == 4, out
+    assert out.n_orphans_stripped == 2, out
+    # Orphan-rate ratio must be sensible.
+    assert out.n_orphans_stripped / out.n_inline_markers <= 1.0, out
+    # And the matched-subset is recoverable by subtraction.
+    assert out.n_inline_markers - out.n_orphans_stripped == 2
+
+
+def test_n_inline_markers_includes_orphans_in_all_orphan_early_exit_path():
+    """Second occurrence of the same bug lived in the all-orphan early
+    exit branch (when token_to_n is empty after step 2). To trigger that
+    branch we need at least one definition (so we don't take the
+    no-definitions early exit at step 1) plus inline markers that all
+    fail to match it. Pin the raw count here too."""
+    article = (
+        "# T\n\n## 1 X\n\n"
+        "Claim with missing source[^GHOST-1]. "
+        "Another with missing[^GHOST-2]. "
+        "Third with missing[^GHOST-3].\n\n"
+        # A definition that nothing inline references — forces
+        # `token_to_n` to be empty after step 2 (all inlines orphan,
+        # this definition is unused) and triggers the early-exit return.
+        "[^UNUSED]: Unused source — https://unused.example.com\n"
+    )
+    out = footnote_normalize.normalize(article)
+    assert out.n_unused_dropped == 1, out
+    assert out.n_orphans_stripped == 3, out
+    # The early-exit branch must also report the raw inline count, not 0.
+    assert out.n_inline_markers == 3, out
+    assert out.n_renumbered == 0, out
+
+
+def test_docstring_does_not_overclaim_idempotency():
+    """Greptile PR #24 round-2 follow-up: the function is NOT idempotent
+    on already-normalized articles — a second pass would re-detect the
+    `[^N]: ...` definition lines inside the existing `## References`
+    block, strip them, and append a fresh `## References` block, leaving
+    the original heading orphaned. Pin the corrected docstring so a
+    future cleanup doesn't accidentally re-introduce the misleading
+    'Idempotent on already-normalized articles' claim — that claim would
+    invite a retry/re-process path that produces a duplicate heading."""
+    doc = footnote_normalize.normalize.__doc__ or ""
+    assert "NOT idempotent" in doc, "docstring no longer warns that the function is not idempotent"
+    # The literal misleading wording must NOT come back.
+    assert "Idempotent on already-normalized articles" not in doc, (
+        "docstring re-introduced the false idempotency claim Greptile flagged"
+    )
+
+
 def test_normalize_handles_section_id_with_dots():
     """Architect emits section ids like `S3.2` for subsections; tokens like
     `[^S3.2-1]` must round-trip correctly through the dot character."""
