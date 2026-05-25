@@ -201,6 +201,41 @@ def test_format_retry_feedback_includes_all_shortfalls():
     assert "5 top sections" in feedback
 
 
+def test_format_retry_feedback_bounds_come_from_constants():
+    """Greptile PR #23 round-2 follow-up: the bound numerals in the LLM
+    feedback string MUST be derived from the module constants
+    (_TOP_SECTIONS_MIN/MAX, _SUBSECTIONS_MIN/MAX, _SEEDS_MIN/MAX), not
+    hard-coded. If anyone bumps a constant (e.g. _TOP_SECTIONS_MIN = 10)
+    but the feedback keeps coaching the architect toward the stale band,
+    the audit will reject the retry while the architect is being told to
+    aim at the old target — a silent drift between two sources of truth.
+
+    This test asserts the feedback substitutes the live constants rather
+    than literal numbers. The check is structured so that bumping a
+    constant + updating the production substitution = test still passes;
+    bumping a constant WITHOUT updating the production substitution =
+    test fails loudly."""
+    audit = {
+        "n_top_sections": 0,
+        "n_subsections_total": 0,
+        "n_seeds_total": 0,
+        "shortfalls": [],
+    }
+    feedback = architect._format_retry_feedback(audit)
+    # Each bound range derived from constants must appear verbatim.
+    expected_top = f"{architect._TOP_SECTIONS_MIN}-{architect._TOP_SECTIONS_MAX}"
+    expected_sub = f"{architect._SUBSECTIONS_MIN}-{architect._SUBSECTIONS_MAX}"
+    expected_seed = f"{architect._SEEDS_MIN}-{architect._SEEDS_MAX}"
+    assert expected_top in feedback, f"top bounds {expected_top!r} missing from feedback"
+    assert expected_sub in feedback, f"subsection bounds {expected_sub!r} missing from feedback"
+    assert expected_seed in feedback, f"seed bounds {expected_seed!r} missing from feedback"
+    # The "minimum top sections" floor in the fallback hint must also come
+    # from the constant — not a stray hard-coded "8".
+    assert f"{architect._TOP_SECTIONS_MIN} top sections" in feedback or (
+        f"{architect._TOP_SECTIONS_MIN} top" in feedback
+    ), "minimum top-sections floor in feedback is not pinned to _TOP_SECTIONS_MIN"
+
+
 def _build_good_plan_obj():
     """Plan that passes every bound — used as a 'retry succeeded' response."""
     return {
