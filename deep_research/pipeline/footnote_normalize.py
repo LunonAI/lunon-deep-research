@@ -63,9 +63,18 @@ def normalize(article: str, references_heading: str = "References") -> FootnoteN
       4. Append ``## {references_heading}\n\n[^1]: ...\n[^2]: ...\n`` at the
          article end, in order of first appearance.
 
-    Idempotent on already-normalized articles: if no per-section markers are
-    present, the body is returned unchanged (n_inline_markers == 0 →
-    no References block appended).
+    Early-exit on articles with NO ``[^X]:`` definitions: returns the body
+    unchanged with all stats == 0 (no References block appended).
+
+    NOT idempotent on already-normalized articles. A second pass would
+    detect the ``[^N]: ...`` definitions inside the ``## References``
+    block as legitimate definitions, strip those lines, then append a
+    NEW ``## References`` block at the end — leaving the original
+    ``## References`` heading orphaned in the body (duplicate heading).
+    Call this exactly once per article. The orchestrator (see
+    ``orchestrate.from_plan``) runs it once after writer assembly and
+    before numbering_fix; do not add a retry or re-process path that
+    re-applies it without first stripping the prior References block.
     """
     # Step 1: collect every (token → definition_text) from `[^X]:` lines.
     # Greptile PR #24 follow-up (2026-05-25): dropped the parallel
@@ -129,7 +138,15 @@ def normalize(article: str, references_heading: str = "References") -> FootnoteN
         return FootnoteNormalizeOutput(
             article=body_stripped,
             n_definitions=len(definitions),
-            n_inline_markers=n_renum,
+            # Greptile PR #24 round-2 follow-up: n_inline_markers is the
+            # RAW count of inline markers found in the body, including
+            # orphans whose token had no matching definition. The previous
+            # `n_renum` undercounted (orphan inlines were silently
+            # excluded), which made any downstream "orphan rate" telemetry
+            # (n_orphans_stripped / n_inline_markers) nonsense — the
+            # denominator excluded the orphans themselves. The matched
+            # subset is still recoverable as n_inline_markers - n_orphans_stripped.
+            n_inline_markers=n_renum + n_orphans,
             n_orphans_stripped=n_orphans,
             n_unused_dropped=n_unused,
             n_renumbered=0,
@@ -148,7 +165,9 @@ def normalize(article: str, references_heading: str = "References") -> FootnoteN
     return FootnoteNormalizeOutput(
         article=final,
         n_definitions=len(definitions),
-        n_inline_markers=n_renum,
+        # See identical fix above (n_renum + n_orphans) for rationale —
+        # n_inline_markers is the raw scan count, not the matched subset.
+        n_inline_markers=n_renum + n_orphans,
         n_orphans_stripped=n_orphans,
         n_unused_dropped=n_unused,
         n_renumbered=len(token_to_n),
