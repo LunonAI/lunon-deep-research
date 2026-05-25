@@ -68,21 +68,19 @@ def normalize(article: str, references_heading: str = "References") -> FootnoteN
     no References block appended).
     """
     # Step 1: collect every (token → definition_text) from `[^X]:` lines.
+    # Greptile PR #24 follow-up (2026-05-25): dropped the parallel
+    # `definition_spans` list. It was built every run (including the
+    # `line_end + 1` newline-inclusion logic) but never consumed — Step 3
+    # below re-scans with `_DEFINITION_RE.sub("", body_renum)` because the
+    # substitution at Step 2 shifts offsets and invalidates the spans
+    # anyway. Keeping the dead list misled readers into thinking offset
+    # tracking was load-bearing.
     definitions: dict[str, str] = {}
-    definition_spans: list[tuple[int, int]] = []  # (line_start, line_end)
     for m in _DEFINITION_RE.finditer(article):
         token = m.group(1)
         text = m.group(2).strip()
         if token not in definitions:
             definitions[token] = text
-        # Record the FULL line span (including trailing newline if any) so
-        # the strip-from-body pass below removes the line cleanly.
-        line_start = m.start()
-        # Include the trailing newline character to avoid leaving blank lines.
-        line_end = m.end()
-        if line_end < len(article) and article[line_end] == "\n":
-            line_end += 1
-        definition_spans.append((line_start, line_end))
 
     if not definitions:
         return FootnoteNormalizeOutput(
