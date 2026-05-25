@@ -51,11 +51,21 @@ CLEANING_RESISTANT_RULE = (
     "2. No sentence may be semantically dependent on a citation mark surviving. "
     "Every sentence must read complete after all [n]/[^n] and reference/"
     "footnote blocks are deleted.\n"
-    "3. Numeric [n] markers are allowed ONLY for pure fact support that is "
-    "cost-free (stripped pre-scoring) — but the sentence must stand without "
-    "them.\n"
+    "3. SUPPLEMENTARY FOOTNOTE CITATION (post-#6) is ENCOURAGED when an "
+    "evidence atom has a non-empty `url` field. Pattern:\n"
+    "   - inline: ...according to McKinsey 2025[^{section_id}-1]...\n"
+    "   - definition (at the END of YOUR section): "
+    "[^{section_id}-1]: McKinsey 2025 — https://example.com/...\n"
+    "   The `{section_id}-N` scope is REQUIRED — substitute YOUR current "
+    "section's id (e.g. S1, S3.2) and number sequentially from 1 within "
+    "this section. The post-process step (footnote_normalize) globally "
+    "renumbers across sections and builds the article's ## References "
+    "block; without the section-scope your markers WILL collide with other "
+    "sections' markers and get stripped as orphans.\n"
     "4. Never place a fact, name, date, or figure ONLY inside a citation mark, "
-    "footnote, or the reference list."
+    "footnote, or the reference list. The inline prose still carries the "
+    "claim; footnotes are SUPPLEMENTARY URL citation, not the substantive "
+    "payload."
 )
 
 # P2-Wave-2.5-E1.v2 (2026-05-23, post-v1-pilot revision):
@@ -122,17 +132,65 @@ _SECTION_OPENING_RECAP_RULE = (
 )
 
 
+# P2-Option-A-#3 (2026-05-23): _INSIGHT_MIN rewritten to be Insight-positive
+# across ALL archetypes. The previous version (post-W9 over-correction) told
+# the writer to NOT add forward-looking content for list-all/compare/
+# explain-mechanism — a calibration that was right when the judge was hitting
+# us for "paranoid speculation" but wrong now: the high-scoring corpus shows
+# +0.154 raw Insight gap (57% of the total Overall gap weighted), meaning
+# corpus articles densely populate forward-looking framing, contrarian moves,
+# quantified projections, and named alternatives — across ALL archetypes,
+# including those Lunon was being told to suppress. The new rule requires a
+# substantive Insight element at the close of every H4 leaf (the depth_seeds
+# unit from PR #20). "Grounded" stays — every insight element must be tied
+# to a named source / concrete data, not free speculation.
 _INSIGHT_MIN = (
-    "INSIGHT ELEMENTS — TIGHT ARCHETYPE-CONDITIONAL POLICY:\n"
-    "Do NOT add forward-looking projections, scenario tables, confidence "
-    "intervals, future-dated content, or methodological caveats UNLESS the "
-    "prompt explicitly asks for prediction/forecast OR the task archetype is "
-    "predict, recommend, or trend. For all other archetypes (list-all, "
-    "compare, explain-mechanism), keep the prose grounded in what the sources "
-    "directly support; brevity + relevance > formulaic insight insertion. "
-    "When insight IS appropriate, ground every forward statement in a named "
-    "source and a concrete date or confidence range — never speculate without "
-    "evidential support."
+    "INSIGHT DENSITY — REQUIRED CLOSE-OF-LEAF (post-#3):\n"
+    "Every H4 leaf section (#### 1.1.1 Foo) must close with AT LEAST ONE of "
+    "the following four elements. The element is the leaf's analytical "
+    "payoff — not a tacked-on sentence, but the substantive synthesis that "
+    "makes the leaf worth reading:\n"
+    "\n"
+    "  (a) FORWARD-LOOKING IMPLICATION — a stated consequence, follow-on "
+    "      effect, or downstream condition, grounded in a named source and "
+    "      tied to a concrete time horizon (e.g. 'By 2027, Pegasus-class "
+    "      Cloths are likely to undergo a second V-stage revision per the "
+    "      Hades-arc continuity, conditional on canonical resolution of the "
+    "      Cloth-of-Sagittarius reassignment timeline').\n"
+    "\n"
+    "  (b) NAMED CONTRARIAN FRAMING — an explicit alternative to the "
+    "      consensus interpretation, attributed to a specific source or "
+    "      reasoning chain (e.g. 'Despite the standard reading that Marin's "
+    "      Cosmo level is bounded at Silver Saint tier, the Episode G data "
+    "      suggests a Gold-class burst capacity under specific conditions').\n"
+    "\n"
+    "  (c) QUANTIFIED PROJECTION OR CONFIDENCE RANGE — a numeric range, "
+    "      probability, or scoped estimate, with stated assumptions (e.g. "
+    "      '60-75% of the Sanctuary's Silver-tier roster falls within the "
+    "      Mach 2-5 speed band per the 1986-1989 canon; outliers are "
+    "      explicitly the Ophiuchus and Crystal Saint cases').\n"
+    "\n"
+    "  (d) NAMED-ALTERNATIVE COMPARISON — a direct comparison against a "
+    "      named alternative entity, framework, theory, or counterfactual "
+    "      (e.g. 'Whereas Mu's Crystal Wall absorbs kinetic energy radially, "
+    "      Aiolia's Lightning Plasma propagates directionally; the two "
+    "      defensive postures imply opposite tradeoffs at peak intensity').\n"
+    "\n"
+    "GROUNDING RULE (unchanged from prior policy): every element above MUST "
+    "be evidence-backed — name a source, cite a date or named work, or "
+    "ground the projection in stated assumptions. Free speculation without "
+    "evidential support hurts more than absent insight.\n"
+    "\n"
+    "AVOID FORMULAIC INSERTION: do NOT bolt a generic 'looking ahead...' or "
+    "'further research is needed' onto every leaf. The four elements above "
+    "are substantive payoffs grounded in the leaf's actual evidence. If the "
+    "evidence for this leaf genuinely cannot support any of (a)-(d) — a "
+    "narrow definitional or list-membership leaf, for instance — state the "
+    "leaf's bounded scope explicitly (e.g. 'the canonical record does not "
+    "extend to X; the cross-arc comparison in §N.M handles the projection') "
+    "and STOP. Do NOT drop or skip the H4 leaf — every depth_seed in the "
+    "outline must produce a leaf section, in order. Under-payoff on one "
+    "leaf is preferable to a generic forecast the judge will read as filler."
 )
 
 # NEW (W9 diagnostic 2026-05-21): the judge cited "inconsistent section
@@ -424,11 +482,48 @@ def check_insight_minimums(text: str) -> dict:
             re.I,
         )
     )
-    causal = len(
+    # P2-Option-A-#3 Greptile PR #21 follow-up (2026-05-25): realigned the
+    # four advisory counts to map 1:1 to _INSIGHT_MIN's four contract elements:
+    #   forward_looking   → element (a) FORWARD-LOOKING IMPLICATION
+    #   contrarian_framing→ element (b) NAMED CONTRARIAN FRAMING  ← NEW
+    #   quant_projection  → element (c) QUANTIFIED PROJECTION/RANGE
+    #   alternatives      → element (d) NAMED-ALTERNATIVE COMPARISON
+    # The prior `causal_chain` count (→ / -> / 导致.*进而 / 从而) had no
+    # equivalent in the new contract, so validation_failures.jsonl rows would
+    # have shown a metric the prompt no longer instructed — confusing future
+    # calibration. The advisory check stays advisory (validation.py:113-115
+    # logs counts but does not hard-fail), so renaming is safe.
+    contrarian = len(
         re.findall(
-            r"(→|->|leads to .* which|because .* in turn|"
-            r"导致.*进而|从而)",
+            # element (b) markers: explicit pushback against a consensus
+            # interpretation. The rule additionally requires evidence-backing,
+            # which a regex cannot verify — this is presence telemetry only.
+            # Greptile PR #21 round-2 follow-up: dropped the bare
+            # `standard reading` alternative. In legal/literary/policy prose,
+            # `the standard reading of the statute…` / `a standard reading
+            # list` is neutral technical vocabulary and carries no inherent
+            # adversative signal. Every other alternative here ships its own
+            # challenge signal (despite, contrary to, challenges the…,
+            # against consensus, counter to, etc.), so a contrarian use like
+            # `Despite the standard reading…` still counts via the bare
+            # `despite\b` alternative — we just stop inflating the count on
+            # neutral mentions.
+            # Greptile PR #21 round-3 follow-up: same logic applied to the
+            # bare `commonly (?:held|assumed|believed)` / `通常认为` /
+            # `普遍认为` alternatives — those describe what a consensus
+            # believes, not pushback against it ("It is commonly held that
+            # X is true, which recent data confirms" would have fired). The
+            # `against (?:the )?consensus` slot is widened to
+            # `against (?:the )?(?:consensus|commonly)` so the contrarian
+            # exemplar "Against the commonly held assumption…" still counts;
+            # ZH contrarian uses still land via `尽管` / `与…相反` / `挑战…共识`.
+            r"(despite\b|contrary to\b|"
+            r"challenges? the (?:view|consensus|standard|prevailing)|"
+            r"against (?:the )?(?:consensus|commonly)|"
+            r"counter to (?:the )?(?:consensus|conventional|standard)|"
+            r"尽管|与.{0,8}相反|挑战.{0,8}共识|反直觉)",
             text,
+            re.I,
         )
     )
     quant_proj = len(
@@ -442,7 +537,7 @@ def check_insight_minimums(text: str) -> dict:
     need = {
         "forward_looking>=3": fwd >= 3,
         "alternatives>=2": alts >= 2,
-        "causal_chain>=1": causal >= 1,
+        "contrarian_framing>=1": contrarian >= 1,
         "quant_projection>=1": quant_proj >= 1,
     }
     return {
@@ -450,7 +545,7 @@ def check_insight_minimums(text: str) -> dict:
         "counts": {
             "forward_looking": fwd,
             "alternatives": alts,
-            "causal_chain": causal,
+            "contrarian_framing": contrarian,
             "quant_projection": quant_proj,
         },
         "fail": [k for k, v in need.items() if not v],

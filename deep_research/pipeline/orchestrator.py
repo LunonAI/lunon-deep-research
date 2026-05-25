@@ -2,7 +2,12 @@
 
 Plan-once → research 3-5 cycles → one forced gap-review → ≤2 gap-fill → stop
 (AI-Q orchestrator.j2 shape). Enforces:
-- Hard tool-call budget = 24 (each Exa search = 1 tool call; halts, never exceeds).
+- Hard tool-call budget = 64 (each Exa search = 1 tool call; halts, never
+  exceeds). Sized to fit 5 specialists × _MAX_SEARCHES_PER_SPECIALIST (12) +
+  2 gap-fill calls + 2 calls of headroom = 60 + 2 + 2 = 64. Pre-PR-22-round-3
+  the budget was 24 — which CAPPED actual dispatches at ~5 per specialist
+  regardless of `_MAX_SEARCHES_PER_SPECIALIST=12`, silently neutering the
+  evidence-volume scaling shipped by PR #22.
 - Forced reflection: a `think` gap-review marking each acceptance criterion
   SATISFIED/PARTIAL/UNSAT, picking ≤2 critical gaps.
 - IterResearch compressed-report memory, bounded compaction every N=8 tool calls.
@@ -13,10 +18,24 @@ memory bank keyed by the producing query's target_sections (items 13/25).
 import json
 
 from .. import llm
+from . import specialists
 from .memory_bank import MemoryBank
 from .specialists import research
 
-BUDGET = 24
+# P2-Option-A-#4 Greptile PR #22 follow-up round 3 (2026-05-25): BUDGET
+# bumped 24 → 64 to actually realise the 12-queries-per-specialist evidence
+# volume that PR #22 advertised. The dispatch math:
+#   5 specialists × specialists._MAX_SEARCHES_PER_SPECIALIST (12) = 60 main-loop
+#   + 2 gap-fill calls (max gap_fill items × 1 query each) = 62 minimum
+#   + 2 calls of headroom (rounding + safety margin) = 64.
+# Pre-fix the 24-budget plus the per-dispatch `min(5, BUDGET - tool_calls)`
+# slice (line 110 below) meant each specialist actually saw at most 5
+# queries — dropping the post-#4 raw-hit ceiling from the advertised
+# 5×12×10=600 to the real 5×5×10=250. Greptile caught this on round 3.
+# Cost note: ~+$1-3 per task (extra Exa searches) + ~+$0.50-1 per task in
+# additional `_compact` LLM calls at the COMPACT_EVERY=8 boundary (digest
+# now triggers compaction ~8x per task instead of 3x).
+BUDGET = 64
 COMPACT_EVERY = 8
 
 # Per-archetype researcher routing (W9 diagnostic + dev6 paired test 2026-05-21):
@@ -106,8 +125,13 @@ def run(plan, prompt, language, archetype, domain):
         if tool_calls >= BUDGET:
             break
         qlist = groups.get(role, [])
-        # budget-aware: never let a dispatch push total past BUDGET
-        qlist = qlist[: max(1, min(5, BUDGET - tool_calls))]
+        # Budget-aware: never let a dispatch push total past BUDGET. The
+        # per-specialist cap is sourced from `specialists._MAX_SEARCHES_PER_SPECIALIST`
+        # (Greptile PR #22 round 3, 2026-05-25) — pre-fix the cap was a
+        # hardcoded `5` here, which silently overrode the post-#4 12-query
+        # bump in specialists.py and pinned every specialist at 5 queries
+        # regardless. Now both numbers move together from a single source.
+        qlist = qlist[: max(1, min(specialists._MAX_SEARCHES_PER_SPECIALIST, BUDGET - tool_calls))]
         try:
             res = research(
                 role, qlist, language=language, domain=domain, exa_mode=exa_mode, model_override=model_override
