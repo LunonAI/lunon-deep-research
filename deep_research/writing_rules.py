@@ -488,9 +488,19 @@ def check_insight_minimums(text: str) -> dict:
             # element (b) markers: explicit pushback against a consensus
             # interpretation. The rule additionally requires evidence-backing,
             # which a regex cannot verify — this is presence telemetry only.
+            # Greptile PR #21 round-2 follow-up: dropped the bare
+            # `standard reading` alternative. In legal/literary/policy prose,
+            # `the standard reading of the statute…` / `a standard reading
+            # list` is neutral technical vocabulary and carries no inherent
+            # adversative signal. Every other alternative here ships its own
+            # challenge signal (despite, contrary to, challenges the…,
+            # against consensus, counter to, etc.), so a contrarian use like
+            # `Despite the standard reading…` still counts via the bare
+            # `despite\b` alternative — we just stop inflating the count on
+            # neutral mentions.
             r"(despite\b|contrary to\b|"
             r"challenges? the (?:view|consensus|standard|prevailing)|"
-            r"against (?:the )?consensus|standard reading|"
+            r"against (?:the )?consensus|"
             r"commonly (?:held|assumed|believed)|"
             r"counter to (?:the )?(?:consensus|conventional|standard)|"
             r"尽管|与.{0,8}相反|挑战.{0,8}共识|通常认为|普遍认为|反直觉)",
