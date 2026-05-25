@@ -156,6 +156,65 @@ def write_section(
         "word treatment of a specific entity, claim, or comparison.\n"
     )
 
+    # P2-Option-A-#7: surface the entity_matrix (when present) to the writer
+    # for list-all/compare archetypes. The matrix is the article's structural
+    # spine; S1 (and ONLY S1) renders it as a markdown table at the top of
+    # its body, while every section gets the equal-depth-per-entity reminder
+    # so each one independently maintains the contract. Other archetypes
+    # don't see the matrix at all.
+    #
+    # Greptile PR #25 follow-up (2026-05-25), 2 issues:
+    #   Issue 1 (duplicate-table risk): the prior block sent the
+    #     "render this as a markdown table" directive to every write_section
+    #     call. Each section LLM is independent, so a capable writer could
+    #     emit the table at the top of S2, S4, ..., producing up to 12
+    #     duplicate tables in the assembled article. The render directive
+    #     is now gated on `sid == "S1"`; the equal-depth reminder still
+    #     broadcasts to all sections (that's the contract every section
+    #     must satisfy on its own slice of the matrix).
+    #   Issue 2 (ambiguous canonical placement): "near the article start"
+    #     was misleading — write_opening generates the literal article start
+    #     (title + ~200-token executive frame) and intentionally does NOT
+    #     receive the matrix (bloating the opening frame would burn the
+    #     200-token budget). The clarified S1 wording now pins the matrix
+    #     to S1's body "immediately under the §1 heading" so neither the
+    #     LLM nor a future reviewer can mistake the executive frame as
+    #     the right place.
+    #
+    # Greptile PR #25 follow-up round 3 (2026-05-25): the suppression guard
+    # now also requires `em.get("dimensions")` — symmetric with the data
+    # contract. A matrix with entities but an empty/missing dimensions list
+    # (a state _normalize flags as `entity_matrix.dimensions=0<4` but does
+    # not reject) would otherwise still fire the S1 "render this as a
+    # markdown table" directive with no column headers, forcing the LLM to
+    # hallucinate dimensions or emit a degenerate single-column table.
+    entity_matrix_block = ""
+    em = plan.get("entity_matrix")
+    if archetype in {"list-all", "compare"} and isinstance(em, dict) and em.get("entities") and em.get("dimensions"):
+        if sid == "S1":
+            entity_matrix_block = (
+                f"\nENTITY MATRIX (article spine for this archetype) — "
+                f"render this as a markdown table at the top of THIS section "
+                f"(immediately under the §1 heading; the executive opening "
+                f"frame is written separately and must not duplicate the "
+                f"table) AND give EACH entity equal-depth treatment in the "
+                f"downstream sections (no entity dropped, no entity "
+                f"over-weighted vs siblings):\n"
+                f"{json.dumps(em, ensure_ascii=False)}\n"
+            )
+        else:
+            # Non-S1 sections: no render directive (S1 owns the canonical
+            # table). Just the equal-depth reminder so this section knows
+            # the entity roster it must treat fairly.
+            entity_matrix_block = (
+                f"\nENTITY MATRIX REMINDER — section §1 renders the "
+                f"canonical table for this list-all/compare article; THIS "
+                f"section must give EACH entity equal-depth treatment "
+                f"(no entity dropped, no entity over-weighted vs siblings) "
+                f"and MUST NOT re-render the matrix table:\n"
+                f"{json.dumps(em, ensure_ascii=False)}\n"
+            )
+
     user = (
         f"PROMPT ({language}):\n{prompt}\n\n"
         f"You are writing ONLY this section of the report (other sections are "
@@ -165,6 +224,7 @@ def write_section(
         f"{json.dumps(unit['subs'], ensure_ascii=False)}\n"
         f"DEPTH TARGET: {unit['depth']}\n"
         f"{depth_block}"
+        f"{entity_matrix_block}"
         f"REPORT OUTLINE (titles only, for coherence): "
         f"{json.dumps(prior_titles, ensure_ascii=False)}\n\n"
         f"ACCEPTANCE CRITERIA THIS SECTION MUST SATISFY:\n"

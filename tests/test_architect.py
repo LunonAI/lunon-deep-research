@@ -295,6 +295,15 @@ def _build_good_plan_obj():
     to architect._QUERIES_MIN (48) entries so the post-#4 query-count audit
     (`queries=0<48` shortfall) does not fire on this "good" plan and break
     the `shortfalls == []` invariant downstream retry tests assert.
+
+    PR #25 merge follow-up (2026-05-25): added a valid entity_matrix
+    (5 entities × 4 dimensions, both at their respective `_MIN` bounds).
+    Required because the retry tests below call `architect.build(...,
+    "compare", ...)` and PR #25's `_normalize(plan, archetype=archetype)`
+    now backfills + audits the entity_matrix for list-all/compare. Without
+    a matrix here, the "good" plan would carry an
+    `entity_matrix=missing(required-for-archetype)` shortfall, defeating
+    the test's purpose of representing a fully-passing plan.
     """
     return {
         "report_toc": [
@@ -315,6 +324,10 @@ def _build_good_plan_obj():
         ],
         "queries": [{"id": f"Q{i + 1}", "text": f"q{i + 1}", "type": "factual"} for i in range(architect._QUERIES_MIN)],
         "acceptance_criteria": [],
+        "entity_matrix": {
+            "entities": [f"E{i + 1}" for i in range(architect._ENTITY_MATRIX_ENTITIES_MIN)],
+            "dimensions": [f"D{i + 1}" for i in range(architect._ENTITY_MATRIX_DIMENSIONS_MIN)],
+        },
     }
 
 

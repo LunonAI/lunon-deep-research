@@ -23,10 +23,25 @@ TYPE_TO_SPECIALIST = {
 
 # Archetype-specific Architect emphasis (item 16: per-archetype planner template).
 _ARCH_EMPHASIS = {
-    "list-all": "Exhaustive enumeration: a section/subsection or table row per "
-    "required item; bias query mix to factual + comparative.",
-    "compare": "Build an explicit entity×dimension comparison matrix as a core "
-    "section; bias to comparative + factual; equal depth per entity.",
+    # Greptile PR #25 follow-up round 2 (2026-05-25): "near the article's
+    # start" was synced to "immediately under the §1 heading (S1's body;
+    # the executive opening frame is written separately and does not
+    # include the table)" so the architect's planning prompt matches the
+    # canonical placement now enforced in writer.write_section's S1-only
+    # render-as-table directive. The prior wording would have led the
+    # architect to embed contradictory placement guidance into task_analysis.
+    "list-all": "Exhaustive enumeration: populate the REQUIRED entity_matrix "
+    "with every prompt-enumerated entity AND the dimensions a reader would "
+    "compare them on. The writer renders the matrix as a markdown table "
+    "immediately under the §1 heading (S1's body; the executive opening "
+    "frame is written separately and does not include the table). "
+    "Bias query mix to factual + comparative.",
+    "compare": "Build an explicit entity×dimension comparison matrix as the "
+    "article's core deliverable: populate the REQUIRED entity_matrix with "
+    "every entity the prompt asks to compare AND the dimensions of comparison. "
+    "The writer renders this matrix as a markdown table immediately under "
+    "the §1 heading AND gives each entity equal-depth treatment downstream. "
+    "Bias to comparative + factual.",
     "trend": "Chronological evolution + current state + forward signal; bias to "
     "trend + causal; demand dated developments.",
     "explain-mechanism": "Causal spine: step-by-step chains showing each "
@@ -44,6 +59,16 @@ criteria into a STRICT JSON research plan. Output ONLY this JSON object:
 {
  "task_analysis": str,
  "report_title": str,
+ "entity_matrix": {                /* REQUIRED for list-all and compare; */
+   "entities": [str, ...],         /* omit (or set to null) for others. */
+   "dimensions": [str, ...]
+ },                                /* 5-20 entities (rows), 4-8 dimensions
+                                      (columns). The article's spine is an
+                                      explicit entity×dimension matrix that
+                                      the writer renders as a table early on
+                                      AND uses to ensure EQUAL depth per
+                                      entity (no entity dropped, no entity
+                                      over-weighted vs siblings).            */
  "report_toc": [ {"id": "S1", "title": str,
     "subsections": [ {"id": "S1.1", "title": str,
                       "depth_seeds": [str, ...] /* 2-4 specific
@@ -87,6 +112,11 @@ HARD RULES:
 - depth_seeds are the WRITER'S H4-leaf-section seeds — concrete claims,
   named entities, data points, or comparisons. Avoid generic seeds like
   "Background" or "Conclusion"; each seed is a specific substantive payload.
+- entity_matrix REQUIRED for list-all and compare archetypes. Populate
+  entities with EVERY entity the prompt names (verbatim where possible),
+  AND choose 4-8 dimensions a reader would compare them across (the
+  "columns" of the table the writer will render). Omit entity_matrix (or
+  set to null) for other archetypes.
 - Match the prompt's language."""
 
 
@@ -196,7 +226,7 @@ def build(
         "architect", user, system=_SYSTEM, max_tokens=32000, effort="low", think=True, note="architect"
     )
     plan = _coerce_to_dict(plan)
-    _normalize(plan)
+    _normalize(plan, archetype=archetype)
 
     # P2-Option-A-#5 (2026-05-23): outline retry-on-shortfall. The fail-soft
     # `_outline_audit` from PR #20 was telemetry-only — if the architect
@@ -231,8 +261,15 @@ def build(
         audit["retry_attempted"] = True
         # Run the retry through the same _normalize so its audit is computed
         # the same way; pick whichever plan is structurally better.
+        # PR #25 + #23 merge resolution (2026-05-25): the retry must also
+        # receive `archetype=archetype` so list-all/compare retries get
+        # entity_matrix backfilled + audited the same way the original plan
+        # does. Without it, a retry on a list-all task with a missing matrix
+        # would skip the `entity_matrix=missing` shortfall, making
+        # `_retry_is_better` mis-judge it as "no new shortfalls" relative to
+        # the original.
         if retry:
-            _normalize(retry)
+            _normalize(retry, archetype=archetype)
             if _retry_is_better(retry["_outline_audit"], audit):
                 retry["_outline_audit"]["retry_attempted"] = True
                 retry["_outline_audit"]["pre_retry_shortfalls"] = audit["pre_retry_shortfalls"]
@@ -276,15 +313,31 @@ def _retry_is_better(retry_audit: dict, orig_audit: dict) -> bool:
     return retry_sf <= orig_sf
 
 
-def _normalize(plan: dict) -> None:
+# P2-Option-A-#7 entity_matrix bounds (list-all and compare archetypes only).
+# The 5-20 entity range covers the corpus distribution: id=91 Saint Seiya
+# (~15 named entities), id=8 ML materials (~7 method classes), id=20 Streamable
+# HTTP (~5 transport variants). 4-8 dimensions covers a useful comparison
+# table without overwhelming reader cognition.
+_ENTITY_MATRIX_ENTITIES_MIN = 5
+_ENTITY_MATRIX_ENTITIES_MAX = 20
+_ENTITY_MATRIX_DIMENSIONS_MIN = 4
+_ENTITY_MATRIX_DIMENSIONS_MAX = 8
+
+
+def _normalize(plan: dict, *, archetype: str | None = None) -> None:
     """Attach specialist_role to every query; backfill depth_seeds default;
-    record outline-depth diagnostics for downstream telemetry.
+    backfill entity_matrix default for list-all/compare archetypes; record
+    outline-depth diagnostics for downstream telemetry.
 
     Fail-soft: a plan that comes back with too-few top sections or missing
     depth_seeds is NOT rejected — the writer still runs on whatever the
     architect emitted. We record the shortfall in `plan["_outline_audit"]`
     so the orchestrate-layer can log it and we can see in dev runs whether
     the architect is honoring the new contract.
+
+    `archetype` is optional for back-compat with tests that call _normalize
+    directly without a plan-build cycle. When provided, the audit also
+    surfaces entity_matrix shortfalls for list-all/compare archetypes.
     """
     for q in plan.get("queries", []):
         t = str(q.get("type", "factual")).strip().lower()
@@ -347,4 +400,49 @@ def _normalize(plan: dict) -> None:
                 audit["shortfalls"].append(f"{sub.get('id')}.seeds={len(seeds)}<{_SEEDS_MIN}")
             if len(seeds) > _SEEDS_MAX:
                 audit["shortfalls"].append(f"{sub.get('id')}.seeds={len(seeds)}>{_SEEDS_MAX}")
+
+    # P2-Option-A-#7 (2026-05-23): entity_matrix audit + backfill for
+    # list-all and compare archetypes. The matrix is the article's spine
+    # (rendered as a table near the article start) and the writer uses it
+    # to ensure equal-depth treatment per entity.
+    em = plan.get("entity_matrix")
+    if archetype in {"list-all", "compare"}:
+        # Greptile PR #25 follow-up round 2 (2026-05-25): track whether the
+        # matrix was entirely absent vs present-but-underpopulated. A
+        # missing matrix necessarily has zero entities and zero dimensions,
+        # so emitting all three of (missing + entities=0<5 + dimensions=0<4)
+        # would inflate the shortfall count for ONE root cause — and PR #23's
+        # retry-on-shortfall logic could waste a retry attempt trying to fix
+        # three independent failures when there's only one underlying gap.
+        matrix_was_missing = not isinstance(em, dict)
+        if matrix_was_missing:
+            # Backfill so writer never crashes on `entity_matrix["entities"]`.
+            em = {"entities": [], "dimensions": []}
+            plan["entity_matrix"] = em
+            audit["shortfalls"].append("entity_matrix=missing(required-for-archetype)")
+        ents = em.get("entities") if isinstance(em.get("entities"), list) else None
+        dims = em.get("dimensions") if isinstance(em.get("dimensions"), list) else None
+        if ents is None:
+            em["entities"] = []
+            ents = em["entities"]
+        if dims is None:
+            em["dimensions"] = []
+            dims = em["dimensions"]
+        audit["entity_matrix_entities"] = len(ents)
+        audit["entity_matrix_dimensions"] = len(dims)
+        # Only emit count shortfalls when the matrix was actually present —
+        # the "missing" shortfall already captures the entire failure mode
+        # when the LLM omitted the field. (Upper-bound count shortfalls
+        # remain gated the same way: if the matrix was missing we backfilled
+        # to {entities: [], dimensions: []} which can't trip the >MAX path.)
+        if not matrix_was_missing:
+            if len(ents) < _ENTITY_MATRIX_ENTITIES_MIN:
+                audit["shortfalls"].append(f"entity_matrix.entities={len(ents)}<{_ENTITY_MATRIX_ENTITIES_MIN}")
+            if len(ents) > _ENTITY_MATRIX_ENTITIES_MAX:
+                audit["shortfalls"].append(f"entity_matrix.entities={len(ents)}>{_ENTITY_MATRIX_ENTITIES_MAX}")
+            if len(dims) < _ENTITY_MATRIX_DIMENSIONS_MIN:
+                audit["shortfalls"].append(f"entity_matrix.dimensions={len(dims)}<{_ENTITY_MATRIX_DIMENSIONS_MIN}")
+            if len(dims) > _ENTITY_MATRIX_DIMENSIONS_MAX:
+                audit["shortfalls"].append(f"entity_matrix.dimensions={len(dims)}>{_ENTITY_MATRIX_DIMENSIONS_MAX}")
+
     plan["_outline_audit"] = audit
