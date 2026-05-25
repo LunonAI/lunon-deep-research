@@ -135,7 +135,9 @@ def test_normalize_records_shortfall_when_outline_over_bounds():
 
 
 def test_normalize_records_no_shortfall_when_outline_meets_bounds():
-    """A plan that hits the 8-12 / 3-6 / 2-4 bounds records zero shortfalls."""
+    """A plan that hits the 8-12 / 3-6 / 2-4 bounds AND the 48-64 query band
+    records zero shortfalls. (Greptile PR #22 follow-up added the
+    query-count check; this test now exercises the queries band too.)"""
     plan = {
         "report_toc": [
             {
@@ -153,7 +155,8 @@ def test_normalize_records_no_shortfall_when_outline_meets_bounds():
             }
             for i in range(8)
         ],
-        "queries": [],
+        # 48 queries — at the lower edge of the post-#4 48-64 HARD RULE band.
+        "queries": [{"id": f"Q{i + 1}", "text": f"q{i + 1}", "type": "factual"} for i in range(48)],
         "acceptance_criteria": [],
     }
     architect._normalize(plan)
@@ -161,8 +164,57 @@ def test_normalize_records_no_shortfall_when_outline_meets_bounds():
     assert audit["n_top_sections"] == 8
     assert audit["n_subsections_total"] == 24
     assert audit["n_seeds_total"] == 48
+    assert audit["n_queries"] == 48
     assert audit["shortfalls"] == []
     assert audit["subsections_missing_seeds"] == 0
+
+
+def test_normalize_records_shortfall_when_query_count_below_band():
+    """Greptile PR #22 follow-up: the 48-64 HARD RULE on queries must surface
+    as an `_outline_audit` shortfall when the LLM falls back to the pre-#4
+    24-32 range (or anything below 48). Without this, a regression that
+    silently halves the evidence volume per specialist would only be
+    visible by counting findings downstream — too late."""
+    plan = {
+        "report_toc": [
+            {"id": "S1", "title": "Sec", "subsections": [{"id": "S1.1", "title": "Sub", "depth_seeds": ["a", "b"]}]}
+        ],
+        # 24 queries — the pre-#4 floor; well below the new 48 lower bound.
+        "queries": [{"id": f"Q{i + 1}", "text": "q", "type": "factual"} for i in range(24)],
+        "acceptance_criteria": [],
+    }
+    architect._normalize(plan)
+    audit = plan["_outline_audit"]
+    assert audit["n_queries"] == 24
+    assert any(f"queries=24<{architect._QUERIES_MIN}" in s for s in audit["shortfalls"]), audit
+
+
+def test_normalize_records_shortfall_when_query_count_above_band():
+    """Symmetric upper bound: 65+ queries also record a shortfall, matching
+    the over-band tracking for top_sections / subsections / seeds."""
+    plan = {
+        "report_toc": [
+            {"id": "S1", "title": "Sec", "subsections": [{"id": "S1.1", "title": "Sub", "depth_seeds": ["a", "b"]}]}
+        ],
+        # 80 queries — above the 64 upper bound.
+        "queries": [{"id": f"Q{i + 1}", "text": "q", "type": "factual"} for i in range(80)],
+        "acceptance_criteria": [],
+    }
+    architect._normalize(plan)
+    audit = plan["_outline_audit"]
+    assert audit["n_queries"] == 80
+    assert any(f"queries=80>{architect._QUERIES_MAX}" in s for s in audit["shortfalls"]), audit
+
+
+def test_audit_n_queries_present_for_empty_plan():
+    """Defensive: empty plan still produces n_queries=0 in the audit (and a
+    queries<MIN shortfall), so downstream readers can rely on the field
+    being present."""
+    plan: dict = {}
+    architect._normalize(plan)
+    audit = plan["_outline_audit"]
+    assert audit["n_queries"] == 0
+    assert any("queries=0<" in s for s in audit["shortfalls"]), audit
 
 
 def test_normalize_attaches_specialist_role():
@@ -237,7 +289,13 @@ def test_format_retry_feedback_bounds_come_from_constants():
 
 
 def _build_good_plan_obj():
-    """Plan that passes every bound — used as a 'retry succeeded' response."""
+    """Plan that passes every bound — used as a 'retry succeeded' response.
+
+    Greptile PR #22 round-3 merge follow-up (2026-05-25): queries list bumped
+    to architect._QUERIES_MIN (48) entries so the post-#4 query-count audit
+    (`queries=0<48` shortfall) does not fire on this "good" plan and break
+    the `shortfalls == []` invariant downstream retry tests assert.
+    """
     return {
         "report_toc": [
             {
@@ -255,7 +313,7 @@ def _build_good_plan_obj():
             }
             for i in range(9)
         ],
-        "queries": [],
+        "queries": [{"id": f"Q{i + 1}", "text": f"q{i + 1}", "type": "factual"} for i in range(architect._QUERIES_MIN)],
         "acceptance_criteria": [],
     }
 

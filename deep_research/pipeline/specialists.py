@@ -14,6 +14,7 @@ available").
 """
 
 import json
+import sys
 
 from .. import llm
 from ..retrieval import domain_routed
@@ -36,6 +37,11 @@ _ROLE = {
     "generalist": "GENERALIST. Multi-mode fallback; let the question guide the method.",
 }
 
+# P2-Option-A-#4 (2026-05-23): per-specialist finding ceiling raised from
+# 8-14 to 14-24 to feed the depth_seeds H4-leaf payload from PR #20. With 5
+# specialists each producing 14-24 atoms, total per-task evidence volume
+# reaches ~70-120 atoms — still below the 600-2250 the depth contract wants
+# but a ~2.4× improvement over the pre-#4 floor.
 _EXTRACT_SYSTEM = (
     "You are a research specialist. {role}\nFrom the search results, extract "
     "SOURCED findings that serve the brief. Think briefly if you must, "
@@ -44,15 +50,119 @@ _EXTRACT_SYSTEM = (
     'with concrete numbers/names/dates), "source_name": str (publication/'
     "institution, e.g. 'IEA 2025' — never a bare number), \"url\": str, "
     '"quote": str (verbatim support <=125 chars), "query_ids": [str]}} '
-    "...8-14 findings ]}}. Only findings grounded in the results; reconcile "
+    "...14-24 findings ]}}. Only findings grounded in the results; reconcile "
     "conflicts in the statement; match the brief's language."
 )
+
+# P2-Option-A-#4: per-specialist max search calls and per-search result count.
+# Pre-#4: 5 searches × 5 results × 5 specialists = 125 raw hits → ~40-70
+# extracted atoms per task. Post-#4: 12 × 10 × 5 = 600 raw hits → ~70-120
+# extracted atoms (extraction is the binding constraint after this raise).
+# The AI-Q "<=5 sequential searches per specialist" guideline reflected the
+# original 24-32-query budget; with #4's 48-64 query budget, each specialist
+# is assigned ~10-13 queries and the cap moves to match.
+_MAX_SEARCHES_PER_SPECIALIST = 12
+_RESULTS_PER_SEARCH = 10
+
+# P2-Option-A-#4 Greptile PR #22 follow-up (2026-05-25): named cap on the
+# serialised SEARCH RESULTS string sent to the extraction LLM. Pre-#4 the
+# inline `[:42000]` truncation was fine because 5×5 raw hits × ~1,600 chars
+# ≈ 40k chars fit comfortably under 42k. Post-#4 the same 5×5 → 12×10 raise
+# pushes the payload to ~192k chars (12 searches × 10 results × ~1,600
+# chars/result; per-result text is already capped at 1500 chars on line ~111
+# plus title/url/date/qid + JSON syntax ≈ 1,600). With the cap still at 42k,
+# only the first ~25 results — barely 2-3 of the 12 specialist searches —
+# survived into the extraction LLM context; the remaining 8-9 searches' hits
+# were silently dropped despite Exa cost having been incurred for them. Only
+# the degraded `_snippet_fallback` path actually saw them.
+#
+# Raise the cap to fit the full expected post-#4 payload with ~25% headroom:
+# 192k × 1.25 ≈ 240k chars. At ~4 chars/token, that's ~60k input tokens,
+# well within Nemotron-3-Super-120B's 128k context (system+brief add ~5k
+# tokens; output budget is 14k; total ~79k < 128k).
+_RESULTS_SERIALISATION_CAP = 240_000
+
+# P2-Option-A-#4 Greptile PR #22 follow-up round 2 (2026-05-25):
+# Per-model serialised-payload cap (chars). Sized so the payload fits
+# within the model's advertised context window after reserving system
+# prompt (~3k tokens) + brief (~2k tokens) + output (~14k tokens, see
+# `max_tokens=14000` on the extraction call below):
+#
+#   safe_payload_chars ≤ (context_tokens - 3k_sys - 2k_brief - 14k_out) * 4
+#
+# Empty string `""` = no override = default specialists model
+# (Nemotron-3-Super-120B). Greptile flagged that the single 240k cap was
+# Nemotron-calibrated but applied uniformly to the model_override path, so
+# a narrower override could silently truncate at its API layer or fall
+# through to `_snippet_fallback` — Exa cost incurred with no extraction
+# benefit. Making the cap per-model puts the context check at the same
+# diff site as any new route added in orchestrator.py: adding a route
+# without an entry here trips the unknown-override warning below.
+_MODEL_PAYLOAD_CAP_CHARS = {
+    # Nemotron-3-Super-120B: 128k ctx (≈109k tokens free after reservation
+    # → ~436k chars available). We use the calibrated 240k (per #4
+    # commentary above; cap is "what we actually need", not "what fits").
+    "": _RESULTS_SERIALISATION_CAP,
+    # Tongyi-DeepResearch-30B-A3B: 131k ctx (verified via OpenRouter model
+    # card 2026-05-25 — https://openrouter.ai/alibaba/tongyi-deepresearch-30b-a3b).
+    # ~112k tokens free after reservation → ~448k chars available;
+    # symmetric to Nemotron, use the same 240k cap.
+    "alibaba/tongyi-deepresearch-30b-a3b": _RESULTS_SERIALISATION_CAP,
+}
+
+# Conservative fallback for an unknown model_override. Sized for a 32k-ctx
+# model (the smallest a commercial frontier extraction model is likely to
+# advertise): 32k - 19k reservation = 13k input tokens free ≈ 52k chars,
+# rounded down for safety. Better to under-fill the context (degraded
+# extraction quality, but findings still produced) than to silently exceed
+# it (API-layer truncation → `_snippet_fallback` catches the JSON parse
+# failure → Exa cost incurred for nothing).
+_UNKNOWN_OVERRIDE_PAYLOAD_CAP_CHARS = 48_000
+
+# Dedupe set so the unknown-override warning fires once per (process,
+# model) rather than once per task per specialist (would be ~30 lines of
+# noise per dev4 run).
+_warned_unknown_overrides: set[str] = set()
+
+
+def _payload_cap_for(model_override: str) -> int:
+    """Resolve the serialised-payload cap (chars) for the extraction call,
+    keyed on the active `model_override`. Unknown override → emits a
+    one-shot stderr warning and returns the conservative 48k cap.
+
+    Operator action on hitting the warning: add the new model's entry to
+    `_MODEL_PAYLOAD_CAP_CHARS` above with its verified context window
+    BEFORE routing additional traffic through it.
+    """
+    if model_override in _MODEL_PAYLOAD_CAP_CHARS:
+        return _MODEL_PAYLOAD_CAP_CHARS[model_override]
+    if model_override not in _warned_unknown_overrides:
+        _warned_unknown_overrides.add(model_override)
+        print(
+            f"[specialists] model_override={model_override!r} not in "
+            f"_MODEL_PAYLOAD_CAP_CHARS — using conservative "
+            f"{_UNKNOWN_OVERRIDE_PAYLOAD_CAP_CHARS}-char cap (sized for "
+            f"32k-ctx model). Add this model's verified context window "
+            f"to the registry to lift the cap.",
+            file=sys.stderr,
+            flush=True,
+        )
+    return _UNKNOWN_OVERRIDE_PAYLOAD_CAP_CHARS
+
+
+# Cap on the degraded snippet-fallback path. Held to match
+# _EXTRACT_SYSTEM's 14-24 finding ceiling so the fallback path doesn't
+# produce more atoms than the LLM-extract path's upper bound (avoids
+# inconsistent atom counts between tasks depending on which path fired).
+_FALLBACK_CAP = 24
 
 
 def _snippet_fallback(results, query_ids):
     """Degrade gracefully: turn raw search hits into evidence atoms."""
     out = []
-    for r in results[:14]:
+    # Cap matches the new _EXTRACT_SYSTEM finding ceiling (14-24); fallback
+    # path should not produce more atoms than the LLM extract path would.
+    for r in results[:_FALLBACK_CAP]:
         txt = (r.get("text") or r.get("title") or "").strip()
         if not txt:
             continue
@@ -80,11 +190,13 @@ def research(role: str, queries: list, *, language: str, domain: str, exa_mode: 
     qids = [str(q.get("id")) for q in queries]
 
     results, n = [], 0
-    for q in queries[:5]:  # AI-Q: <=5 sequential searches per specialist
+    for q in queries[:_MAX_SEARCHES_PER_SPECIALIST]:  # bumped to 12 in #4
         qtext = q.get("text") or ""
         if not qtext:
             continue
-        for h in domain_routed.search(qtext, language=language, domain=domain, mode=exa_mode, num_results=5):
+        for h in domain_routed.search(
+            qtext, language=language, domain=domain, mode=exa_mode, num_results=_RESULTS_PER_SEARCH
+        ):
             results.append(
                 {
                     "title": h["title"],
@@ -100,7 +212,11 @@ def research(role: str, queries: list, *, language: str, domain: str, exa_mode: 
         return {"role": role, "findings": [], "n_searches": n}
 
     brief = "\n".join(f"[{q.get('id')}] {q.get('text', '')}" for q in queries)
-    user = f"BRIEF ({language}):\n{brief}\n\nSEARCH RESULTS:\n" + json.dumps(results, ensure_ascii=False)[:42000]
+    # Greptile PR #22 follow-up round 2 (2026-05-25): resolve the cap per
+    # active extraction model. See `_payload_cap_for` above for the registry
+    # and the unknown-override fallback rationale.
+    payload_cap = _payload_cap_for(model_override)
+    user = f"BRIEF ({language}):\n{brief}\n\nSEARCH RESULTS:\n" + json.dumps(results, ensure_ascii=False)[:payload_cap]
     try:
         if model_override:
             # Route to override (Tongyi-DR for list-all/explain-mechanism)
