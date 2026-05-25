@@ -1,8 +1,9 @@
 """Architect subagent (p1-checklist items 6 + 14; adapts AI-Q architect.j2).
 
 Turns the Scout landscape + extracted intents + regenerated criteria into a
-STRICT JSON plan: hierarchical TOC, 24-32 typed queries (1:1 mapped to the 5
-researcher specialists), 24-32 acceptance criteria that FOLD IN every
+STRICT JSON plan: hierarchical TOC, 48-64 typed queries (1:1 mapped to the 5
+researcher specialists; pre-#4 was 24-32, doubled to feed the depth_seeds
+H4-leaf payload from PR #20), 24-32 acceptance criteria that FOLD IN every
 regenerated sub-criterion and every extracted intent as an explicit coverage
 obligation, and per-section depth targets. Archetype-aware (item 16).
 """
@@ -63,7 +64,7 @@ criteria into a STRICT JSON research plan. Output ONLY this JSON object:
     "target_sections": ["S1", ...]} ... 24-32 ],
  "queries": [ {"id": "Q1", "text": str,
     "type": "factual"|"causal"|"comparative"|"critical"|"trend",
-    "target_sections": ["S1", ...], "rationale": str } ... 24-32 ]
+    "target_sections": ["S1", ...], "rationale": str } ... 48-64 ]
 }
 
 HARD RULES:
@@ -72,8 +73,12 @@ HARD RULES:
 - EVERY extracted intent becomes >=1 acceptance_criterion (source="intent").
 - Prompt-enumerated terms/entities MUST appear verbatim as section or
   subsection titles (structural anchoring → instruction-following).
-- 24-32 queries AND 24-32 acceptance_criteria. Every query maps to >=1 TOC
+- 48-64 queries AND 24-32 acceptance_criteria. Every query maps to >=1 TOC
   section. Distribute query `type` to cover all needed analytical functions.
+  (Query count doubled from 24-32 post-#4: the depth_seeds H4-leaf payload
+  from PR #20 expects 200-450 leaves per article, each needing 3-5 evidence
+  atoms = 600-2250 atoms total. Pre-#4 produced only ~40-70 atoms per task,
+  leaving the depth contract structurally evidence-starved.)
 - report_toc 8-12 top-level sections; each top section has 3-6 subsections;
   each subsection has 2-4 depth_seeds. (Calibrated to the #1-leaderboard
   the reference corpus structural profile: mean 9 top sections, 4 subsections per
@@ -104,6 +109,16 @@ _SUBSECTIONS_MIN = 3
 _SUBSECTIONS_MAX = 6
 _SEEDS_MIN = 2
 _SEEDS_MAX = 4
+# P2-Option-A-#4 Greptile PR #22 follow-up (2026-05-25): query-count band
+# enforced in the HARD RULES section of _SYSTEM. Tracked here next to the
+# other structural bounds so a plan that silently regresses to the pre-#4
+# 24-32 query band is visible in the audit log as a shortfall rather than
+# passing without notice. Collocated with the other constants per PR #23's
+# "_format_retry_feedback must reference the same source of truth" rule —
+# if any future retry-feedback string interpolates the query band, it
+# pulls from here.
+_QUERIES_MIN = 48
+_QUERIES_MAX = 64
 
 
 def _format_retry_feedback(audit: dict) -> str:
@@ -172,9 +187,13 @@ def build(
     # Adaptive thinking on, effort=low: the structured prompt does the heavy
     # lifting; medium effort added ~5min/task for no plan-quality gain in the
     # W1 smoke. Latency decision (logged).
-    # Token budget: 16k → 24k (PR #20: depth_seeds payload of 200-450 seeds).
+    # Token budget calibration:
+    # - PR #20 bumped 16k → 24k for the depth_seeds payload (200-450 seeds).
+    # - PR #22 (#4) bumps 24k → 32k for the doubled query count (48-64) on
+    #   top of the existing payload. 32k leaves headroom for verbose
+    #   query rationales without truncation.
     plan = llm.call_json(
-        "architect", user, system=_SYSTEM, max_tokens=24000, effort="low", think=True, note="architect"
+        "architect", user, system=_SYSTEM, max_tokens=32000, effort="low", think=True, note="architect"
     )
     plan = _coerce_to_dict(plan)
     _normalize(plan)
@@ -278,17 +297,29 @@ def _normalize(plan: dict) -> None:
     plan.setdefault("queries", [])
 
     toc = plan.get("report_toc", [])
+    queries = plan.get("queries", [])
     audit = {
         "n_top_sections": len(toc),
         "n_subsections_total": 0,
         "n_seeds_total": 0,
         "subsections_missing_seeds": 0,
+        # Greptile PR #22 follow-up: track query count alongside the other
+        # structural counts so a plan that emits fewer than the post-#4
+        # HARD RULE band (48-64) is visible in the audit log instead of
+        # passing silently. Without this, a model fallback to the pre-#4
+        # 24-32 range would leave specialists evidence-starved without
+        # any diagnostic surfacing the cause.
+        "n_queries": len(queries),
         "shortfalls": [],
     }
     if len(toc) < _TOP_SECTIONS_MIN:
         audit["shortfalls"].append(f"top_sections={len(toc)}<{_TOP_SECTIONS_MIN}")
     if len(toc) > _TOP_SECTIONS_MAX:
         audit["shortfalls"].append(f"top_sections={len(toc)}>{_TOP_SECTIONS_MAX}")
+    if len(queries) < _QUERIES_MIN:
+        audit["shortfalls"].append(f"queries={len(queries)}<{_QUERIES_MIN}")
+    if len(queries) > _QUERIES_MAX:
+        audit["shortfalls"].append(f"queries={len(queries)}>{_QUERIES_MAX}")
     for sec in toc:
         subs = sec.get("subsections", []) or []
         audit["n_subsections_total"] += len(subs)
