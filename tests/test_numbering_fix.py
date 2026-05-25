@@ -8,6 +8,7 @@ scripts/p2_validate_f.py.
 
 from deep_research.pipeline.numbering_fix import (
     _normalize_hash_from_number,
+    collapse_empty_sections,
     renumber_headings,
 )
 from deep_research.pipeline.numbering_fix import (
@@ -269,6 +270,115 @@ def test_run_normalization_wired_into_pipeline():
     assert headings[0][0] == "#"
     assert all(h[0] != "#" for h in headings[1:]), f"non-title H1 leaked through: {headings}"
     assert nfo.headings_hash_normalized >= 1
+
+
+# --- P2-Option-A-#6 round-3 (Greptile PR #24): References protection -------
+
+
+def test_collapse_protects_references_block_with_single_entry():
+    """A single-citation `## References` block is ~6 body words — below the
+    10-word `collapse_empty_sections` threshold. Without the protected-
+    titles guard the entire block (heading + entry) gets silently dropped,
+    leaving footnote_normalize_stats showing references were built while
+    the shipped article has none."""
+    text = (
+        "## 1 Body\n\nplenty of body words here to keep the section, talking about evidence.\n\n"
+        "## References\n\n[^1]: Source A 2025 — https://a.example.com\n"
+    )
+    cleaned, n_collapsed = collapse_empty_sections(text)
+    assert "## References" in cleaned, f"References heading was dropped:\n{cleaned}"
+    assert "[^1]: Source A 2025" in cleaned, "the bibliography entry was dropped with the heading"
+    # The body section also survives (>=10 words), so 0 collapses total.
+    assert n_collapsed == 0, f"unexpected collapses: {n_collapsed}"
+
+
+def test_collapse_protects_references_block_with_zero_entries():
+    """Pathological but possible: References heading with NO body at all
+    (e.g. every citation was orphaned/unused). Even then the heading must
+    survive — the collapse heuristic is for stub content sections, not
+    structural anchors."""
+    text = "## 1 Body\n\nbody words enough to survive collapse with margin to spare for sure.\n\n## References\n"
+    cleaned, _ = collapse_empty_sections(text)
+    assert "## References" in cleaned
+
+
+def test_collapse_protects_zh_references_heading():
+    """ZH-language articles emit `## 参考文献`. The protected set must
+    cover EN+ZH+Sources, matching the existing
+    `writing_rules.citation_strip_audit` regex
+    `(References|参考文献|Sources)`. Without ZH coverage, ZH articles
+    would silently lose their bibliography."""
+    text = "## 1 正文\n\n正文需要足够多的字数才能通过空段折叠的阈值，因此这里加一些填充文字。\n\n## 参考文献\n\n[^1]: 来源 — https://a.example.com\n"
+    cleaned, _ = collapse_empty_sections(text)
+    assert "## 参考文献" in cleaned, f"ZH references heading was dropped:\n{cleaned}"
+
+
+def test_collapse_protects_sources_heading_alias():
+    """`## Sources` is the third name in the regex. Pin it too."""
+    text = "## 1 Body\n\nbody words enough to survive collapse with margin to spare for sure.\n\n## Sources\n\n[^1]: X — https://x.example.com\n"
+    cleaned, _ = collapse_empty_sections(text)
+    assert "## Sources" in cleaned
+
+
+def test_collapse_protects_numbered_references_heading():
+    """Defensive: if the renumber step ever runs BEFORE collapse (e.g. a
+    future reordering bug), the heading would arrive as
+    `## 5 References`. The numeric-prefix normalization in
+    `_is_protected_heading` must catch that form too."""
+    text = "## 1 Body\n\nbody words enough to survive collapse with margin to spare for sure.\n\n## 5 References\n\n[^1]: X — https://x.example.com\n"
+    cleaned, _ = collapse_empty_sections(text)
+    assert "## 5 References" in cleaned
+
+
+def test_collapse_still_drops_unrelated_short_section():
+    """Negative case: a plain stub section like `## 4 Conclusion\\n\\nTBD.`
+    must still get collapsed. The protected-titles set must NOT be a
+    blanket exemption for low-content sections — only the named
+    structural anchors."""
+    text = (
+        "## 1 Body\n\nplenty of body words here to keep the section, talking about evidence.\n\n"
+        "## 4 Conclusion\n\nTBD.\n"
+    )
+    cleaned, n_collapsed = collapse_empty_sections(text)
+    assert "## 4 Conclusion" not in cleaned, "non-protected stub section survived collapse"
+    assert n_collapsed == 1
+
+
+def test_collapse_protection_is_case_insensitive():
+    """`## REFERENCES` (all caps from a writer that shouts) or `## references`
+    (lowercase from a writer that doesn't) must both be recognised — case
+    is not a real signal here."""
+    for variant in ("## references", "## REFERENCES", "## ReFeReNcEs"):
+        text = f"## 1 Body\n\nbody words enough to survive collapse with margin to spare for sure.\n\n{variant}\n\n[^1]: X — https://x.example.com\n"
+        cleaned, _ = collapse_empty_sections(text)
+        assert variant in cleaned, f"case variant {variant!r} was not protected"
+
+
+def test_low_citation_article_full_pipeline_preserves_references():
+    """End-to-end cross-module test: drive `footnote_normalize.normalize`
+    on a 1-citation article (the exact failure shape Greptile flagged),
+    then feed the result through `numbering_fix.run()` (the orchestrate
+    ordering), and assert the References block survives. This catches
+    any future regression where the protection is removed OR the
+    orchestrator ordering changes in a way that re-introduces the bug."""
+    from deep_research.pipeline import footnote_normalize
+
+    article = "# Saint Seiya Report\n\n## 1 Bronze Saints\n\nPegasus Seiya is the protagonist[^S1-1]; he wears the Pegasus Cloth and trains under Mu of Aries on Sanctuary's Star Hill.\n\n[^S1-1]: Saint Seiya Encyclopedia 2024 — https://encyclopedia.example.com/saint-seiya\n"
+    fno = footnote_normalize.normalize(article)
+    # Sanity: footnote_normalize built the block.
+    assert fno.n_renumbered == 1
+    assert "## References" in fno.article
+    # Now run the deterministic post-edit pipeline as orchestrate does.
+    nfo = numbering_fix_run(fno.article)
+    # The shipped article MUST still have the References block AND the entry.
+    assert "References" in nfo.article, f"References block lost in numbering_fix:\n{nfo.article}"
+    assert "[^1]:" in nfo.article, "the bibliography entry was stripped"
+    # And sections_collapsed should not count the References block (the body
+    # section is well above 10 words, so 0 total collapses on this input).
+    assert nfo.sections_collapsed == 0, (
+        f"sections_collapsed={nfo.sections_collapsed} — the References block "
+        f"or another structural section was collapsed unexpectedly"
+    )
 
 
 if __name__ == "__main__":
