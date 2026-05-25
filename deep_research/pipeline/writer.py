@@ -190,12 +190,7 @@ def write_section(
     # hallucinate dimensions or emit a degenerate single-column table.
     entity_matrix_block = ""
     em = plan.get("entity_matrix")
-    if (
-        archetype in {"list-all", "compare"}
-        and isinstance(em, dict)
-        and em.get("entities")
-        and em.get("dimensions")
-    ):
+    if archetype in {"list-all", "compare"} and isinstance(em, dict) and em.get("entities") and em.get("dimensions"):
         if sid == "S1":
             entity_matrix_block = (
                 f"\nENTITY MATRIX (article spine for this archetype) — "
