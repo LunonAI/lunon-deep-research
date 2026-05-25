@@ -498,12 +498,20 @@ def check_insight_minimums(text: str) -> dict:
             # `Despite the standard reading…` still counts via the bare
             # `despite\b` alternative — we just stop inflating the count on
             # neutral mentions.
+            # Greptile PR #21 round-3 follow-up: same logic applied to the
+            # bare `commonly (?:held|assumed|believed)` / `通常认为` /
+            # `普遍认为` alternatives — those describe what a consensus
+            # believes, not pushback against it ("It is commonly held that
+            # X is true, which recent data confirms" would have fired). The
+            # `against (?:the )?consensus` slot is widened to
+            # `against (?:the )?(?:consensus|commonly)` so the contrarian
+            # exemplar "Against the commonly held assumption…" still counts;
+            # ZH contrarian uses still land via `尽管` / `与…相反` / `挑战…共识`.
             r"(despite\b|contrary to\b|"
             r"challenges? the (?:view|consensus|standard|prevailing)|"
-            r"against (?:the )?consensus|"
-            r"commonly (?:held|assumed|believed)|"
+            r"against (?:the )?(?:consensus|commonly)|"
             r"counter to (?:the )?(?:consensus|conventional|standard)|"
-            r"尽管|与.{0,8}相反|挑战.{0,8}共识|通常认为|普遍认为|反直觉)",
+            r"尽管|与.{0,8}相反|挑战.{0,8}共识|反直觉)",
             text,
             re.I,
         )
