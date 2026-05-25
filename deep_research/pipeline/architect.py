@@ -134,6 +134,13 @@ _SUBSECTIONS_MIN = 3
 _SUBSECTIONS_MAX = 6
 _SEEDS_MIN = 2
 _SEEDS_MAX = 4
+# P2-Option-A-#4 Greptile PR #22 follow-up (2026-05-25): query-count band
+# enforced in the HARD RULES section of _SYSTEM. Tracked here as a
+# shortfall the same way structural counts are tracked — so a plan that
+# silently regresses to the pre-#4 24-32 band is visible in the audit log
+# rather than passing without notice.
+_QUERIES_MIN = 48
+_QUERIES_MAX = 64
 
 
 def _normalize(plan: dict) -> None:
@@ -157,17 +164,29 @@ def _normalize(plan: dict) -> None:
     plan.setdefault("queries", [])
 
     toc = plan.get("report_toc", [])
+    queries = plan.get("queries", [])
     audit = {
         "n_top_sections": len(toc),
         "n_subsections_total": 0,
         "n_seeds_total": 0,
         "subsections_missing_seeds": 0,
+        # Greptile PR #22 follow-up: track query count alongside the other
+        # structural counts so a plan that emits fewer than the post-#4
+        # HARD RULE band (48-64) is visible in the audit log instead of
+        # passing silently. Without this, a model fallback to the pre-#4
+        # 24-32 range would leave specialists evidence-starved without
+        # any diagnostic surfacing the cause.
+        "n_queries": len(queries),
         "shortfalls": [],
     }
     if len(toc) < _TOP_SECTIONS_MIN:
         audit["shortfalls"].append(f"top_sections={len(toc)}<{_TOP_SECTIONS_MIN}")
     if len(toc) > _TOP_SECTIONS_MAX:
         audit["shortfalls"].append(f"top_sections={len(toc)}>{_TOP_SECTIONS_MAX}")
+    if len(queries) < _QUERIES_MIN:
+        audit["shortfalls"].append(f"queries={len(queries)}<{_QUERIES_MIN}")
+    if len(queries) > _QUERIES_MAX:
+        audit["shortfalls"].append(f"queries={len(queries)}>{_QUERIES_MAX}")
     for sec in toc:
         subs = sec.get("subsections", []) or []
         audit["n_subsections_total"] += len(subs)
