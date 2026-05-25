@@ -85,14 +85,40 @@ HARD RULES:
 - Match the prompt's language."""
 
 
+# P2-Option-A-#1 calibration (mean of the 10 high-scoring the reference articles):
+# 9.0 top sections, 4 subsections/top, 2-3 seeds/sub. The 8-12 / 3-6 / 2-4
+# bounds bracket the natural variation across archetypes. Architect emissions
+# outside these bounds are accepted (no fail-loud) but counted for diagnostics
+# so we can see in telemetry whether the writer is being asked to populate a
+# shallow tree.
+#
+# Greptile PR #23 round-2 follow-up (2026-05-25): moved this block above
+# `_format_retry_feedback` so the LLM-facing retry feedback string can
+# reference the same constants the audit uses. Previously the feedback
+# hard-coded "8-12" / "3-6" / "2-4"; if anyone bumped a constant the
+# architect would be coached toward a stale target while the actual code
+# checks rejected the result, with no obvious source of the drift.
+_TOP_SECTIONS_MIN = 8
+_TOP_SECTIONS_MAX = 12
+_SUBSECTIONS_MIN = 3
+_SUBSECTIONS_MAX = 6
+_SEEDS_MIN = 2
+_SEEDS_MAX = 4
+
+
 def _format_retry_feedback(audit: dict) -> str:
     """Turn `_outline_audit` shortfalls into a feedback string for the
     architect's retry call. Lists each specific bound violation so the
     architect knows exactly what to fix, not just that 'something is wrong'.
+
+    Bound numerals are interpolated from the module-level
+    `_TOP_SECTIONS_*` / `_SUBSECTIONS_*` / `_SEEDS_*` constants so the LLM
+    feedback can never drift away from the actual audit-check thresholds.
     """
     lines = [
         "SHORTFALL FEEDBACK — your previous plan did NOT meet the structural contract.",
-        f"It returned {audit['n_top_sections']} top sections (need 8-12), "
+        f"It returned {audit['n_top_sections']} top sections "
+        f"(need {_TOP_SECTIONS_MIN}-{_TOP_SECTIONS_MAX}), "
         f"{audit['n_subsections_total']} total subsections, "
         f"{audit['n_seeds_total']} total depth_seeds.",
         "",
@@ -104,13 +130,15 @@ def _format_retry_feedback(audit: dict) -> str:
         [
             "",
             "REGENERATE the FULL plan, fixing every shortfall above. The "
-            "structural contract (8-12 top sections, 3-6 subsections each, "
-            "2-4 depth_seeds each) is the highest-priority constraint — it "
-            "directly drives output depth and Comprehensiveness/Insight scores. "
-            "If you cannot find enough material for 8 top sections on this "
-            "prompt, break broader sections into narrower ones; if you have "
-            "too many, merge near-duplicates. Same logic for subsections and "
-            "seeds.",
+            f"structural contract ({_TOP_SECTIONS_MIN}-{_TOP_SECTIONS_MAX} top "
+            f"sections, {_SUBSECTIONS_MIN}-{_SUBSECTIONS_MAX} subsections each, "
+            f"{_SEEDS_MIN}-{_SEEDS_MAX} depth_seeds each) is the highest-priority "
+            "constraint — it directly drives output depth and "
+            "Comprehensiveness/Insight scores. "
+            f"If you cannot find enough material for {_TOP_SECTIONS_MIN} top "
+            "sections on this prompt, break broader sections into narrower "
+            "ones; if you have too many, merge near-duplicates. Same logic "
+            "for subsections and seeds.",
         ]
     )
     return "\n".join(lines)
@@ -227,20 +255,6 @@ def _retry_is_better(retry_audit: dict, orig_audit: dict) -> bool:
     retry_sf = len(retry_audit.get("shortfalls", []))
     orig_sf = len(orig_audit.get("shortfalls", []))
     return retry_sf <= orig_sf
-
-
-# P2-Option-A-#1 calibration (mean of the 10 high-scoring the reference articles):
-# 9.0 top sections, 4 subsections/top, 2-3 seeds/sub. The 8-12 / 3-6 / 2-4
-# bounds bracket the natural variation across archetypes. Architect emissions
-# outside these bounds are accepted (no fail-loud) but counted for diagnostics
-# so we can see in telemetry whether the writer is being asked to populate a
-# shallow tree.
-_TOP_SECTIONS_MIN = 8
-_TOP_SECTIONS_MAX = 12
-_SUBSECTIONS_MIN = 3
-_SUBSECTIONS_MAX = 6
-_SEEDS_MIN = 2
-_SEEDS_MAX = 4
 
 
 def _normalize(plan: dict) -> None:
