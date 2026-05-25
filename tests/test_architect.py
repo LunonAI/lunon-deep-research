@@ -294,7 +294,46 @@ def test_build_keeps_original_when_retry_makes_things_worse(monkeypatch):
     plan = architect.build("p", "en", "compare", [], {}, [])
     # We kept the original shallow plan (1 top section), not the worse retry.
     assert plan["_outline_audit"]["n_top_sections"] == 1
-    assert plan["_outline_audit"].get("retry_rejected_for_more_shortfalls") is True
+    # Greptile PR #23 follow-up: renamed from
+    # `retry_rejected_for_more_shortfalls` (misleading name — fired on the
+    # empty-retry rule 1 too, where the retry actually had FEWER shortfalls).
+    assert plan["_outline_audit"].get("retry_rejected") is True
+    # And `retry_attempted` must be True on the rejection path, same as on
+    # the success path (both reflect "LLM was called").
+    assert plan["_outline_audit"]["retry_attempted"] is True
+
+
+def test_build_marks_retry_attempted_when_retry_response_is_uncoercible(monkeypatch):
+    """Greptile PR #23 follow-up regression test for the
+    `_coerce_to_dict(retry) == {}` failure mode.
+
+    The retry LLM call CAN return a response that `_coerce_to_dict` flattens
+    to `{}` (e.g. a malformed JSON wrapper, an unexpected scalar). Before
+    the fix the entire `if retry:` block was skipped on that path and
+    `retry_attempted` silently stayed False — making a real LLM failure look
+    identical to "audit had no shortfalls" in dev-run telemetry. The fix
+    raises `retry_attempted=True` BEFORE the guard. This test pins that
+    behaviour so a future refactor cannot regress it."""
+    # First call returns the shallow plan that triggers retry; second call
+    # returns a scalar that _coerce_to_dict will flatten to {}.
+    responses = iter([_build_shallow_plan_obj(), "not a dict, not a plan"])
+
+    def fake_call_json(*_args, **_kw):
+        return next(responses)
+
+    monkeypatch.setattr(architect.llm, "call_json", fake_call_json)
+    plan = architect.build("p", "en", "compare", [], {}, [])
+    # We kept the original shallow plan — there was no usable retry.
+    assert plan["_outline_audit"]["n_top_sections"] == 1
+    # The LLM was called for the retry; telemetry must reflect that.
+    assert plan["_outline_audit"]["retry_attempted"] is True, (
+        "retry_attempted must be True whenever the retry LLM was called, even if the response was uncoercible"
+    )
+    # And the rejection-named flag MUST NOT fire here — the retry was not
+    # rejected by `_retry_is_better`; it was never coercible enough to evaluate.
+    assert "retry_rejected" not in plan["_outline_audit"], (
+        "retry_rejected should only fire when _retry_is_better explicitly rejected a coerced retry plan"
+    )
 
 
 def test_normalize_handles_empty_plan():

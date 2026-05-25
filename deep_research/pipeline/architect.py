@@ -175,6 +175,13 @@ def build(
             note="architect.retry",
         )
         retry = _coerce_to_dict(retry)
+        # Greptile PR #23 follow-up (2026-05-25): mark `retry_attempted=True`
+        # BEFORE the `if retry:` guard. The LLM was called at this point; if
+        # `_coerce_to_dict` returns `{}` (uncoercible response) the entire
+        # `if retry:` block is skipped, but a dev-run reader scanning
+        # `retry_attempted` should still see the trigger fired. Without this,
+        # a real LLM failure looks identical to "audit had no shortfalls".
+        audit["retry_attempted"] = True
         # Run the retry through the same _normalize so its audit is computed
         # the same way; pick whichever plan is structurally better.
         if retry:
@@ -185,8 +192,13 @@ def build(
                 plan = retry
             else:
                 # Keep original; record that retry was attempted but rejected.
-                audit["retry_attempted"] = True
-                audit["retry_rejected_for_more_shortfalls"] = True
+                # Greptile PR #23 follow-up: renamed from
+                # `retry_rejected_for_more_shortfalls`. _retry_is_better has
+                # three distinct rejection rules and the empty-retry path
+                # (rule 1, n_top_sections==0) actually produces FEWER
+                # shortfalls than the original — the old name fired on that
+                # path too, misleading anyone reading telemetry about WHY.
+                audit["retry_rejected"] = True
 
     return plan
 
