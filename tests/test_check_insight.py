@@ -177,6 +177,42 @@ def test_contrarian_framing_still_counts_despite_with_standard_reading():
     )
 
 
+def test_contrarian_framing_no_false_positive_on_neutral_commonly_held():
+    """Greptile PR #21 round-3 follow-up: bare `commonly held/assumed/believed`
+    (EN) and `通常认为` / `普遍认为` (ZH) describe what a consensus *believes*,
+    not pushback against it. A sentence like "It is commonly held that X is
+    true, which recent data confirms" carries no adversarial signal and must
+    not inflate contrarian_framing. The contrarian use "Against the commonly
+    held assumption…" still counts via the widened `against (?:the )?commonly`
+    slot; ZH contrarian uses still land via `尽管` / `与…相反` / `挑战…共识`."""
+    text = (
+        "It is commonly held that the upper bound is fixed, which recent data confirms. "
+        "Researchers commonly assume the panel is homogeneous, and the cohort study agrees. "
+        "It is commonly believed that the equilibrium is stable, in line with the 2025 update. "
+        "学界通常认为该上限是固定的，最新数据也支持这一结论。"
+        "普遍认为这是稳定的均衡，新观测同样如此。"
+        # 5 neutral consensus-describing uses; no challenge signal anywhere.
+    )
+    out = check_insight_minimums(text)
+    assert out["counts"]["contrarian_framing"] == 0, (
+        f"neutral consensus-describing phrases inflated contrarian count: {out['counts']}"
+    )
+
+
+def test_contrarian_framing_still_counts_against_the_commonly_held():
+    """Greptile PR #21 round-3 follow-up: the named contrarian exemplar
+    "Against the commonly held assumption…" must still count as contrarian
+    framing. With bare `commonly (?:held|assumed|believed)` removed, the
+    widened `against (?:the )?(?:consensus|commonly)` slot carries the load."""
+    text = (
+        "Against the commonly held assumption, the panel shows heterogeneity."
+    )
+    out = check_insight_minimums(text)
+    assert out["counts"]["contrarian_framing"] >= 1, (
+        f"'Against the commonly held…' exemplar no longer counts as contrarian: {out['counts']}"
+    )
+
+
 def test_counts_dict_keys_match_four_element_contract():
     """The advisory counts dict must expose exactly the four keys named in
     _INSIGHT_MIN's contract. Greptile PR #21 follow-up: causal_chain is
