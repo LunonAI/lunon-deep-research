@@ -110,6 +110,93 @@ def test_normalize_back_compat_when_archetype_not_provided():
     assert "n_top_sections" in plan["_outline_audit"]
 
 
+def test_missing_entity_matrix_emits_exactly_one_entity_matrix_shortfall():
+    """Greptile PR #25 follow-up round 2: when entity_matrix is entirely
+    absent on a list-all/compare task, _normalize must emit ONE shortfall
+    (the `entity_matrix=missing` entry) — NOT three (missing + entities=0<5
+    + dimensions=0<4) for what is structurally a single root cause.
+
+    Pre-fix, the backfilled empty matrix would trip BOTH count-shortfall
+    checks, padding the shortfall list to three entries for a single LLM
+    failure. PR #23's retry-on-shortfall logic could then waste a retry
+    attempting to fix three "independent" failures when adding a single
+    entity_matrix block would fix all three at once.
+
+    The fix is to gate the count checks behind a `matrix_was_missing` flag
+    so count shortfalls only emit when the matrix was PRESENT but
+    under/over-populated. This test pins that contract."""
+    for archetype in ("list-all", "compare"):
+        plan = {"report_toc": [], "queries": [], "acceptance_criteria": []}
+        architect._normalize(plan, archetype=archetype)
+        em_shortfalls = [s for s in plan["_outline_audit"]["shortfalls"] if s.startswith("entity_matrix")]
+        # Exactly one entity_matrix-related shortfall, and it must be the
+        # missing entry (not the count entries that would be redundant noise).
+        assert len(em_shortfalls) == 1, (
+            f"archetype={archetype}: expected exactly 1 entity_matrix shortfall "
+            f"when matrix is missing, got {len(em_shortfalls)}: {em_shortfalls}"
+        )
+        assert em_shortfalls[0].startswith("entity_matrix=missing"), (
+            f"archetype={archetype}: the single shortfall must be the "
+            f"`entity_matrix=missing` entry, got {em_shortfalls[0]!r}"
+        )
+        # Belt-and-suspenders: explicitly assert the count shortfalls are
+        # NOT present — those would be the regression.
+        assert not any("entity_matrix.entities=0<" in s for s in em_shortfalls), em_shortfalls
+        assert not any("entity_matrix.dimensions=0<" in s for s in em_shortfalls), em_shortfalls
+        # But the count TELEMETRY counters MUST still be populated (a dev-run
+        # reader needs to see entity_matrix_entities=0 / dimensions=0 to know
+        # the backfill fired). Telemetry counts are separate from shortfalls.
+        assert plan["_outline_audit"]["entity_matrix_entities"] == 0
+        assert plan["_outline_audit"]["entity_matrix_dimensions"] == 0
+
+
+def test_present_but_under_populated_matrix_still_emits_count_shortfalls():
+    """Counter-test to the above: when the entity_matrix WAS present in
+    the plan but under-populated (e.g. 1 entity, 1 dimension), the count
+    shortfalls MUST still fire — those are real, non-redundant signals
+    that the architect produced a too-shallow matrix. The fix only
+    suppresses count shortfalls when the matrix was entirely MISSING."""
+    plan = _plan_with_em(["only-one"], ["only-dim"])
+    architect._normalize(plan, archetype="list-all")
+    em_shortfalls = [s for s in plan["_outline_audit"]["shortfalls"] if s.startswith("entity_matrix")]
+    # Two distinct shortfalls — both the entity undercount AND the
+    # dimension undercount — because the matrix was PRESENT but each
+    # axis is below its minimum.
+    assert any("entity_matrix.entities=1<" in s for s in em_shortfalls), em_shortfalls
+    assert any("entity_matrix.dimensions=1<" in s for s in em_shortfalls), em_shortfalls
+    # And there must be NO `missing` entry — the matrix was present.
+    assert not any("entity_matrix=missing" in s for s in em_shortfalls), em_shortfalls
+
+
+def test_arch_emphasis_list_all_pins_s1_placement_wording():
+    """Greptile PR #25 follow-up round 2: the architect's planning prompt
+    for list-all archetype must match the canonical placement enforced by
+    writer.write_section's S1-only render-as-table directive
+    ("immediately under the §1 heading"). The prior wording said "near the
+    article's start" which is ambiguous against the executive opening
+    frame that write_opening produces separately — the architect could
+    have embedded contradictory placement guidance into task_analysis,
+    misleading downstream review or future maintainers."""
+    emphasis = architect._ARCH_EMPHASIS["list-all"]
+    # New wording present.
+    assert "immediately under the §1 heading" in emphasis, emphasis
+    assert "S1's body" in emphasis, emphasis
+    assert "executive opening" in emphasis, emphasis
+    # Old wording removed (would re-create the ambiguity Greptile flagged).
+    assert "near the article's start" not in emphasis, emphasis
+
+
+def test_arch_emphasis_compare_pins_s1_placement_wording():
+    """Same as the list-all test above — the compare archetype's
+    planning prompt must also pin the canonical S1 placement."""
+    emphasis = architect._ARCH_EMPHASIS["compare"]
+    assert "immediately under the §1 heading" in emphasis, emphasis
+    assert "near the article's start" not in emphasis, emphasis
+    # The compare-specific equal-depth instruction must SURVIVE the
+    # rewrite — it's the load-bearing half of the compare prompt.
+    assert "equal-depth treatment downstream" in emphasis, emphasis
+
+
 def test_writer_includes_entity_matrix_block_for_listall(monkeypatch):
     """For list-all archetype with a populated entity_matrix, the writer's
     section user-prompt must include the ENTITY MATRIX block + the matrix

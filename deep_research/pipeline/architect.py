@@ -22,16 +22,25 @@ TYPE_TO_SPECIALIST = {
 
 # Archetype-specific Architect emphasis (item 16: per-archetype planner template).
 _ARCH_EMPHASIS = {
+    # Greptile PR #25 follow-up round 2 (2026-05-25): "near the article's
+    # start" was synced to "immediately under the §1 heading (S1's body;
+    # the executive opening frame is written separately and does not
+    # include the table)" so the architect's planning prompt matches the
+    # canonical placement now enforced in writer.write_section's S1-only
+    # render-as-table directive. The prior wording would have led the
+    # architect to embed contradictory placement guidance into task_analysis.
     "list-all": "Exhaustive enumeration: populate the REQUIRED entity_matrix "
     "with every prompt-enumerated entity AND the dimensions a reader would "
-    "compare them on. The writer renders the matrix as a table near the "
-    "article's start. Bias query mix to factual + comparative.",
+    "compare them on. The writer renders the matrix as a markdown table "
+    "immediately under the §1 heading (S1's body; the executive opening "
+    "frame is written separately and does not include the table). "
+    "Bias query mix to factual + comparative.",
     "compare": "Build an explicit entity×dimension comparison matrix as the "
     "article's core deliverable: populate the REQUIRED entity_matrix with "
     "every entity the prompt asks to compare AND the dimensions of comparison. "
-    "The writer renders this matrix as a table near the article's start AND "
-    "gives each entity equal-depth treatment downstream. Bias to comparative "
-    "+ factual.",
+    "The writer renders this matrix as a markdown table immediately under "
+    "the §1 heading AND gives each entity equal-depth treatment downstream. "
+    "Bias to comparative + factual.",
     "trend": "Chronological evolution + current state + forward signal; bias to "
     "trend + causal; demand dated developments.",
     "explain-mechanism": "Causal spine: step-by-step chains showing each "
@@ -231,7 +240,15 @@ def _normalize(plan: dict, *, archetype: str | None = None) -> None:
     # to ensure equal-depth treatment per entity.
     em = plan.get("entity_matrix")
     if archetype in {"list-all", "compare"}:
-        if not isinstance(em, dict):
+        # Greptile PR #25 follow-up round 2 (2026-05-25): track whether the
+        # matrix was entirely absent vs present-but-underpopulated. A
+        # missing matrix necessarily has zero entities and zero dimensions,
+        # so emitting all three of (missing + entities=0<5 + dimensions=0<4)
+        # would inflate the shortfall count for ONE root cause — and PR #23's
+        # retry-on-shortfall logic could waste a retry attempt trying to fix
+        # three independent failures when there's only one underlying gap.
+        matrix_was_missing = not isinstance(em, dict)
+        if matrix_was_missing:
             # Backfill so writer never crashes on `entity_matrix["entities"]`.
             em = {"entities": [], "dimensions": []}
             plan["entity_matrix"] = em
@@ -246,13 +263,19 @@ def _normalize(plan: dict, *, archetype: str | None = None) -> None:
             dims = em["dimensions"]
         audit["entity_matrix_entities"] = len(ents)
         audit["entity_matrix_dimensions"] = len(dims)
-        if len(ents) < _ENTITY_MATRIX_ENTITIES_MIN:
-            audit["shortfalls"].append(f"entity_matrix.entities={len(ents)}<{_ENTITY_MATRIX_ENTITIES_MIN}")
-        if len(ents) > _ENTITY_MATRIX_ENTITIES_MAX:
-            audit["shortfalls"].append(f"entity_matrix.entities={len(ents)}>{_ENTITY_MATRIX_ENTITIES_MAX}")
-        if len(dims) < _ENTITY_MATRIX_DIMENSIONS_MIN:
-            audit["shortfalls"].append(f"entity_matrix.dimensions={len(dims)}<{_ENTITY_MATRIX_DIMENSIONS_MIN}")
-        if len(dims) > _ENTITY_MATRIX_DIMENSIONS_MAX:
-            audit["shortfalls"].append(f"entity_matrix.dimensions={len(dims)}>{_ENTITY_MATRIX_DIMENSIONS_MAX}")
+        # Only emit count shortfalls when the matrix was actually present —
+        # the "missing" shortfall already captures the entire failure mode
+        # when the LLM omitted the field. (Upper-bound count shortfalls
+        # remain gated the same way: if the matrix was missing we backfilled
+        # to {entities: [], dimensions: []} which can't trip the >MAX path.)
+        if not matrix_was_missing:
+            if len(ents) < _ENTITY_MATRIX_ENTITIES_MIN:
+                audit["shortfalls"].append(f"entity_matrix.entities={len(ents)}<{_ENTITY_MATRIX_ENTITIES_MIN}")
+            if len(ents) > _ENTITY_MATRIX_ENTITIES_MAX:
+                audit["shortfalls"].append(f"entity_matrix.entities={len(ents)}>{_ENTITY_MATRIX_ENTITIES_MAX}")
+            if len(dims) < _ENTITY_MATRIX_DIMENSIONS_MIN:
+                audit["shortfalls"].append(f"entity_matrix.dimensions={len(dims)}<{_ENTITY_MATRIX_DIMENSIONS_MIN}")
+            if len(dims) > _ENTITY_MATRIX_DIMENSIONS_MAX:
+                audit["shortfalls"].append(f"entity_matrix.dimensions={len(dims)}>{_ENTITY_MATRIX_DIMENSIONS_MAX}")
 
     plan["_outline_audit"] = audit
