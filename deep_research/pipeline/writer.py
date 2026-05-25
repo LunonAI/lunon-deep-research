@@ -158,20 +158,54 @@ def write_section(
 
     # P2-Option-A-#7: surface the entity_matrix (when present) to the writer
     # for list-all/compare archetypes. The matrix is the article's structural
-    # spine; the writer renders it as a table early in the article (typically
-    # in the first or second top section) AND uses it to enforce equal-depth
-    # treatment per entity downstream. Other archetypes don't see the matrix.
+    # spine; S1 (and ONLY S1) renders it as a markdown table at the top of
+    # its body, while every section gets the equal-depth-per-entity reminder
+    # so each one independently maintains the contract. Other archetypes
+    # don't see the matrix at all.
+    #
+    # Greptile PR #25 follow-up (2026-05-25), 2 issues:
+    #   Issue 1 (duplicate-table risk): the prior block sent the
+    #     "render this as a markdown table" directive to every write_section
+    #     call. Each section LLM is independent, so a capable writer could
+    #     emit the table at the top of S2, S4, ..., producing up to 12
+    #     duplicate tables in the assembled article. The render directive
+    #     is now gated on `sid == "S1"`; the equal-depth reminder still
+    #     broadcasts to all sections (that's the contract every section
+    #     must satisfy on its own slice of the matrix).
+    #   Issue 2 (ambiguous canonical placement): "near the article start"
+    #     was misleading — write_opening generates the literal article start
+    #     (title + ~200-token executive frame) and intentionally does NOT
+    #     receive the matrix (bloating the opening frame would burn the
+    #     200-token budget). The clarified S1 wording now pins the matrix
+    #     to S1's body "immediately under the §1 heading" so neither the
+    #     LLM nor a future reviewer can mistake the executive frame as
+    #     the right place.
     entity_matrix_block = ""
     em = plan.get("entity_matrix")
     if archetype in {"list-all", "compare"} and isinstance(em, dict) and em.get("entities"):
-        entity_matrix_block = (
-            f"\nENTITY MATRIX (article spine for this archetype) — "
-            f"render this as a markdown table near the article start and "
-            f"give EACH entity equal-depth treatment in the downstream "
-            f"sections (no entity dropped, no entity over-weighted vs "
-            f"siblings):\n"
-            f"{json.dumps(em, ensure_ascii=False)}\n"
-        )
+        if sid == "S1":
+            entity_matrix_block = (
+                f"\nENTITY MATRIX (article spine for this archetype) — "
+                f"render this as a markdown table at the top of THIS section "
+                f"(immediately under the §1 heading; the executive opening "
+                f"frame is written separately and must not duplicate the "
+                f"table) AND give EACH entity equal-depth treatment in the "
+                f"downstream sections (no entity dropped, no entity "
+                f"over-weighted vs siblings):\n"
+                f"{json.dumps(em, ensure_ascii=False)}\n"
+            )
+        else:
+            # Non-S1 sections: no render directive (S1 owns the canonical
+            # table). Just the equal-depth reminder so this section knows
+            # the entity roster it must treat fairly.
+            entity_matrix_block = (
+                f"\nENTITY MATRIX REMINDER — section §1 renders the "
+                f"canonical table for this list-all/compare article; THIS "
+                f"section must give EACH entity equal-depth treatment "
+                f"(no entity dropped, no entity over-weighted vs siblings) "
+                f"and MUST NOT re-render the matrix table:\n"
+                f"{json.dumps(em, ensure_ascii=False)}\n"
+            )
 
     user = (
         f"PROMPT ({language}):\n{prompt}\n\n"
