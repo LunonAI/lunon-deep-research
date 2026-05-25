@@ -115,8 +115,41 @@ def strip_stage_directions(text: str) -> tuple[str, int]:
 
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
 
+# Structural headings the writer/post-process emits whose body is INTRINSICALLY
+# short. These must NEVER be subject to the empty-section collapse heuristic —
+# the heuristic exists to catch stub content sections like `## 4 Conclusion\n\nTBD`,
+# not the appended bibliography. Set kept identical to the regex used in
+# `writing_rules.citation_strip_audit` (`(References|参考文献|Sources)`) so both
+# sides of the pipeline recognise the same names.
+#
+# Greptile PR #24 round-3 follow-up (2026-05-25): without this guard,
+# `footnote_normalize` emits `## References\n\n[^1]: Source — url` (~6 body
+# words) for a 1-citation article and `collapse_empty_sections` then silently
+# deletes the entire block. The `footnote_normalize_stats.n_renumbered`
+# telemetry shows the block was built, but the shipped article has no
+# References section — confusing for post-hoc debugging.
+_PROTECTED_HEADING_TITLES = frozenset({"references", "参考文献", "sources"})
 
-def collapse_empty_sections(text: str, min_words: int = 10) -> tuple[str, int]:
+# Strip a leading "1.2.3 " / "5 " numeric prefix from a heading title so the
+# protected-title check matches both pre-renumber (`## References`) and any
+# post-renumber form (`## 5 References`). Reused later for the renumber
+# step; defined here so `collapse_empty_sections` can use it.
+_LEADING_NUM_RE = re.compile(r"^\s*\d+(?:\.\d+)*\.?\s+")
+
+
+def _is_protected_heading(title: str, protected: frozenset[str]) -> bool:
+    """Case-insensitive, numeric-prefix-insensitive match against the
+    protected-titles set."""
+    stripped = _LEADING_NUM_RE.sub("", title).strip().lower()
+    return stripped in protected
+
+
+def collapse_empty_sections(
+    text: str,
+    min_words: int = 10,
+    *,
+    protected_titles: frozenset[str] = _PROTECTED_HEADING_TITLES,
+) -> tuple[str, int]:
     """If a heading is immediately followed by another heading (or EOF) with
     fewer than `min_words` words of body between them, drop the empty heading.
 
@@ -124,24 +157,35 @@ def collapse_empty_sections(text: str, min_words: int = 10) -> tuple[str, int]:
     that have effectively no content (≤9 words). A heading whose next heading
     is at a DEEPER level is treated as a parent (its content lives in the
     subsections) and is preserved regardless of body-word count.
+
+    Headings whose normalized title is in `protected_titles` are ALSO
+    preserved regardless of body length — these are structural sections
+    (References / 参考文献 / Sources) whose body is intrinsically short and
+    whose deletion would silently strip the bibliography from low-citation
+    articles. See `_PROTECTED_HEADING_TITLES` for the default set.
     """
     lines = text.splitlines()
     keep = [True] * len(lines)
-    # (line_index, depth) so we can detect a parent-of-subsection.
+    # (line_index, depth, title) so we can detect a parent-of-subsection
+    # AND protect well-known structural headings by title.
     heading_info = []
     for i, ln in enumerate(lines):
         m = _HEADING_RE.match(ln)
         if m:
-            heading_info.append((i, len(m.group(1))))
+            heading_info.append((i, len(m.group(1)), m.group(2)))
     n_collapsed = 0
-    for k, (i, depth) in enumerate(heading_info):
+    for k, (i, depth, title) in enumerate(heading_info):
         if k + 1 < len(heading_info):
-            nxt, next_depth = heading_info[k + 1]
+            nxt, next_depth = heading_info[k + 1][0], heading_info[k + 1][1]
         else:
             nxt, next_depth = len(lines), 0
         # If next heading is deeper, this heading is a parent — keep it,
         # its substance is carried by its subsections.
         if next_depth > depth:
+            continue
+        # Protected structural heading (References block, etc.) — keep
+        # regardless of body length.
+        if _is_protected_heading(title, protected_titles):
             continue
         body = "\n".join(lines[i + 1 : nxt])
         if len(body.split()) < min_words:
@@ -185,8 +229,9 @@ _CROSS_REF_SUB_RE = re.compile(
 )
 
 # Strip an EXISTING numeric prefix from a heading line: "1.2.3 Title" → "Title".
-# Handles "1." "1.1" "1.1.1" and optional trailing dot/space.
-_LEADING_NUM_RE = re.compile(r"^\s*\d+(?:\.\d+)*\.?\s+")
+# Handles "1." "1.1" "1.1.1" and optional trailing dot/space. Defined ONCE
+# near the top of the module (above `collapse_empty_sections`, which is the
+# earliest consumer post-PR #24 round-3) and reused by the renumber path.
 
 
 def _has_cross_refs(text: str) -> bool:

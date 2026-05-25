@@ -95,6 +95,12 @@ def test_normalize_records_no_shortfalls_when_matrix_meets_bounds():
         }
         for i in range(8)
     ]
+    # PR #25 merge follow-up (2026-05-25): satisfy PR #22's _QUERIES_MIN=48
+    # query-count audit, which otherwise fires `queries=0<48` on `_plan_with_em`'s
+    # empty queries list and breaks the `shortfalls == []` invariant.
+    plan["queries"] = [
+        {"id": f"Q{i + 1}", "text": f"q{i + 1}", "type": "factual"} for i in range(architect._QUERIES_MIN)
+    ]
     architect._normalize(plan, archetype="list-all")
     audit = plan["_outline_audit"]
     assert audit["shortfalls"] == [], f"unexpected shortfalls: {audit['shortfalls']}"
@@ -397,9 +403,16 @@ def test_writer_suppresses_block_when_dimensions_missing_or_empty(monkeypatch):
     monkeypatch.setattr(writer.llm, "call", fake_call_a)
     plan_a = _plan_with_em(["a", "b", "c", "d", "e"], [])
     writer.write_section(
-        unit, plan_a, _DummyBank(),
-        prompt="p", language="en", archetype="list-all",
-        domain="default", prior_titles=[], task_id=None, target_tokens=None,
+        unit,
+        plan_a,
+        _DummyBank(),
+        prompt="p",
+        language="en",
+        archetype="list-all",
+        domain="default",
+        prior_titles=[],
+        task_id=None,
+        target_tokens=None,
     )
     assert "ENTITY MATRIX" not in captured["a"], (
         "entities-without-dimensions must suppress the block — the render "
@@ -415,16 +428,24 @@ def test_writer_suppresses_block_when_dimensions_missing_or_empty(monkeypatch):
     plan_b = {
         "report_title": "T",
         "entity_matrix": {"entities": ["a", "b", "c", "d", "e"]},  # no `dimensions` key
-        "report_toc": [], "queries": [], "acceptance_criteria": [],
+        "report_toc": [],
+        "queries": [],
+        "acceptance_criteria": [],
     }
     writer.write_section(
-        unit, plan_b, _DummyBank(),
-        prompt="p", language="en", archetype="list-all",
-        domain="default", prior_titles=[], task_id=None, target_tokens=None,
+        unit,
+        plan_b,
+        _DummyBank(),
+        prompt="p",
+        language="en",
+        archetype="list-all",
+        domain="default",
+        prior_titles=[],
+        task_id=None,
+        target_tokens=None,
     )
     assert "ENTITY MATRIX" not in captured["b"], (
-        "missing `dimensions` key must suppress the block — symmetric with "
-        "the empty-list case"
+        "missing `dimensions` key must suppress the block — symmetric with the empty-list case"
     )
 
     # Case 3 (symmetry counter-check): dimensions populated, entities empty
@@ -437,9 +458,16 @@ def test_writer_suppresses_block_when_dimensions_missing_or_empty(monkeypatch):
     monkeypatch.setattr(writer.llm, "call", fake_call_c)
     plan_c = _plan_with_em([], ["d1", "d2", "d3", "d4"])
     writer.write_section(
-        unit, plan_c, _DummyBank(),
-        prompt="p", language="en", archetype="list-all",
-        domain="default", prior_titles=[], task_id=None, target_tokens=None,
+        unit,
+        plan_c,
+        _DummyBank(),
+        prompt="p",
+        language="en",
+        archetype="list-all",
+        domain="default",
+        prior_titles=[],
+        task_id=None,
+        target_tokens=None,
     )
     assert "ENTITY MATRIX" not in captured["c"], (
         "dimensions-without-entities must also suppress (a table with rows "
