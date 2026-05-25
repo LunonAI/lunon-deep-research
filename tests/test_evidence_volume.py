@@ -94,3 +94,90 @@ def test_specialist_serialisation_cap_fits_post_p4_payload():
     )
 
 
+def test_payload_cap_for_default_model_matches_nemotron_cap():
+    """Greptile PR #22 follow-up round 2: the no-override path (empty
+    string) routes to the default Nemotron-3-Super-120B model and must
+    use the full Nemotron-calibrated 240k cap. Pins the registry default
+    against accidental removal/rename of the empty-string key."""
+    assert specialists._payload_cap_for("") == specialists._RESULTS_SERIALISATION_CAP
+    assert specialists._payload_cap_for("") == 240_000
+
+
+def test_payload_cap_for_tongyi_matches_nemotron_cap():
+    """Tongyi-DR-30B-A3B has a 131k ctx (verified via OpenRouter model card
+    2026-05-25), symmetric to Nemotron's 128k. The cap registry must therefore
+    grant Tongyi the same 240k char budget — otherwise list-all tasks (which
+    orchestrator.py routes to Tongyi) silently get a smaller payload than
+    explain-mechanism tasks (which stay on Nemotron) for no reason."""
+    from deep_research.pipeline.orchestrator import TONGYI_MODEL
+
+    assert specialists._payload_cap_for(TONGYI_MODEL) == specialists._RESULTS_SERIALISATION_CAP
+
+
+def test_payload_cap_for_unknown_override_returns_conservative_cap(capsys):
+    """An unknown model_override (e.g. an experimental route added in
+    orchestrator.py without a corresponding registry entry) must NOT
+    receive the full Nemotron 240k cap — a narrower model would silently
+    truncate at its API layer. Instead it gets the conservative 48k cap
+    (sized for a 32k-ctx model) AND emits a stderr warning so the
+    operator sees they hit the fallback path.
+
+    This is the exact regression Greptile PR #22 flagged: pre-fix, any
+    new override slug would silently inherit Nemotron's cap. Post-fix,
+    the unknown-override slug is gated through `_payload_cap_for` which
+    explicitly chooses the conservative path."""
+    # Reset the per-process dedupe set so this test sees the warning.
+    specialists._warned_unknown_overrides.clear()
+
+    cap = specialists._payload_cap_for("vendor/some-experimental-model")
+    assert cap == specialists._UNKNOWN_OVERRIDE_PAYLOAD_CAP_CHARS
+    assert cap == 48_000
+
+    captured = capsys.readouterr()
+    assert "vendor/some-experimental-model" in captured.err
+    assert "_MODEL_PAYLOAD_CAP_CHARS" in captured.err
+    assert "conservative" in captured.err
+
+
+def test_unknown_override_warning_dedupes_per_model(capsys):
+    """The warning must fire exactly once per (process, model) — otherwise
+    a per-task, per-specialist invocation (30+ calls per dev4 run) would
+    flood stderr and the operator would learn to ignore it. The first call
+    warns; subsequent calls return the cap silently."""
+    specialists._warned_unknown_overrides.clear()
+
+    cap1 = specialists._payload_cap_for("vendor/unknown-x")
+    captured_first = capsys.readouterr()
+    assert "vendor/unknown-x" in captured_first.err
+
+    cap2 = specialists._payload_cap_for("vendor/unknown-x")
+    captured_second = capsys.readouterr()
+    # Same model → no second warning.
+    assert captured_second.err == ""
+    # Cap is still returned correctly even when silent.
+    assert cap1 == cap2 == specialists._UNKNOWN_OVERRIDE_PAYLOAD_CAP_CHARS
+
+    # A DIFFERENT unknown model fires its own warning (dedupe is per-model,
+    # not per-process — every new route deserves its own visibility).
+    specialists._payload_cap_for("vendor/unknown-y")
+    captured_third = capsys.readouterr()
+    assert "vendor/unknown-y" in captured_third.err
+
+
+def test_unknown_override_cap_safely_below_32k_ctx_budget():
+    """Sanity bound on the conservative fallback. The 48k char cap MUST
+    fit safely inside a 32k-token model's context after reserving room for
+    system prompt (~3k tokens), brief (~2k tokens), and output (14k tokens
+    per max_tokens on the extraction call): 32k - 19k = 13k free input
+    tokens ≈ 52k chars. The 48k cap leaves ~4k chars of headroom — enough
+    to absorb JSON-escaping overhead without overflowing.
+
+    Pin this so a future refactor that bumps the fallback toward the
+    Nemotron cap (without verifying the model registry was updated) is
+    caught here."""
+    free_input_tokens_32k_model = 32_000 - 3_000 - 2_000 - 14_000  # 13k
+    free_input_chars_32k_model = free_input_tokens_32k_model * 4  # 52k
+    assert specialists._UNKNOWN_OVERRIDE_PAYLOAD_CAP_CHARS <= free_input_chars_32k_model, (
+        f"unknown-override cap {specialists._UNKNOWN_OVERRIDE_PAYLOAD_CAP_CHARS} "
+        f"exceeds the 32k-ctx free-input budget ({free_input_chars_32k_model} chars)"
+    )
