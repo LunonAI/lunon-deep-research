@@ -173,9 +173,14 @@ _INSIGHT_MIN = (
     "\n"
     "AVOID FORMULAIC INSERTION: do NOT bolt a generic 'looking ahead...' or "
     "'further research is needed' onto every leaf. The four elements above "
-    "are substantive payoffs; if the available evidence for this leaf does "
-    "not support any of them, the leaf is the wrong choice — pick a "
-    "different depth_seed where the evidence does support a payoff."
+    "are substantive payoffs grounded in the leaf's actual evidence. If the "
+    "evidence for this leaf genuinely cannot support any of (a)-(d) — a "
+    "narrow definitional or list-membership leaf, for instance — state the "
+    "leaf's bounded scope explicitly (e.g. 'the canonical record does not "
+    "extend to X; the cross-arc comparison in §N.M handles the projection') "
+    "and STOP. Do NOT drop or skip the H4 leaf — every depth_seed in the "
+    "outline must produce a leaf section, in order. Under-payoff on one "
+    "leaf is preferable to a generic forecast the judge will read as filler."
 )
 
 # NEW (W9 diagnostic 2026-05-21): the judge cited "inconsistent section
@@ -467,11 +472,30 @@ def check_insight_minimums(text: str) -> dict:
             re.I,
         )
     )
-    causal = len(
+    # P2-Option-A-#3 Greptile PR #21 follow-up (2026-05-25): realigned the
+    # four advisory counts to map 1:1 to _INSIGHT_MIN's four contract elements:
+    #   forward_looking   → element (a) FORWARD-LOOKING IMPLICATION
+    #   contrarian_framing→ element (b) NAMED CONTRARIAN FRAMING  ← NEW
+    #   quant_projection  → element (c) QUANTIFIED PROJECTION/RANGE
+    #   alternatives      → element (d) NAMED-ALTERNATIVE COMPARISON
+    # The prior `causal_chain` count (→ / -> / 导致.*进而 / 从而) had no
+    # equivalent in the new contract, so validation_failures.jsonl rows would
+    # have shown a metric the prompt no longer instructed — confusing future
+    # calibration. The advisory check stays advisory (validation.py:113-115
+    # logs counts but does not hard-fail), so renaming is safe.
+    contrarian = len(
         re.findall(
-            r"(→|->|leads to .* which|because .* in turn|"
-            r"导致.*进而|从而)",
+            # element (b) markers: explicit pushback against a consensus
+            # interpretation. The rule additionally requires evidence-backing,
+            # which a regex cannot verify — this is presence telemetry only.
+            r"(despite\b|contrary to\b|"
+            r"challenges? the (?:view|consensus|standard|prevailing)|"
+            r"against (?:the )?consensus|standard reading|"
+            r"commonly (?:held|assumed|believed)|"
+            r"counter to (?:the )?(?:consensus|conventional|standard)|"
+            r"尽管|与.{0,8}相反|挑战.{0,8}共识|通常认为|普遍认为|反直觉)",
             text,
+            re.I,
         )
     )
     quant_proj = len(
@@ -485,7 +509,7 @@ def check_insight_minimums(text: str) -> dict:
     need = {
         "forward_looking>=3": fwd >= 3,
         "alternatives>=2": alts >= 2,
-        "causal_chain>=1": causal >= 1,
+        "contrarian_framing>=1": contrarian >= 1,
         "quant_projection>=1": quant_proj >= 1,
     }
     return {
@@ -493,7 +517,7 @@ def check_insight_minimums(text: str) -> dict:
         "counts": {
             "forward_looking": fwd,
             "alternatives": alts,
-            "causal_chain": causal,
+            "contrarian_framing": contrarian,
             "quant_projection": quant_proj,
         },
         "fail": [k for k, v in need.items() if not v],

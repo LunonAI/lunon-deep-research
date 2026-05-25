@@ -101,18 +101,85 @@ def test_no_false_positive_on_bijiao_compound():
     )
 
 
-def test_gate_passes_when_2_plus_alts_with_fwd_causal_quant():
-    """Smoke: a passable text should pass the gate."""
+def test_contrarian_framing_counts_en_and_zh_markers():
+    """element (b) NAMED CONTRARIAN FRAMING — explicit pushback against a
+    consensus interpretation. Greptile PR #21 follow-up added this count to
+    replace causal_chain so the four advisory metrics map 1:1 to the four
+    _INSIGHT_MIN contract elements."""
     text = (
+        # EN markers
+        "Despite the standard reading, the Episode G data tells a different story. "
+        "Contrary to the prevailing view, the cohort study finds the opposite. "
+        "This challenges the consensus that the upper bound is fixed. "
+        "Against the commonly held assumption, the panel shows heterogeneity. "
+        "Counter to the conventional framing, the bear case is plausible. "
+        # ZH markers
+        "尽管学界普遍认为该上限是固定的，最新数据并不支持这一结论。"
+        "通常认为这是稳定的均衡，但与该共识相反，最新观测呈现震荡。"
+        "这一发现挑战了上述共识。"
+        "这是一个反直觉的结果。"
+    )
+    out = check_insight_minimums(text)
+    # 5 EN + 4 ZH markers above; lower bound 7 leaves headroom for any
+    # regex tightening without making the test brittle.
+    assert out["counts"]["contrarian_framing"] >= 7, out["counts"]
+
+
+def test_contrarian_framing_no_false_positives_on_neutral_text():
+    """Neutral prose without any consensus-pushback signal must not
+    contribute to contrarian_framing — protects the advisory log telemetry
+    from inflation."""
+    text = (
+        "The 2024 study described methods. "
+        "Researchers collected data across three regions. "
+        "Results were summarized in a table. "
+        "The 2025 update is forthcoming."
+    )
+    out = check_insight_minimums(text)
+    assert out["counts"]["contrarian_framing"] == 0, out["counts"]
+
+
+def test_counts_dict_keys_match_four_element_contract():
+    """The advisory counts dict must expose exactly the four keys named in
+    _INSIGHT_MIN's contract. Greptile PR #21 follow-up: causal_chain is
+    GONE; contrarian_framing is its replacement. Future calibration work
+    parses these keys directly out of validation_failures.jsonl."""
+    out = check_insight_minimums("placeholder text with no signals")
+    assert set(out["counts"].keys()) == {
+        "forward_looking",
+        "alternatives",
+        "contrarian_framing",
+        "quant_projection",
+    }, out["counts"]
+    # causal_chain must NOT be re-introduced — it has no equivalent in the
+    # four-element rule and would re-poison the telemetry.
+    assert "causal_chain" not in out["counts"]
+
+
+def test_gate_passes_with_all_four_contract_elements():
+    """Smoke: a text covering all four _INSIGHT_MIN contract elements should
+    pass the advisory gate. Post-#3-PR21 the four tracked counts are
+    forward_looking (a), contrarian_framing (b), quant_projection (c),
+    alternatives (d) — one for each named element of the writer rule."""
+    text = (
+        # (a) forward_looking: >=3 dated horizons
         "By 2026 the market reaches $5B (range $3B-$7B). "
         "By 2028 the market reaches $10B (range $7B-$15B). "
         "By 2030 the market reaches $20B. "
+        # (d) alternatives: >=2 comparative moves
         "However, alternative scenarios place the 2030 value lower. "
-        "Instead of supply-side drivers → demand inflation rules. "
-        "On the other hand, the bear case puts 2030 at $12B."
+        "On the other hand, the bear case puts 2030 at $12B. "
+        # (b) contrarian_framing: >=1 explicit pushback against consensus
+        "Despite the prevailing view that supply-side drivers dominate, "
+        "the cross-region panel data points the other way. "
+        # (c) quant_projection: covered already by the $X-$Y ranges above
     )
     out = check_insight_minimums(text)
     assert out["ok"], f"gate should pass: {out['fail']}"
+    assert out["counts"]["contrarian_framing"] >= 1, out["counts"]
+    assert out["counts"]["forward_looking"] >= 3, out["counts"]
+    assert out["counts"]["alternatives"] >= 2, out["counts"]
+    assert out["counts"]["quant_projection"] >= 1, out["counts"]
 
 
 if __name__ == "__main__":
