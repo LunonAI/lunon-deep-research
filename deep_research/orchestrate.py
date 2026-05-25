@@ -48,6 +48,14 @@ def _persist_drift(s, language: str, query: str) -> None:
             "evidence_dedup": getattr(s, "evidence_dedup_stats", {}),
             "capel": getattr(s, "capel_stats", {}),
             "g_dedup_suppressed": getattr(s, "g_dedup_suppressed", False),
+            # Greptile PR #24 follow-up (2026-05-25): forward
+            # footnote_normalize_stats into the drift record alongside its
+            # peer post-processor stats so per-run footnote volume
+            # (n_definitions, n_inline_markers, n_orphans_stripped, etc.)
+            # is visible in inner_loop_drift.jsonl when analysing dev4
+            # output. Without this the stats lived only on PipelineState
+            # and never reached the dev-run telemetry.
+            "footnote_normalize": getattr(s, "footnote_normalize_stats", {}),
         }
         _DRIFT_PATH.parent.mkdir(parents=True, exist_ok=True)
         with _DRIFT_LOCK, _DRIFT_PATH.open("a", encoding="utf-8") as fh:
