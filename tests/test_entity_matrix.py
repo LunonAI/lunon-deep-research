@@ -363,6 +363,90 @@ def test_writer_omits_entity_matrix_for_other_archetypes(monkeypatch):
     assert "ENTITY MATRIX" not in captured_user["text"]
 
 
+def test_writer_suppresses_block_when_dimensions_missing_or_empty(monkeypatch):
+    """Greptile PR #25 follow-up round 3: the suppression guard must be
+    symmetric across the (entities, dimensions) axes. A matrix with
+    populated entities but an empty (or missing) dimensions list is a
+    state _normalize flags as `entity_matrix.dimensions=0<4` but does NOT
+    reject — so without a `dimensions` guard, the S1 render directive
+    would fire telling the LLM to "render this as a markdown table" with
+    no column headers, forcing it to hallucinate dimensions or produce a
+    degenerate single-column table. This test pins both halves:
+    entities-without-dimensions AND dimensions-without-entities must
+    suppress the block (the latter was already covered by the truthy
+    `entities` guard but is asserted here for symmetry)."""
+
+    class _DummyBank:
+        def for_section(self, _sid):
+            return []
+
+    unit = {
+        "id": "S1",
+        "title": "Foundations",
+        "depth": "broad",
+        "subs": [{"id": "S1.1", "title": "Sub", "depth_seeds": []}],
+    }
+
+    # Case 1: entities populated, dimensions empty list.
+    captured: dict[str, str] = {}
+
+    def fake_call_a(_role, user, *, system, max_tokens, note):  # noqa: ARG001
+        captured["a"] = user
+        return "## 1 stub\n\nstub body."
+
+    monkeypatch.setattr(writer.llm, "call", fake_call_a)
+    plan_a = _plan_with_em(["a", "b", "c", "d", "e"], [])
+    writer.write_section(
+        unit, plan_a, _DummyBank(),
+        prompt="p", language="en", archetype="list-all",
+        domain="default", prior_titles=[], task_id=None, target_tokens=None,
+    )
+    assert "ENTITY MATRIX" not in captured["a"], (
+        "entities-without-dimensions must suppress the block — the render "
+        "directive would otherwise tell the LLM to build a table with no columns"
+    )
+
+    # Case 2: entities populated, dimensions key missing entirely.
+    def fake_call_b(_role, user, *, system, max_tokens, note):  # noqa: ARG001
+        captured["b"] = user
+        return "## 1 stub\n\nstub body."
+
+    monkeypatch.setattr(writer.llm, "call", fake_call_b)
+    plan_b = {
+        "report_title": "T",
+        "entity_matrix": {"entities": ["a", "b", "c", "d", "e"]},  # no `dimensions` key
+        "report_toc": [], "queries": [], "acceptance_criteria": [],
+    }
+    writer.write_section(
+        unit, plan_b, _DummyBank(),
+        prompt="p", language="en", archetype="list-all",
+        domain="default", prior_titles=[], task_id=None, target_tokens=None,
+    )
+    assert "ENTITY MATRIX" not in captured["b"], (
+        "missing `dimensions` key must suppress the block — symmetric with "
+        "the empty-list case"
+    )
+
+    # Case 3 (symmetry counter-check): dimensions populated, entities empty
+    # — already covered by the pre-existing `em.get('entities')` guard,
+    # but assert it here too so future refactors can't lose the symmetry.
+    def fake_call_c(_role, user, *, system, max_tokens, note):  # noqa: ARG001
+        captured["c"] = user
+        return "## 1 stub\n\nstub body."
+
+    monkeypatch.setattr(writer.llm, "call", fake_call_c)
+    plan_c = _plan_with_em([], ["d1", "d2", "d3", "d4"])
+    writer.write_section(
+        unit, plan_c, _DummyBank(),
+        prompt="p", language="en", archetype="list-all",
+        domain="default", prior_titles=[], task_id=None, target_tokens=None,
+    )
+    assert "ENTITY MATRIX" not in captured["c"], (
+        "dimensions-without-entities must also suppress (a table with rows "
+        "but no row identifiers is equally degenerate)"
+    )
+
+
 def test_writer_handles_empty_entity_matrix_gracefully(monkeypatch):
     """list-all archetype where the architect emitted an EMPTY entities list
     should not crash and should not emit a malformed ENTITY MATRIX block."""

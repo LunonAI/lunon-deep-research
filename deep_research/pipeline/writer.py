@@ -180,9 +180,22 @@ def write_section(
     #     to S1's body "immediately under the §1 heading" so neither the
     #     LLM nor a future reviewer can mistake the executive frame as
     #     the right place.
+    #
+    # Greptile PR #25 follow-up round 3 (2026-05-25): the suppression guard
+    # now also requires `em.get("dimensions")` — symmetric with the data
+    # contract. A matrix with entities but an empty/missing dimensions list
+    # (a state _normalize flags as `entity_matrix.dimensions=0<4` but does
+    # not reject) would otherwise still fire the S1 "render this as a
+    # markdown table" directive with no column headers, forcing the LLM to
+    # hallucinate dimensions or emit a degenerate single-column table.
     entity_matrix_block = ""
     em = plan.get("entity_matrix")
-    if archetype in {"list-all", "compare"} and isinstance(em, dict) and em.get("entities"):
+    if (
+        archetype in {"list-all", "compare"}
+        and isinstance(em, dict)
+        and em.get("entities")
+        and em.get("dimensions")
+    ):
         if sid == "S1":
             entity_matrix_block = (
                 f"\nENTITY MATRIX (article spine for this archetype) — "
