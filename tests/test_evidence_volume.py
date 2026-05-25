@@ -164,6 +164,133 @@ def test_unknown_override_warning_dedupes_per_model(capsys):
     assert "vendor/unknown-y" in captured_third.err
 
 
+def test_orchestrator_budget_can_actually_realise_max_searches_per_specialist():
+    """Greptile PR #22 round 3: the orchestrator's BUDGET must be large
+    enough that all 5 specialists can each run their full
+    _MAX_SEARCHES_PER_SPECIALIST queries AND the gap-fill phase can still
+    fire its up-to-2 calls. Pre-fix BUDGET was 24 → capped each specialist
+    at 5 searches regardless of the post-#4 12-query bump in
+    specialists.py, silently dropping the post-#4 raw-hit ceiling from
+    the advertised 5×12×10=600 to the real 5×5×10=250.
+
+    This test pins the math invariant: any future BUDGET change must
+    keep room for (5 × _MAX_SEARCHES_PER_SPECIALIST) + GAP_FILL_HEADROOM."""
+    from deep_research.pipeline import orchestrator
+
+    n_specialists_in_main_loop = 5  # see _ARCH_PRIORITY entries
+    gap_fill_max_calls = 2  # see line "for g in (gap.get(...))[:2]"
+    required_minimum = (n_specialists_in_main_loop * specialists._MAX_SEARCHES_PER_SPECIALIST) + gap_fill_max_calls
+    assert orchestrator.BUDGET >= required_minimum, (
+        f"orchestrator.BUDGET={orchestrator.BUDGET} is too low — needs at "
+        f"least {required_minimum} to fit 5×{specialists._MAX_SEARCHES_PER_SPECIALIST}="
+        f"{n_specialists_in_main_loop * specialists._MAX_SEARCHES_PER_SPECIALIST} "
+        f"main-loop searches + {gap_fill_max_calls} gap-fill calls. Pre-fix "
+        f"BUDGET=24 silently capped specialists at 5 queries."
+    )
+
+
+def test_orchestrator_dispatch_uses_specialists_max_searches_constant(monkeypatch):
+    """Behavioral regression test for Greptile PR #22 round 3.
+
+    The orchestrator's per-specialist dispatch slice
+    (`qlist[:max(1, min(..., BUDGET - tool_calls))]`) MUST source the
+    per-specialist cap from `specialists._MAX_SEARCHES_PER_SPECIALIST`,
+    not a hardcoded literal. Pre-fix the hardcoded `5` here silently
+    overrode the constant in specialists.py.
+
+    This test feeds a plan with 12 queries for ONE specialist role,
+    captures what `research()` actually receives, and asserts the qlist
+    is length 12 (the constant) — NOT 5 (the old hardcoded cap)."""
+    from deep_research.pipeline import orchestrator
+
+    # Build a minimal plan: 12 queries all routed to the 'evidence_gatherer'
+    # specialist. The architect's list-all archetype priority puts
+    # evidence_gatherer FIRST so the dispatch sees its queries before
+    # budget exhaustion can hide a bug.
+    plan = {
+        "queries": [
+            {
+                "id": f"Q{i + 1}",
+                "text": f"query {i + 1}",
+                "specialist_role": "evidence_gatherer",
+                "target_sections": ["S1"],
+            }
+            for i in range(12)
+        ],
+        "report_toc": [{"id": "S1", "title": "x"}],
+    }
+
+    # Capture the qlist that `research()` was called with for the
+    # evidence_gatherer specialist.
+    captured: dict[str, list] = {}
+
+    def fake_research(role, qlist, **_kw):
+        captured.setdefault(role, []).extend(qlist)
+        # Return enough n_searches to advance the budget so we don't loop
+        # forever, but no findings (keeps ingest a no-op).
+        return {"role": role, "findings": [], "n_searches": len(qlist)}
+
+    # Patch the symbol imported into orchestrator's namespace, since
+    # `from .specialists import research` binds it locally there.
+    monkeypatch.setattr(orchestrator, "research", fake_research)
+    # Stub the gap-review / compaction LLM calls so the test stays offline.
+    monkeypatch.setattr(orchestrator, "_gap_review", lambda *_a, **_kw: {"review": [], "gap_fill": []})
+    monkeypatch.setattr(orchestrator, "_compact", lambda *_a, **_kw: "")
+
+    orchestrator.run(plan, prompt="p", language="en", archetype="list-all", domain="default")
+
+    # The evidence_gatherer specialist must have received ALL 12 queries
+    # in its dispatch — NOT 5. This is the regression Greptile flagged.
+    eg_queries = captured.get("evidence_gatherer", [])
+    assert len(eg_queries) == specialists._MAX_SEARCHES_PER_SPECIALIST, (
+        f"evidence_gatherer received {len(eg_queries)} queries; expected "
+        f"{specialists._MAX_SEARCHES_PER_SPECIALIST}. If you see 5 here, the "
+        f"orchestrator's dispatch cap regressed back to a hardcoded literal."
+    )
+    # And the exact query objects (not the count) are forwarded — pin that
+    # the slice didn't subtly reorder or duplicate anything.
+    assert [q["id"] for q in eg_queries] == [f"Q{i + 1}" for i in range(12)]
+
+
+def test_orchestrator_dispatch_still_respects_remaining_budget(monkeypatch):
+    """Defensive: the per-dispatch slice should also cap at
+    (BUDGET - tool_calls) when budget is nearly exhausted, even though
+    that condition no longer fires in the nominal path (BUDGET=64 vs
+    5×12=60 main-loop ceiling). Pin the BUDGET-aware behaviour so a
+    future refactor that drops the `min(..., BUDGET - tool_calls)` half
+    of the cap is caught here."""
+    from deep_research.pipeline import orchestrator
+
+    # 12 evidence_gatherer queries, but BUDGET shrunk so only 3 fit.
+    plan = {
+        "queries": [
+            {
+                "id": f"Q{i + 1}",
+                "text": "x",
+                "specialist_role": "evidence_gatherer",
+                "target_sections": ["S1"],
+            }
+            for i in range(12)
+        ],
+        "report_toc": [{"id": "S1", "title": "x"}],
+    }
+    captured: dict[str, list] = {}
+
+    def fake_research(role, qlist, **_kw):
+        captured.setdefault(role, []).extend(qlist)
+        return {"role": role, "findings": [], "n_searches": len(qlist)}
+
+    monkeypatch.setattr(orchestrator, "research", fake_research)
+    monkeypatch.setattr(orchestrator, "_gap_review", lambda *_a, **_kw: {"review": [], "gap_fill": []})
+    monkeypatch.setattr(orchestrator, "_compact", lambda *_a, **_kw: "")
+    monkeypatch.setattr(orchestrator, "BUDGET", 3)
+
+    orchestrator.run(plan, prompt="p", language="en", archetype="list-all", domain="default")
+
+    # Budget=3 → evidence_gatherer's qlist is capped to 3, not 12.
+    assert len(captured.get("evidence_gatherer", [])) == 3, captured
+
+
 def test_unknown_override_cap_safely_below_32k_ctx_budget():
     """Sanity bound on the conservative fallback. The 48k char cap MUST
     fit safely inside a 32k-token model's context after reserving room for
