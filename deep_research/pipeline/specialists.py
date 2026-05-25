@@ -14,6 +14,7 @@ available").
 """
 
 import json
+import sys
 
 from .. import llm
 from ..retrieval import domain_routed
@@ -81,6 +82,74 @@ _RESULTS_PER_SEARCH = 10
 # tokens; output budget is 14k; total ~79k < 128k).
 _RESULTS_SERIALISATION_CAP = 240_000
 
+# P2-Option-A-#4 Greptile PR #22 follow-up round 2 (2026-05-25):
+# Per-model serialised-payload cap (chars). Sized so the payload fits
+# within the model's advertised context window after reserving system
+# prompt (~3k tokens) + brief (~2k tokens) + output (~14k tokens, see
+# `max_tokens=14000` on the extraction call below):
+#
+#   safe_payload_chars ≤ (context_tokens - 3k_sys - 2k_brief - 14k_out) * 4
+#
+# Empty string `""` = no override = default specialists model
+# (Nemotron-3-Super-120B). Greptile flagged that the single 240k cap was
+# Nemotron-calibrated but applied uniformly to the model_override path, so
+# a narrower override could silently truncate at its API layer or fall
+# through to `_snippet_fallback` — Exa cost incurred with no extraction
+# benefit. Making the cap per-model puts the context check at the same
+# diff site as any new route added in orchestrator.py: adding a route
+# without an entry here trips the unknown-override warning below.
+_MODEL_PAYLOAD_CAP_CHARS = {
+    # Nemotron-3-Super-120B: 128k ctx (≈109k tokens free after reservation
+    # → ~436k chars available). We use the calibrated 240k (per #4
+    # commentary above; cap is "what we actually need", not "what fits").
+    "": _RESULTS_SERIALISATION_CAP,
+    # Tongyi-DeepResearch-30B-A3B: 131k ctx (verified via OpenRouter model
+    # card 2026-05-25 — https://openrouter.ai/alibaba/tongyi-deepresearch-30b-a3b).
+    # ~112k tokens free after reservation → ~448k chars available;
+    # symmetric to Nemotron, use the same 240k cap.
+    "alibaba/tongyi-deepresearch-30b-a3b": _RESULTS_SERIALISATION_CAP,
+}
+
+# Conservative fallback for an unknown model_override. Sized for a 32k-ctx
+# model (the smallest a commercial frontier extraction model is likely to
+# advertise): 32k - 19k reservation = 13k input tokens free ≈ 52k chars,
+# rounded down for safety. Better to under-fill the context (degraded
+# extraction quality, but findings still produced) than to silently exceed
+# it (API-layer truncation → `_snippet_fallback` catches the JSON parse
+# failure → Exa cost incurred for nothing).
+_UNKNOWN_OVERRIDE_PAYLOAD_CAP_CHARS = 48_000
+
+# Dedupe set so the unknown-override warning fires once per (process,
+# model) rather than once per task per specialist (would be ~30 lines of
+# noise per dev4 run).
+_warned_unknown_overrides: set[str] = set()
+
+
+def _payload_cap_for(model_override: str) -> int:
+    """Resolve the serialised-payload cap (chars) for the extraction call,
+    keyed on the active `model_override`. Unknown override → emits a
+    one-shot stderr warning and returns the conservative 48k cap.
+
+    Operator action on hitting the warning: add the new model's entry to
+    `_MODEL_PAYLOAD_CAP_CHARS` above with its verified context window
+    BEFORE routing additional traffic through it.
+    """
+    if model_override in _MODEL_PAYLOAD_CAP_CHARS:
+        return _MODEL_PAYLOAD_CAP_CHARS[model_override]
+    if model_override not in _warned_unknown_overrides:
+        _warned_unknown_overrides.add(model_override)
+        print(
+            f"[specialists] model_override={model_override!r} not in "
+            f"_MODEL_PAYLOAD_CAP_CHARS — using conservative "
+            f"{_UNKNOWN_OVERRIDE_PAYLOAD_CAP_CHARS}-char cap (sized for "
+            f"32k-ctx model). Add this model's verified context window "
+            f"to the registry to lift the cap.",
+            file=sys.stderr,
+            flush=True,
+        )
+    return _UNKNOWN_OVERRIDE_PAYLOAD_CAP_CHARS
+
+
 # Cap on the degraded snippet-fallback path. Held to match
 # _EXTRACT_SYSTEM's 14-24 finding ceiling so the fallback path doesn't
 # produce more atoms than the LLM-extract path's upper bound (avoids
@@ -143,10 +212,11 @@ def research(role: str, queries: list, *, language: str, domain: str, exa_mode: 
         return {"role": role, "findings": [], "n_searches": n}
 
     brief = "\n".join(f"[{q.get('id')}] {q.get('text', '')}" for q in queries)
-    user = (
-        f"BRIEF ({language}):\n{brief}\n\nSEARCH RESULTS:\n"
-        + json.dumps(results, ensure_ascii=False)[:_RESULTS_SERIALISATION_CAP]
-    )
+    # Greptile PR #22 follow-up round 2 (2026-05-25): resolve the cap per
+    # active extraction model. See `_payload_cap_for` above for the registry
+    # and the unknown-override fallback rationale.
+    payload_cap = _payload_cap_for(model_override)
+    user = f"BRIEF ({language}):\n{brief}\n\nSEARCH RESULTS:\n" + json.dumps(results, ensure_ascii=False)[:payload_cap]
     try:
         if model_override:
             # Route to override (Tongyi-DR for list-all/explain-mechanism)
