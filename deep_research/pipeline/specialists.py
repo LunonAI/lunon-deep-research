@@ -63,13 +63,37 @@ _EXTRACT_SYSTEM = (
 _MAX_SEARCHES_PER_SPECIALIST = 12
 _RESULTS_PER_SEARCH = 10
 
+# P2-Option-A-#4 Greptile PR #22 follow-up (2026-05-25): named cap on the
+# serialised SEARCH RESULTS string sent to the extraction LLM. Pre-#4 the
+# inline `[:42000]` truncation was fine because 5×5 raw hits × ~1,600 chars
+# ≈ 40k chars fit comfortably under 42k. Post-#4 the same 5×5 → 12×10 raise
+# pushes the payload to ~192k chars (12 searches × 10 results × ~1,600
+# chars/result; per-result text is already capped at 1500 chars on line ~111
+# plus title/url/date/qid + JSON syntax ≈ 1,600). With the cap still at 42k,
+# only the first ~25 results — barely 2-3 of the 12 specialist searches —
+# survived into the extraction LLM context; the remaining 8-9 searches' hits
+# were silently dropped despite Exa cost having been incurred for them. Only
+# the degraded `_snippet_fallback` path actually saw them.
+#
+# Raise the cap to fit the full expected post-#4 payload with ~25% headroom:
+# 192k × 1.25 ≈ 240k chars. At ~4 chars/token, that's ~60k input tokens,
+# well within Nemotron-3-Super-120B's 128k context (system+brief add ~5k
+# tokens; output budget is 14k; total ~79k < 128k).
+_RESULTS_SERIALISATION_CAP = 240_000
+
+# Cap on the degraded snippet-fallback path. Held to match
+# _EXTRACT_SYSTEM's 14-24 finding ceiling so the fallback path doesn't
+# produce more atoms than the LLM-extract path's upper bound (avoids
+# inconsistent atom counts between tasks depending on which path fired).
+_FALLBACK_CAP = 24
+
 
 def _snippet_fallback(results, query_ids):
     """Degrade gracefully: turn raw search hits into evidence atoms."""
     out = []
     # Cap matches the new _EXTRACT_SYSTEM finding ceiling (14-24); fallback
     # path should not produce more atoms than the LLM extract path would.
-    for r in results[:24]:
+    for r in results[:_FALLBACK_CAP]:
         txt = (r.get("text") or r.get("title") or "").strip()
         if not txt:
             continue
@@ -119,7 +143,10 @@ def research(role: str, queries: list, *, language: str, domain: str, exa_mode: 
         return {"role": role, "findings": [], "n_searches": n}
 
     brief = "\n".join(f"[{q.get('id')}] {q.get('text', '')}" for q in queries)
-    user = f"BRIEF ({language}):\n{brief}\n\nSEARCH RESULTS:\n" + json.dumps(results, ensure_ascii=False)[:42000]
+    user = (
+        f"BRIEF ({language}):\n{brief}\n\nSEARCH RESULTS:\n"
+        + json.dumps(results, ensure_ascii=False)[:_RESULTS_SERIALISATION_CAP]
+    )
     try:
         if model_override:
             # Route to override (Tongyi-DR for list-all/explain-mechanism)
