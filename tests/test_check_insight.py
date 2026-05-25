@@ -139,6 +139,44 @@ def test_contrarian_framing_no_false_positives_on_neutral_text():
     assert out["counts"]["contrarian_framing"] == 0, out["counts"]
 
 
+def test_contrarian_framing_no_false_positive_on_neutral_standard_reading():
+    """Greptile PR #21 round-2 follow-up: `standard reading` appears in
+    neutral technical contexts in legal, literary, and policy prose
+    (`the standard reading of the statute requires…`, `a standard reading
+    list`). It carries no inherent adversative signal there, so it must
+    not contribute to contrarian_framing on its own — every other
+    alternative in the regex ships its own challenge signal. A previous
+    draft of the regex included a bare `standard reading` token, which
+    would have inflated the advisory count for those domains."""
+    text = (
+        "The standard reading of the statute requires notice within thirty days. "
+        "Section 4 modifies the standard reading rule for transit cases. "
+        "Required preparation includes the standard reading list distributed last term. "
+        "Counsel adopted the standard reading throughout the brief."
+        # 4 neutral mentions of "standard reading"; no challenge signal anywhere.
+    )
+    out = check_insight_minimums(text)
+    assert out["counts"]["contrarian_framing"] == 0, (
+        f"neutral 'standard reading' uses inflated contrarian count: {out['counts']}"
+    )
+
+
+def test_contrarian_framing_still_counts_despite_with_standard_reading():
+    """The contrarian exemplar in `_INSIGHT_MIN` itself — `Despite the
+    standard reading that Marin's Cosmo level is bounded at Silver Saint
+    tier…` — must still count as contrarian framing. With the bare
+    `standard reading` alternative removed (Greptile PR #21 round-2),
+    `despite\\b` carries the load."""
+    text = (
+        "Despite the standard reading that Marin's Cosmo level is bounded at "
+        "Silver Saint tier, the Episode G data suggests a Gold-class burst capacity."
+    )
+    out = check_insight_minimums(text)
+    assert out["counts"]["contrarian_framing"] >= 1, (
+        f"the _INSIGHT_MIN exemplar sentence no longer counts as contrarian: {out['counts']}"
+    )
+
+
 def test_counts_dict_keys_match_four_element_contract():
     """The advisory counts dict must expose exactly the four keys named in
     _INSIGHT_MIN's contract. Greptile PR #21 follow-up: causal_chain is
