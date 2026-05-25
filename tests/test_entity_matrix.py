@@ -152,6 +152,89 @@ def test_writer_includes_entity_matrix_block_for_listall(monkeypatch):
     assert "ENTITY MATRIX" in captured_user["text"]
     assert "Bronze Saints" in captured_user["text"]
     assert "Cosmo class" in captured_user["text"]
+    # Greptile PR #25 follow-up: pin the S1-specific canonical-placement
+    # wording. The block must tell the writer to render the table at the
+    # top of THIS section (S1's body), not in the executive opening frame
+    # (which is written separately by write_opening and intentionally does
+    # NOT receive the matrix).
+    assert "render this as a markdown table" in captured_user["text"]
+    assert "immediately under the §1 heading" in captured_user["text"]
+    assert "executive opening" in captured_user["text"]
+
+
+def test_writer_render_directive_only_fires_on_s1(monkeypatch):
+    """Greptile PR #25 follow-up regression test for the duplicate-table
+    risk. The previous block sent the "render this as a markdown table"
+    directive to every section (S1-S12); each section LLM is independent
+    and could emit the table at the top of its own body, producing up to
+    12 duplicate tables in the assembled article.
+
+    The fix gates the render directive on `sid == "S1"`. S2 (and every
+    other non-S1 section) must instead receive a leaner equal-depth
+    REMINDER plus an explicit `MUST NOT re-render the matrix table`
+    prohibition. The matrix JSON itself is still surfaced so the writer
+    knows the entity roster it must treat fairly.
+
+    Without this test the regression would slip back through silently —
+    the original PR #25 test suite only exercised S1."""
+    captured_user: dict[str, str] = {}
+
+    def fake_call(_role, user, *, system, max_tokens, note):  # noqa: ARG001
+        captured_user["text"] = user
+        return "## 2.1 stub\n\nstub body."
+
+    monkeypatch.setattr(writer.llm, "call", fake_call)
+
+    plan = _plan_with_em(
+        ["Bronze Saints", "Silver Saints", "Gold Saints", "Marina Generals", "Specters"],
+        ["armor tier", "Cosmo class", "speed class", "wearer roster"],
+    )
+    # The S2 unit shape mirrors S1 — only the id is different so the
+    # routing branch is the only thing under test.
+    unit = {
+        "id": "S2",
+        "title": "Power Hierarchy",
+        "depth": "deep",
+        "subs": [{"id": "S2.1", "title": "Sub", "depth_seeds": []}],
+    }
+
+    class _DummyBank:
+        def for_section(self, _sid):
+            return []
+
+    writer.write_section(
+        unit,
+        plan,
+        _DummyBank(),
+        prompt="p",
+        language="en",
+        archetype="list-all",
+        domain="default",
+        prior_titles=[],
+        task_id=None,
+        target_tokens=None,
+    )
+    text = captured_user["text"]
+
+    # The equal-depth reminder MUST still appear on non-S1 sections —
+    # that's the contract every section must satisfy on its slice of the
+    # matrix.
+    assert "ENTITY MATRIX REMINDER" in text
+    assert "equal-depth treatment" in text
+    # And the entity roster MUST still be visible so the writer knows
+    # what entities to treat fairly.
+    assert "Bronze Saints" in text
+    assert "Cosmo class" in text
+
+    # CRITICAL: the render-as-table directive MUST NOT appear on non-S1
+    # sections. This is the regression guard for the duplicate-table risk.
+    assert "render this as a markdown table" not in text, (
+        "non-S1 sections must not receive the render-as-table directive — "
+        "S1 owns the canonical placement to avoid up to 12 duplicate tables"
+    )
+    # And the explicit prohibition MUST be present so a capable LLM that
+    # might otherwise hallucinate a table is stopped at the prompt layer.
+    assert "MUST NOT re-render the matrix table" in text
 
 
 def test_writer_omits_entity_matrix_for_other_archetypes(monkeypatch):
