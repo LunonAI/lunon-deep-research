@@ -243,8 +243,11 @@ def write_section(
         f"2026-05-26 smoke produced 0 because earlier prompts did not "
         f"make the inline marker mandatory).\n"
         f"• REUSE markers across mentions of the SAME source — Qianfan "
-        f"reuses each `[^N]` ~7× on average. Don't invent a new number "
-        f"per sentence when citing the same paper repeatedly.\n"
+        f"reuses each `[^{sid}-N]` ~7× on average. Don't invent a new number "
+        f"per sentence when citing the same paper repeatedly. The "
+        f"section-scope `{sid}-` prefix is REQUIRED on reused markers too "
+        f"— bare `[^N]` (no section scope) WILL be stripped as orphans by "
+        f"footnote_normalize, silently dropping every reused citation.\n"
         f"• Define each marker EXACTLY ONCE at the end of YOUR section, "
         f'on its own line: `[^{sid}-1]: Author/Source (year), "Title," '
         f"Publisher/Journal volume, pages.` URL is OPTIONAL — if the "
