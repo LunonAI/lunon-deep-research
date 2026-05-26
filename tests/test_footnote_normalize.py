@@ -208,3 +208,79 @@ def test_normalize_handles_section_id_with_dots():
     assert "[^S3.2-1]" not in out.article
     assert "[^1]" in out.article
     assert "[^2]" in out.article
+
+
+# ---- Wave 1 §2.1a (2026-05-26): writer-emitted References pre-strip ----
+
+
+def test_writer_refs_section_with_bare_markers_stripped():
+    """Canonical id=91 morning-smoke pattern from gap-map §2.1a: the
+    writer invented its own `## 29 References` section in the body with
+    bare `[^N]` markers above each `[^N]: source` line. Pre-Wave-1
+    behaviour left the orphan heading + bare markers in the body
+    alongside the canonical `## References` block — duplicate headings
+    + 32 stray markers in the output. The pre-strip pass must remove
+    the writer's section entirely while still capturing its defs into
+    the canonical block."""
+    article = (
+        "# Title\n\n## 1 Intro\n\n"
+        "The standard reading per Lebrun (1999)[^S1-1] is established.\n\n"
+        "## 29 References (Sources for this section)\n\n"
+        "[^S1-1]\n"
+        "[^S1-1]: Lebrun, B. (1999) — https://example.com/lebrun\n"
+    )
+    out = footnote_normalize.normalize(article)
+    # The orphan heading must be gone.
+    assert "## 29 References" not in out.article
+    # The bare `[^S1-1]` on its own line (above the def in the writer
+    # block) must be gone — it should not appear except as the renumbered
+    # `[^1]` inline marker in the prose.
+    assert "\n[^S1-1]\n" not in out.article
+    # The canonical References block at the end must still be present
+    # with the captured definition.
+    assert "## References" in out.article
+    assert "Lebrun" in out.article
+    # Telemetry counter must reflect the strip.
+    assert out.n_writer_refs_sections_stripped == 1
+
+
+def test_writer_refs_section_without_numbering_stripped():
+    """The writer may emit `## References` with no leading number (vs
+    `## 29 References`). The pre-strip regex must catch both."""
+    article = "# Title\n\n## 1 Intro\n\nClaim per Source A[^S1-1].\n\n## References\n\n[^S1-1]: Source A\n"
+    out = footnote_normalize.normalize(article)
+    assert out.n_writer_refs_sections_stripped == 1
+    # Output has exactly ONE `## References` heading (the canonical one
+    # we append in Step 4) — not two.
+    assert out.article.count("## References") == 1
+
+
+def test_no_writer_refs_section_telemetry_zero():
+    """When the writer does NOT emit its own References block, the
+    telemetry counter stays at 0 and normalize behaviour is unchanged
+    vs the pre-Wave-1 contract."""
+    article = "# Title\n\n## 1 Intro\n\nClaim per Source A[^S1-1].\n\n[^S1-1]: Source A — https://example.com\n"
+    out = footnote_normalize.normalize(article)
+    assert out.n_writer_refs_sections_stripped == 0
+    # Renumber + def-strip still works as before.
+    assert out.n_renumbered == 1
+    assert "[^1]" in out.article
+
+
+def test_writer_refs_section_does_not_swallow_following_section():
+    """The pre-strip regex must stop at the next `## ` heading so it
+    doesn't accidentally swallow a following body section that happens
+    to come after the writer's References block."""
+    article = (
+        "# Title\n\n## 1 Intro\n\n"
+        "Claim per Source A[^S1-1].\n\n"
+        "## 5 References (Sources)\n\n"
+        "[^S1-1]: Source A\n\n"
+        "## 6 Following Section\n\n"
+        "Important content that must survive the pre-strip pass.\n"
+    )
+    out = footnote_normalize.normalize(article)
+    assert out.n_writer_refs_sections_stripped == 1
+    # The following section's heading + content must still be in the body.
+    assert "## 6 Following Section" in out.article
+    assert "Important content that must survive" in out.article

@@ -30,6 +30,17 @@ def _persist_drift(s, language: str, query: str) -> None:
     """Best-effort inner-loop drift logger. ALL exceptions swallowed —
     failure to log MUST NOT affect task outcome."""
     try:
+        # Wave 1 §7.2 (2026-05-26): derive `inline_def_ratio` from
+        # footnote_normalize_stats so analysers can spot the "writer is
+        # making a fresh marker per cite, no reuse" failure mode without
+        # recomputing the ratio every time downstream. Qianfan's ~7×
+        # reuse pattern gives ratio ≈ 7; a degenerate 1:1 marker:def run
+        # gives ratio ≈ 1 (= zero reuse).
+        fn_stats = dict(getattr(s, "footnote_normalize_stats", {}) or {})
+        n_inline = int(fn_stats.get("n_inline_markers", 0))
+        n_defs = int(fn_stats.get("n_definitions", 0))
+        fn_stats["inline_def_ratio"] = round(n_inline / n_defs, 3) if n_defs > 0 else None
+
         rec = {
             "task_fp": query[:120],  # fingerprint for cross-ref with query.jsonl
             "language": language,
@@ -43,6 +54,12 @@ def _persist_drift(s, language: str, query: str) -> None:
             "article_chars": len(s.article or ""),
             "article_words": len((s.article or "").split()),
             "tool_calls": s.tool_calls,
+            # Wave 1 §7.1: surface the orchestrator's per-task specialist-
+            # timeout count so dev4 / W13 analysers can correlate timeout
+            # pressure with quality drift. 0 = clean; > 0 = some
+            # specialist hit _SPECIALIST_TIMEOUT_S and the orchestrator
+            # fell back to partial content.
+            "n_specialist_timeouts": int(getattr(s, "n_specialist_timeouts", 0) or 0),
             "numbering_fix": getattr(s, "numbering_fix_stats", {}),
             "refiner_gate": getattr(s, "refiner_gate_verdict", {}),
             "evidence_dedup": getattr(s, "evidence_dedup_stats", {}),
@@ -54,8 +71,9 @@ def _persist_drift(s, language: str, query: str) -> None:
             # (n_definitions, n_inline_markers, n_orphans_stripped, etc.)
             # is visible in inner_loop_drift.jsonl when analysing dev4
             # output. Without this the stats lived only on PipelineState
-            # and never reached the dev-run telemetry.
-            "footnote_normalize": getattr(s, "footnote_normalize_stats", {}),
+            # and never reached the dev-run telemetry. Wave 1 §7.2 added
+            # the derived `inline_def_ratio` field above.
+            "footnote_normalize": fn_stats,
         }
         _DRIFT_PATH.parent.mkdir(parents=True, exist_ok=True)
         with _DRIFT_LOCK, _DRIFT_PATH.open("a", encoding="utf-8") as fh:
@@ -173,6 +191,10 @@ def from_plan(ctx: dict, query: str, language: str, task_id: int | None = None) 
     s.memory_bank = res["memory_bank"]
     s.digest = res["digest"]
     s.tool_calls = res["tool_calls"]
+    # Wave 1 §7.1 (2026-05-26): capture specialist-timeout telemetry so it
+    # flows into _persist_drift below. Fail-soft: pre-PR-26 orchestrator
+    # outputs won't have this key, so default to 0 rather than KeyError.
+    s.n_specialist_timeouts = int(res.get("n_specialist_timeouts", 0))
 
     # P2-Wave-1-D: evidence-layer dedup. Hardcoded default `url+embedding`
     # post-validation (Wave-1 D sanity-4 passed 2026-05-23: paired ΔO +0.046 vs
@@ -261,6 +283,9 @@ def from_plan(ctx: dict, query: str, language: str, task_id: int | None = None) 
         "n_orphans_stripped": fno.n_orphans_stripped,
         "n_unused_dropped": fno.n_unused_dropped,
         "n_renumbered": fno.n_renumbered,
+        # Wave 1 §2.1a (2026-05-26): writer-emitted ## References sections
+        # the pre-strip pass removed before normalize processing.
+        "n_writer_refs_sections_stripped": fno.n_writer_refs_sections_stripped,
     }
 
     # Deterministic post-edit (plan v3 §2a+2d+2c-validator): stop-list regex,

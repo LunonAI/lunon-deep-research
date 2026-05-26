@@ -39,6 +39,38 @@ _DEFINITION_RE = re.compile(r"^[ \t]*\[\^([A-Za-z0-9._-]+)\]:[ \t]*(.+?)[ \t]*$"
 # separately above.
 _INLINE_RE = re.compile(r"\[\^([A-Za-z0-9._-]+)\](?!:)")
 
+# Wave 1 §2.1a (2026-05-26): writer-emitted References-section detector.
+# The 2026-05-26 id=91 morning smoke surfaced articles where the writer
+# emitted its own ``## N References`` (or ``## References``) section at
+# the end of a body section — typically with bare ``[^N]`` markers above
+# each ``[^N]: source`` line as a "preview/anchor" pattern the writer
+# invented. Verified pattern from gap-map §2.1a:
+#   ## 29 References
+#   [^1]
+#   [^1]: Seiyapedia (Fandom), "Cloths," — https://...
+#   [^2]
+#   [^2]: Wikipedia contributors, ...
+# The default ``normalize`` flow extracted those defs, renumbered the
+# bare-marker inlines (since they had matching defs), stripped the def
+# lines, and appended a NEW ``## References`` block — but left the
+# orphan ``## 29 References`` heading and the bare markers in body,
+# producing a malformed article with DUPLICATE References headings +
+# 32 stray ``[^N]`` markers. To fix, we strip any writer-emitted
+# References section in the body BEFORE the inline-renumber + def-strip
+# steps. Definitions inside the section are captured BY THE EARLIER
+# def-scan (which sees the unmodified article), so they survive into
+# the final clean ``## References`` block.
+#
+# Match permissively: optional leading whitespace, then ``##`` (level-2
+# heading per the writer prompt's HEADING-HASH MAPPING rule), optional
+# numbering (``29 ``, ``12. ``, ``5 `` etc.), then ``References`` or
+# ``Reference`` followed by a word boundary. The match extends to the
+# next level-2 (or level-1) heading or end-of-string.
+_WRITER_REFS_SECTION_RE = re.compile(
+    r"^[ \t]*##[ \t]+\d*\.?[ \t]*References?\b.*?(?=^[ \t]*#{1,2}[ \t]|\Z)",
+    re.MULTILINE | re.DOTALL | re.IGNORECASE,
+)
+
 
 @dataclass
 class FootnoteNormalizeOutput:
@@ -48,6 +80,12 @@ class FootnoteNormalizeOutput:
     n_orphans_stripped: int
     n_unused_dropped: int
     n_renumbered: int
+    # Wave 1 §2.1a: count of writer-emitted ``## References`` sections
+    # removed from the body before normalize processing. Non-zero means
+    # the writer is inventing its own References blocks — a writer-side
+    # behaviour worth telemetering separately from the orphan / unused
+    # counters above.
+    n_writer_refs_sections_stripped: int = 0
 
 
 def normalize(article: str, references_heading: str = "References") -> FootnoteNormalizeOutput:
@@ -77,6 +115,9 @@ def normalize(article: str, references_heading: str = "References") -> FootnoteN
     re-applies it without first stripping the prior References block.
     """
     # Step 1: collect every (token → definition_text) from `[^X]:` lines.
+    # MUST run on the unmodified article so defs inside any writer-emitted
+    # ``## References`` section (stripped in Step 1.5 below) are still
+    # captured.
     # Greptile PR #24 follow-up (2026-05-25): dropped the parallel
     # `definition_spans` list. It was built every run (including the
     # `line_end + 1` newline-inclusion logic) but never consumed — Step 3
@@ -91,6 +132,20 @@ def normalize(article: str, references_heading: str = "References") -> FootnoteN
         if token not in definitions:
             definitions[token] = text
 
+    # Step 1.5 (Wave 1 §2.1a, 2026-05-26): strip any writer-emitted
+    # ``## References`` section from the body BEFORE inline renumbering.
+    # The writer occasionally invents its own References block at the end
+    # of a body section with bare ``[^N]`` markers above each ``[^N]:``
+    # definition line. Defs were already captured in Step 1 from the
+    # unmodified article, so removing the writer's section here loses
+    # nothing — it just prevents the bare markers and the orphan
+    # heading from surviving into the final article alongside the
+    # canonical ``## References`` block we append in Step 4.
+    article, n_writer_refs_stripped = _WRITER_REFS_SECTION_RE.subn("", article)
+    # Collapse any blank-line storm the strip introduced.
+    if n_writer_refs_stripped:
+        article = re.sub(r"\n{3,}", "\n\n", article).rstrip() + "\n"
+
     if not definitions:
         return FootnoteNormalizeOutput(
             article=article,
@@ -99,6 +154,7 @@ def normalize(article: str, references_heading: str = "References") -> FootnoteN
             n_orphans_stripped=0,
             n_unused_dropped=0,
             n_renumbered=0,
+            n_writer_refs_sections_stripped=n_writer_refs_stripped,
         )
 
     # Step 2: walk article in document order, assign fresh global numbers
@@ -150,6 +206,7 @@ def normalize(article: str, references_heading: str = "References") -> FootnoteN
             n_orphans_stripped=n_orphans,
             n_unused_dropped=n_unused,
             n_renumbered=0,
+            n_writer_refs_sections_stripped=n_writer_refs_stripped,
         )
     refs_lines = [f"## {references_heading}", ""]
     # Iterate by N order, not insertion-into-token_to_n order, so the output
@@ -171,4 +228,5 @@ def normalize(article: str, references_heading: str = "References") -> FootnoteN
         n_orphans_stripped=n_orphans,
         n_unused_dropped=n_unused,
         n_renumbered=len(token_to_n),
+        n_writer_refs_sections_stripped=n_writer_refs_stripped,
     )
