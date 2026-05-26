@@ -247,7 +247,8 @@ _ARCH_REFINE_EMPHASIS = {
 
 # Length target multiplier. The historical _MED catalog was calibrated to
 # Lunon's W9 outputs (~9k word median); the #1-leaderboard Qianfan corpus
-# runs ~99k mean and ~80k on the explain-mechanism extreme (id=56).
+# runs ~22k words mean across 100 articles; explain-mechanism extremes
+# like id=56 reach ~80k (confirmed 2026-05-26 smoke).
 #
 # Calibration history:
 #  - W9 baseline: 1.0× → ~9k words/article

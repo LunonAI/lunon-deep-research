@@ -279,7 +279,7 @@ def write_section(
     # 7k; (c) refiner-pass output that needs room to grow. The "depth uplift"
     # PR #20 promises lands primarily via (i) the architect's deeper outline
     # (more sections × more H3 × explicit depth_seeds payload) and (ii) the
-    # length_ceiling 2.2× bump that lifts the per-section CAPEL target —
+    # length_ceiling 4.0× bump that lifts the per-section CAPEL target —
     # NOT primarily via this max_tokens headroom.
     raw = llm.call("writer", user, system=sys, max_tokens=14000, note=f"writer.sec.{sid}")
     if capel_active:
