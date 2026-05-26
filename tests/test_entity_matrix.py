@@ -80,20 +80,27 @@ def test_normalize_records_entity_overcount_shortfall():
 
 
 def test_normalize_records_no_shortfalls_when_matrix_meets_bounds():
-    """5-20 entities, 4-8 dimensions → no entity_matrix shortfalls."""
+    """5-20 entities, 4-8 dimensions → no entity_matrix shortfalls.
+
+    Wave 2 §1.2: `list-all` archetype now requires a FLAT outline
+    (30-80 top sections, 0-2 subsections, 0 depth_seeds) per the reference corpus calibration. The fixture below is built to that
+    flat shape so the only audit dimension under test is the
+    entity_matrix one."""
     plan = _plan_with_em(
         ["e1", "e2", "e3", "e4", "e5", "e6"],
         ["d1", "d2", "d3", "d4", "d5"],
     )
-    # Use a fuller plan so the other audits also pass.
+    # Wave 2 §1.2: flat list-all outline = top_min top sections, no
+    # subsections, no depth_seeds. Matches the reference id=91 (78 H2 / 0 H3).
+    list_all_top_min = architect._ARCHETYPE_OUTLINE_SHAPE["list-all"]["top_min"]
     plan["report_toc"] = [
         {
             "id": f"S{i + 1}",
             "title": "x",
-            "subsections": [{"id": f"S{i + 1}.{j + 1}", "title": "x", "depth_seeds": ["a", "b"]} for j in range(3)],
+            "subsections": [],
             "depth_target": "broad",
         }
-        for i in range(8)
+        for i in range(list_all_top_min)
     ]
     # PR #25 merge follow-up (2026-05-25): satisfy PR #22's _QUERIES_MIN=48
     # query-count audit, which otherwise fires `queries=0<48` on `_plan_with_em`'s

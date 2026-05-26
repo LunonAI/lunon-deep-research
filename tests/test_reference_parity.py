@@ -90,23 +90,61 @@ def test_writer_section_user_prompt_carries_citation_contract():
     citations. Pin the post-2026-05-26 CITATION CONTRACT block that
     makes `[^sid-N]` footnotes mandatory in the user prompt (where the
     writer's attention actually lands), not just buried in the system
-    prompt's CLEANING_RESISTANT_RULE."""
+    prompt's CLEANING_RESISTANT_RULE.
+
+    Wave 2 §2.1c (2026-05-26) restructured the contract to address the
+    post-Wave-1 smoke failure mode (writer emitted clean inline markers
+    but 0 def lines, dropping every citation). Pin both the
+    long-standing PR #27 CITATION CONTRACT presence + the Wave 2
+    structural-numbering and def-emission additions."""
     src = inspect.getsource(writer.write_section)
     assert "CITATION CONTRACT" in src, (
         "writer.write_section user prompt must include the CITATION "
         "CONTRACT block — the post-2026-05-26 smoke fix that makes "
         "[^sid-N] footnotes mandatory at the user-prompt layer."
     )
-    # And the reference parity reference must be in the prompt — gives the
-    # writer the empirical target (326 markers) that motivated the change.
-    assert "the reference" in src and "326" in src, (
-        "CITATION CONTRACT must reference the reference's 326-marker target so the writer knows the empirical bar."
-    )
+    # The reference must be there in some form — gives the
+    # writer the empirical anchor (Wave 1 smoke distance 1.966 or
+    # earlier the reference ~7× reuse density).
+    assert "the reference" in src, "CITATION CONTRACT must reference the reference empirical anchor."
     # The old name-only steering must be GONE — it was the active
     # countermand to the system prompt's footnote rule.
     assert "cite by inline source NAME" not in src, (
         "The pre-fix 'cite by inline source NAME' phrase must be gone — "
         "it steered writers AWAY from footnotes in the smoke."
+    )
+
+
+def test_writer_section_citation_contract_forbids_missing_defs():
+    """Wave 2 §2.1c: the post-Wave-1 smoke surfaced the writer emitting
+    clean inline markers but 0 `[^X]: source` def lines, causing every
+    citation to be stripped as orphan. The strengthened contract must
+    explicitly forbid this failure mode with a worked example and the
+    downstream consequence (orphans stripped, citation surface gone)."""
+    src = inspect.getsource(writer.write_section)
+    assert "FORBIDDEN" in src, (
+        "CITATION CONTRACT must include an explicit FORBIDDEN section "
+        "for the missing-def-lines failure mode (Wave 2 §2.1c)."
+    )
+    # The consequence chain must be spelled out so the writer knows what
+    # happens when defs are skipped.
+    src_lower = src.lower()
+    assert "orphan" in src_lower or "strip" in src_lower, (
+        "FORBIDDEN section must spell out the orphan-stripping consequence "
+        "so the writer doesn't silently skip def emission again."
+    )
+
+
+def test_writer_section_evidence_atoms_pre_assigned_markers():
+    """Wave 2 §2.1c: each evidence atom passed to the writer must carry
+    its pre-assigned `[^{sid}-N]` marker in the rendered ev_view so the
+    writer can't pick a wrong number (the post-process synthesis safety
+    net uses the marker-N ↔ atom-N mapping to recover missing defs)."""
+    src = inspect.getsource(writer.write_section)
+    # The ev_view construction must include a `marker` field for each atom.
+    assert '"marker"' in src or "marker=" in src or "{sid}-{i" in src, (
+        "ev_view must pre-assign each atom its [^{sid}-N] marker so the "
+        "writer can't mismatch (Wave 2 §2.1c structural fix)."
     )
 
 
@@ -120,19 +158,21 @@ def test_reuse_guidance_uses_scoped_form_consistently():
     as orphans by footnote_normalize — silently dropping exactly the
     citations the PR was trying to preserve.
 
-    Pin that the REUSE bullets explicitly demonstrate the scoped form."""
+    Wave 2 §2.1c restructured the user-prompt contract; pin the scoped
+    form on the SYSTEM prompt side (which still uses the PR #27
+    phrasing) and the structural-numbering pattern on the user side."""
     src = inspect.getsource(writer.write_section)
     rule = writing_rules.CLEANING_RESISTANT_RULE
 
-    # User prompt: REUSE bullet must use `{sid}-N`, not bare `[^N]` alone.
-    # The substring search has to be careful — `[^N]` appears as part of
-    # `[^{sid}-N]` so we test for the explicit "reuses each `[^{sid}-N]`"
-    # phrase that the PR-27 follow-up established.
-    assert "reuses each `[^{sid}-N]`" in src, (
-        "writer.write_section REUSE bullet must use the section-scoped "
-        "`[^{sid}-N]` form in its example — a bare `[^N]` example would "
-        "anchor the LLM toward unscoped reused markers that "
-        "footnote_normalize strips as orphans."
+    # User prompt: REUSE must use the scoped `[^{sid}-N]` form (Wave 2
+    # §2.1c made this structural via the pre-assigned `marker` field on
+    # each atom). Bare `[^N]` examples would anchor the LLM toward
+    # unscoped reused markers that footnote_normalize strips as orphans.
+    assert "{sid}-N" in src or "[^{sid}-" in src, (
+        "writer.write_section REUSE / contract must use the section-scoped "
+        "`[^{sid}-N]` form — a bare `[^N]` example would anchor the LLM "
+        "toward unscoped reused markers that footnote_normalize strips "
+        "as orphans."
     )
 
     # System prompt: same requirement, with `{section_id}` template var.
@@ -143,16 +183,11 @@ def test_reuse_guidance_uses_scoped_form_consistently():
         "inferring bare `[^N]` is acceptable for reused markers."
     )
 
-    # And explicit anti-bare guidance — both files must call out that
-    # bare `[^N]` (no section scope) gets stripped as orphan.
-    assert "stripped as orphans" in src, (
-        "writer.write_section REUSE bullet must spell out the orphan-"
-        "stripping consequence so the LLM doesn't infer bare `[^N]` is "
-        "tolerated."
-    )
+    # Explicit anti-bare guidance on the system-prompt side.
     assert "stripped as orphans" in rule, (
         "CLEANING_RESISTANT_RULE REUSE bullet must spell out the orphan-"
-        "stripping consequence symmetric to writer.write_section."
+        "stripping consequence so the LLM doesn't infer bare `[^N]` is "
+        "tolerated."
     )
 
 

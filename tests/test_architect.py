@@ -394,7 +394,12 @@ def test_build_skips_retry_when_first_plan_meets_bounds(monkeypatch):
         return _build_good_plan_obj()
 
     monkeypatch.setattr(architect.llm, "call_json", fake_call_json)
-    plan = architect.build("p", "en", "compare", [], {}, [])
+    # Wave 2 §1.2: use `predict` archetype because it still uses the
+    # default 8-12 / 3-6 / 2-4 outline bounds that `_build_good_plan_obj`'s
+    # shape (9 × 3 × 2) satisfies. The `compare` archetype now uses
+    # 15-30 / 2-5 / 0-0 per the reference-calibrated preset, which would
+    # fail this fixture without unrelated rewrites.
+    plan = architect.build("p", "en", "predict", [], {}, [])
     assert calls == ["architect"], f"unexpected calls: {calls}"
     assert plan["_outline_audit"]["retry_attempted"] is False
 
@@ -410,7 +415,12 @@ def test_build_triggers_retry_when_first_plan_has_shortfalls(monkeypatch):
         return next(responses)
 
     monkeypatch.setattr(architect.llm, "call_json", fake_call_json)
-    plan = architect.build("p", "en", "compare", [], {}, [])
+    # Wave 2 §1.2: use `predict` archetype because it still uses the
+    # default 8-12 / 3-6 / 2-4 outline bounds that `_build_good_plan_obj`'s
+    # shape (9 × 3 × 2) satisfies. The `compare` archetype now uses
+    # 15-30 / 2-5 / 0-0 per the reference-calibrated preset, which would
+    # fail this fixture without unrelated rewrites.
+    plan = architect.build("p", "en", "predict", [], {}, [])
     assert calls == ["architect", "architect.retry"], f"unexpected calls: {calls}"
     assert plan["_outline_audit"]["retry_attempted"] is True
     # Retry succeeded — final plan should be the deep one.
@@ -434,7 +444,12 @@ def test_build_keeps_original_when_retry_makes_things_worse(monkeypatch):
         return next(responses)
 
     monkeypatch.setattr(architect.llm, "call_json", fake_call_json)
-    plan = architect.build("p", "en", "compare", [], {}, [])
+    # Wave 2 §1.2: use `predict` archetype because it still uses the
+    # default 8-12 / 3-6 / 2-4 outline bounds that `_build_good_plan_obj`'s
+    # shape (9 × 3 × 2) satisfies. The `compare` archetype now uses
+    # 15-30 / 2-5 / 0-0 per the reference-calibrated preset, which would
+    # fail this fixture without unrelated rewrites.
+    plan = architect.build("p", "en", "predict", [], {}, [])
     # We kept the original shallow plan (1 top section), not the worse retry.
     assert plan["_outline_audit"]["n_top_sections"] == 1
     # Greptile PR #23 follow-up: renamed from
@@ -465,7 +480,12 @@ def test_build_marks_retry_attempted_when_retry_response_is_uncoercible(monkeypa
         return next(responses)
 
     monkeypatch.setattr(architect.llm, "call_json", fake_call_json)
-    plan = architect.build("p", "en", "compare", [], {}, [])
+    # Wave 2 §1.2: use `predict` archetype because it still uses the
+    # default 8-12 / 3-6 / 2-4 outline bounds that `_build_good_plan_obj`'s
+    # shape (9 × 3 × 2) satisfies. The `compare` archetype now uses
+    # 15-30 / 2-5 / 0-0 per the reference-calibrated preset, which would
+    # fail this fixture without unrelated rewrites.
+    plan = architect.build("p", "en", "predict", [], {}, [])
     # We kept the original shallow plan — there was no usable retry.
     assert plan["_outline_audit"]["n_top_sections"] == 1
     # The LLM was called for the retry; telemetry must reflect that.
