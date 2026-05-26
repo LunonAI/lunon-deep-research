@@ -126,11 +126,17 @@ def test_classify_quant_avoids_bare_range_false_positive():
 
 def test_classify_contrarian_catches_expanded_idioms():
     """Pre-fix regex was thin. Expanded coverage adds 'argue against'
-    / 'push back on' / 'in fact' / ZH 实际上 / 事实上."""
+    / 'push back on' / 'in fact, the [reverse|opposite|contrary]' /
+    ZH 实际上 / 事实上.
+
+    Wave 2 PR #30 round-5 follow-up: bare `in fact` was narrowed (it
+    matched too many non-contrarian analytical openings); now requires
+    a reversal marker (reverse/opposite/contrary) after."""
     samples = [
         "The Episode G analysis argues against the standard reading.",
         "Critics push back on this consensus.",
-        "In fact, the data shows the opposite pattern.",
+        # Updated to match the narrowed `in fact, the reverse/opposite/contrary` form.
+        "In fact, the opposite pattern holds across all archetypes.",
         "Differs from the standard interpretation, the model predicts...",
         "实际上，数据显示相反的结果。",
         "事实上，传统的解释并不成立。",
@@ -180,6 +186,34 @@ def test_classify_contrarian_does_not_fire_on_bare_yet():
         "Critics argue against the consensus view.",
         "In fact, the opposite holds.",
         "Contrary to popular belief, the model predicts X.",
+    ]
+    for s in real_contrarian:
+        assert _classify_leaf_elements(s)["contrarian"], f"missed: {s!r}"
+
+
+def test_classify_contrarian_in_fact_narrowed_to_reversal_marker():
+    """Greptile PR #30 round-5 follow-up: bare `\\bin fact\\b` was too
+    broad — it matched common analytical openings like 'In fact,
+    performance improved by 30%' or 'In fact, this method is well-
+    understood', which are NOT contrarian framing. Over-counting
+    inflates `per_element_rate_pct['contrarian']` and masks genuine
+    under-performance the §3.2 rule is meant to surface.
+
+    Pin: bare 'In fact, X' must NOT fire contrarian; only the
+    narrowed form 'In fact, the reverse/opposite/contrary' fires."""
+    # Common non-contrarian "In fact, ..." openings — must NOT fire.
+    false_positives = [
+        "In fact, performance improved by 30%.",
+        "In fact, this method is well-understood across the literature.",
+        "In fact, the dataset contains 50,000 entries.",
+    ]
+    for s in false_positives:
+        assert not _classify_leaf_elements(s)["contrarian"], f"false positive: {s!r}"
+    # Genuine adversative "In fact" framing — MUST still fire.
+    real_contrarian = [
+        "In fact, the reverse holds — yields are higher under this constraint.",
+        "In fact, the opposite pattern emerges from the Episode G data.",
+        "In fact, the contrary is true: alignment drops with size.",
     ]
     for s in real_contrarian:
         assert _classify_leaf_elements(s)["contrarian"], f"missed: {s!r}"

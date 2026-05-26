@@ -133,12 +133,21 @@ _CONTRARIAN_RE = re.compile(
     # "not yet" / "yet another" / "5 years ago, yet the pattern
     # continues" all still matched. The other contrarian phrases below
     # cover genuine adversative framing without the false-positive risk.
+    #
+    # Greptile PR #30 round-5 follow-up (2026-05-26): `\bin fact\b`
+    # narrowed to require a reversal marker (reverse/opposite/contrary)
+    # after. The bare phrase matches common analytical openings
+    # ("In fact, performance improved 30%" / "In fact, this is
+    # well-understood") that are NOT contrarian framing; over-counting
+    # there inflates `per_element_rate_pct["contrarian"]` and masks
+    # genuine under-performance — the opposite of what §3.2 is meant
+    # to surface.
     r"(\bdespite\b|\bcontrary to\b|"
     r"challenges? the (?:view|consensus|standard|prevailing|conventional)|"
     r"against (?:the )?(?:consensus|commonly|conventional)|"
     r"counter to (?:the )?(?:consensus|conventional|standard|received)|"
     r"argue(?:s|d)? against|push(?:es|ed)? back (?:on|against)|"
-    r"\bin fact\b|"
+    r"\bin fact[,\s]+(?:the\s+)?(?:reverse|opposite|contrary)|"
     r"contrary to popular|differs from the standard|"
     r"尽管|与.{0,8}相反|挑战.{0,8}共识|反直觉|实际上|事实上|"
     r"反观|相反地)",
@@ -462,8 +471,13 @@ def _render_human(task_id: str, archetype: str, scores: dict) -> str:
         rate = ins["per_element_rate_pct"][elem]
         target = ins["per_element_target_pct"][elem]
         gap = ins["per_element_gap_pct"][elem]
-        marker = "  " if gap >= 0 else "↓"
-        lines.append(f"    {marker} {elem:<16s}: {rate:>5.1f}% (target ≥{target}%, gap {gap:+.1f}%)")
+        # Greptile PR #30 round-5 follow-up (2026-05-26): pad the
+        # non-compliant `↓` to 2-char display width so the element-name
+        # column aligns whether the row passed (`  `) or failed (`↓ `).
+        # Pre-fix, failing rows shifted left by one column making the
+        # table hard to scan when multiple elements failed.
+        marker = "  " if gap >= 0 else "↓ "
+        lines.append(f"    {marker}{elem:<16s}: {rate:>5.1f}% (target ≥{target}%, gap {gap:+.1f}%)")
     if ins["elements_below_target"]:
         lines.append(f"    BELOW target: {', '.join(ins['elements_below_target'])}")
     os_ = scores["outline_shape"]
