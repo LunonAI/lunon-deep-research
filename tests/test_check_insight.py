@@ -204,9 +204,7 @@ def test_contrarian_framing_still_counts_against_the_commonly_held():
     "Against the commonly held assumption…" must still count as contrarian
     framing. With bare `commonly (?:held|assumed|believed)` removed, the
     widened `against (?:the )?(?:consensus|commonly)` slot carries the load."""
-    text = (
-        "Against the commonly held assumption, the panel shows heterogeneity."
-    )
+    text = "Against the commonly held assumption, the panel shows heterogeneity."
     out = check_insight_minimums(text)
     assert out["counts"]["contrarian_framing"] >= 1, (
         f"'Against the commonly held…' exemplar no longer counts as contrarian: {out['counts']}"

@@ -133,6 +133,14 @@ HARD RULES:
 # hard-coded "8-12" / "3-6" / "2-4"; if anyone bumped a constant the
 # architect would be coached toward a stale target while the actual code
 # checks rejected the result, with no obvious source of the drift.
+#
+# Wave 2 §1.2 (2026-05-26): the uniform 8-12 / 3-6 / 2-4 bounds are the
+# DEFAULT, used when the archetype is unknown or has no preset. Per-
+# archetype bounds in `_ARCHETYPE_OUTLINE_SHAPE` override these for the
+# archetypes whose the reference articles show structurally
+# different shapes (list-all wants flat 30-80 H2 with no H3/H4 per
+# id=91's verified 78 H2 / 0 H3; compare wants moderate 15-30 H2;
+# explain-mechanism stays at the deeper hierarchical shape).
 _TOP_SECTIONS_MIN = 8
 _TOP_SECTIONS_MAX = 12
 _SUBSECTIONS_MIN = 3
@@ -151,19 +159,135 @@ _QUERIES_MIN = 48
 _QUERIES_MAX = 64
 
 
-def _format_retry_feedback(audit: dict) -> str:
+# Wave 2 §1.2 (2026-05-26): per-archetype outline shape preset.
+# Calibrated against the 10-doc reference corpus (profiled
+# 2026-05-26 via scripts/p2_reference_profile + p2_reference_distance
+# semantic-depth scan). Key findings:
+#   - id=91 (list-all, Saint Seiya armors): 78 H2 / 0 H3 — flat enumeration
+#   - id=14 (list-all, math/quantum research): 81 H2 / 0 H3 — flat
+#   - id=8 (list-all, ML methods): 63 H2 / 0 H3 — flat
+#   - id=56 (explain-mechanism, auction theory): 70 H2 / 135 H3 — deep
+#   - id=20 (explain-mechanism, HTTP): 55 H2 / 138 H3 — deep
+#   - id=89 (explain-mechanism, biology): 53 H2 / 221 H3 — deep
+#   - id=38 (predict/trend, jewelry trends): 58 H2 / 115 H3 — medium
+# ZERO of the 10 reference docs use H4+ headings. The pre-Wave-2 outline
+# spec produced 8-12 H2 × 3-6 H3 × 2-4 H4 leaves = 48-288 H4 leaves;
+# this misaligns with the reference's no-H4 convention. Wave 2 keeps H4 for
+# explain-mechanism / predict (where deep hierarchy still helps the
+# judge see depth) but drops H4 for list-all / compare (where the reference's
+# flat shape is the high-scoring template).
+_ARCHETYPE_OUTLINE_SHAPE: dict[str, dict[str, int]] = {
+    # list-all: flat enumeration. 30-80 top sections (one per entity in
+    # the matrix is the common pattern), minimal subsections (0-2 for
+    # cross-cutting framing), no H4 leaves.
+    "list-all": {
+        "top_min": 30,
+        "top_max": 80,
+        "sub_min": 0,
+        "sub_max": 2,
+        "seed_min": 0,
+        "seed_max": 0,
+    },
+    # compare: comparison-table archetype. Moderate top-section count
+    # (15-30) for the entities + framing sections, 2-5 subsections per
+    # top (cross-cutting dimensions), no H4.
+    "compare": {
+        "top_min": 15,
+        "top_max": 30,
+        "sub_min": 2,
+        "sub_max": 5,
+        "seed_min": 0,
+        "seed_max": 0,
+    },
+    # explain-mechanism: deepest archetype. the reference refs show 50-70 H2
+    # with 130-220 H3 leaves. Our pre-Wave-2 8-12 × 4-8 H3 produces
+    # 32-96 H3 leaves, fewer than the reference's ~135. Bump the top-section
+    # band to 8-14 + sub band to 4-8 + keep H4 (2-4 seeds) so total
+    # H3+H4 leaf count approaches the reference's per-article density.
+    "explain-mechanism": {
+        "top_min": 8,
+        "top_max": 14,
+        "sub_min": 4,
+        "sub_max": 8,
+        "seed_min": 2,
+        "seed_max": 4,
+    },
+    # predict / trend / recommend: forward-looking analysis archetypes.
+    # the reference id=38 (trends): 58 H2 / 115 H3. Use the default-shape
+    # bounds (closer to the historical 8-12 / 3-6 / 2-4) since these
+    # archetypes show wide structural variance across the corpus.
+    "predict": {
+        "top_min": 8,
+        "top_max": 12,
+        "sub_min": 3,
+        "sub_max": 6,
+        "seed_min": 2,
+        "seed_max": 4,
+    },
+    "trend": {
+        "top_min": 8,
+        "top_max": 12,
+        "sub_min": 3,
+        "sub_max": 6,
+        "seed_min": 2,
+        "seed_max": 4,
+    },
+    "recommend": {
+        "top_min": 8,
+        "top_max": 12,
+        "sub_min": 3,
+        "sub_max": 6,
+        "seed_min": 2,
+        "seed_max": 4,
+    },
+}
+
+# Default outline shape — used when archetype is unknown / missing
+# from `_ARCHETYPE_OUTLINE_SHAPE`. Matches the pre-Wave-2 uniform
+# 8-12 / 3-6 / 2-4 bounds for backward compat.
+_DEFAULT_OUTLINE_SHAPE: dict[str, int] = {
+    "top_min": _TOP_SECTIONS_MIN,
+    "top_max": _TOP_SECTIONS_MAX,
+    "sub_min": _SUBSECTIONS_MIN,
+    "sub_max": _SUBSECTIONS_MAX,
+    "seed_min": _SEEDS_MIN,
+    "seed_max": _SEEDS_MAX,
+}
+
+
+def _bounds_for_archetype(archetype: str | None) -> dict[str, int]:
+    """Return the per-archetype outline-shape bounds dict.
+
+    Falls back to `_DEFAULT_OUTLINE_SHAPE` when archetype is unknown
+    (back-compat with callers that don't pass archetype, e.g. tests
+    of `_normalize` that don't run the full build cycle).
+
+    Greptile PR #30 round-3 follow-up (2026-05-26): wraps the `.get()`
+    result in `dict(...)` so the return is ALWAYS a fresh copy.
+    Pre-fix the known-archetype path returned the actual module-level
+    dict object — a caller mutating the returned dict (e.g.
+    `b = _bounds_for_archetype('predict'); b['top_min'] = 99`) would
+    silently corrupt the constant. Mirrors the
+    `writing_rules.insight_distribution` fix from PR #30 round-2.
+    """
+    return dict(_ARCHETYPE_OUTLINE_SHAPE.get(archetype or "", _DEFAULT_OUTLINE_SHAPE))
+
+
+def _format_retry_feedback(audit: dict, archetype: str | None = None) -> str:
     """Turn `_outline_audit` shortfalls into a feedback string for the
     architect's retry call. Lists each specific bound violation so the
     architect knows exactly what to fix, not just that 'something is wrong'.
 
-    Bound numerals are interpolated from the module-level
-    `_TOP_SECTIONS_*` / `_SUBSECTIONS_*` / `_SEEDS_*` constants so the LLM
-    feedback can never drift away from the actual audit-check thresholds.
+    Bound numerals are interpolated from `_bounds_for_archetype(archetype)`
+    so the LLM feedback always matches the actual audit-check thresholds
+    for the specific archetype this retry is for (Wave 2 §1.2). Falls
+    back to default uniform bounds when archetype is None.
     """
+    b = _bounds_for_archetype(archetype)
     lines = [
         "SHORTFALL FEEDBACK — your previous plan did NOT meet the structural contract.",
         f"It returned {audit['n_top_sections']} top sections "
-        f"(need {_TOP_SECTIONS_MIN}-{_TOP_SECTIONS_MAX}), "
+        f"(need {b['top_min']}-{b['top_max']}), "
         f"{audit['n_subsections_total']} total subsections, "
         f"{audit['n_seeds_total']} total depth_seeds.",
         "",
@@ -171,19 +295,24 @@ def _format_retry_feedback(audit: dict) -> str:
     ]
     for s in audit.get("shortfalls", []):
         lines.append(f"  - {s}")
+    seed_clause = (
+        f"{b['seed_min']}-{b['seed_max']} depth_seeds each"
+        if b["seed_max"] > 0
+        else "ZERO depth_seeds per subsection (this archetype uses flat outline, no H4 leaves)"
+    )
     lines.extend(
         [
             "",
-            "REGENERATE the FULL plan, fixing every shortfall above. The "
-            f"structural contract ({_TOP_SECTIONS_MIN}-{_TOP_SECTIONS_MAX} top "
-            f"sections, {_SUBSECTIONS_MIN}-{_SUBSECTIONS_MAX} subsections each, "
-            f"{_SEEDS_MIN}-{_SEEDS_MAX} depth_seeds each) is the highest-priority "
-            "constraint — it directly drives output depth and "
-            "Comprehensiveness/Insight scores. "
-            f"If you cannot find enough material for {_TOP_SECTIONS_MIN} top "
-            "sections on this prompt, break broader sections into narrower "
-            "ones; if you have too many, merge near-duplicates. Same logic "
-            "for subsections and seeds.",
+            f"REGENERATE the FULL plan, fixing every shortfall above. The "
+            f"structural contract for archetype `{archetype or 'default'}` "
+            f"({b['top_min']}-{b['top_max']} top sections, "
+            f"{b['sub_min']}-{b['sub_max']} subsections each, "
+            f"{seed_clause}) is the highest-priority constraint — it "
+            "directly drives output depth and Comprehensiveness/Insight "
+            f"scores. If you cannot find enough material for {b['top_min']} "
+            "top sections on this prompt, break broader sections into "
+            "narrower ones; if you have too many, merge near-duplicates. "
+            "Same logic for subsections and seeds.",
         ]
     )
     return "\n".join(lines)
@@ -203,9 +332,34 @@ def build(
     prompt: str, language: str, archetype: str, intents: list, landscape: dict, coverage_obligations: list
 ) -> dict:
     emphasis = _ARCH_EMPHASIS.get(archetype, "")
+    # Wave 2 §1.2: inject the per-archetype outline-shape preset into the
+    # user prompt so the LLM sees the right bounds upfront. The _SYSTEM
+    # prompt above still describes the DEFAULT 8-12 / 3-6 / 2-4 contract
+    # for back-compat; this block OVERRIDES those defaults for archetypes
+    # whose the reference shape is structurally different.
+    b = _bounds_for_archetype(archetype)
+    seed_clause = (
+        f"{b['seed_min']}-{b['seed_max']} depth_seeds per subsection (one H4 leaf per seed)"
+        if b["seed_max"] > 0
+        else "ZERO depth_seeds — this archetype renders as a FLAT outline. "
+        "Set `depth_seeds: []` on every subsection. Do NOT invent H4 leaves."
+    )
+    archetype_outline_block = (
+        f"OUTLINE SHAPE FOR THIS ARCHETYPE (`{archetype}`) — OVERRIDE the "
+        f"8-12 / 3-6 / 2-4 default in the HARD RULES above. Wave 2 §1.2 "
+        f"calibration against the 10-doc reference corpus showed "
+        f"archetype-specific shapes:\n"
+        f"  • report_toc: {b['top_min']}-{b['top_max']} top-level sections\n"
+        f"  • subsections per top section: {b['sub_min']}-{b['sub_max']}\n"
+        f"  • {seed_clause}\n"
+        f"These bounds are ENFORCED by the audit + retry-on-shortfall "
+        f"loop. A plan outside these bounds for this archetype will be "
+        f"rejected and you'll be asked to regenerate.\n"
+    )
     user = (
         f"PROMPT ({language}):\n{prompt}\n\n"
         f"ARCHETYPE: {archetype}\nARCHETYPE EMPHASIS: {emphasis}\n\n"
+        f"{archetype_outline_block}\n"
         f"EXTRACTED INTENTS (each must become an acceptance criterion):\n"
         f"{json.dumps(intents, ensure_ascii=False)}\n\n"
         f"REGENERATED EVALUATION SUB-CRITERIA (each must become an acceptance "
@@ -249,7 +403,12 @@ def build(
     audit["retry_attempted"] = False
     audit["pre_retry_shortfalls"] = list(audit.get("shortfalls", []))
     if audit.get("shortfalls"):
-        retry_user = _format_retry_feedback(audit) + "\n\n" + user
+        # Wave 2 §1.2: pass archetype so the retry feedback interpolates
+        # per-archetype bounds (otherwise the feedback would use the
+        # default 8-12 / 3-6 / 2-4 numbers, which mismatch the audit
+        # for non-default archetypes — exactly the drift PR #23 was
+        # written to prevent).
+        retry_user = _format_retry_feedback(audit, archetype=archetype) + "\n\n" + user
         retry = llm.call_json(
             "architect",
             retry_user,
@@ -373,10 +532,18 @@ def _normalize(plan: dict, *, archetype: str | None = None) -> None:
         "n_queries": len(queries),
         "shortfalls": [],
     }
-    if len(toc) < _TOP_SECTIONS_MIN:
-        audit["shortfalls"].append(f"top_sections={len(toc)}<{_TOP_SECTIONS_MIN}")
-    if len(toc) > _TOP_SECTIONS_MAX:
-        audit["shortfalls"].append(f"top_sections={len(toc)}>{_TOP_SECTIONS_MAX}")
+    # Wave 2 §1.2: dispatch to per-archetype bounds. `archetype=None`
+    # falls back to the default uniform 8-12 / 3-6 / 2-4 bounds via
+    # _bounds_for_archetype, preserving back-compat with callers that
+    # don't pass archetype (the existing test suite + any pre-Wave-2
+    # script invocations).
+    b = _bounds_for_archetype(archetype)
+    audit["archetype"] = archetype or ""
+    audit["bounds"] = dict(b)
+    if len(toc) < b["top_min"]:
+        audit["shortfalls"].append(f"top_sections={len(toc)}<{b['top_min']}")
+    if len(toc) > b["top_max"]:
+        audit["shortfalls"].append(f"top_sections={len(toc)}>{b['top_max']}")
     if len(queries) < _QUERIES_MIN:
         audit["shortfalls"].append(f"queries={len(queries)}<{_QUERIES_MIN}")
     if len(queries) > _QUERIES_MAX:
@@ -384,10 +551,10 @@ def _normalize(plan: dict, *, archetype: str | None = None) -> None:
     for sec in toc:
         subs = sec.get("subsections", []) or []
         audit["n_subsections_total"] += len(subs)
-        if len(subs) < _SUBSECTIONS_MIN:
-            audit["shortfalls"].append(f"{sec.get('id')}.subs={len(subs)}<{_SUBSECTIONS_MIN}")
-        if len(subs) > _SUBSECTIONS_MAX:
-            audit["shortfalls"].append(f"{sec.get('id')}.subs={len(subs)}>{_SUBSECTIONS_MAX}")
+        if len(subs) < b["sub_min"]:
+            audit["shortfalls"].append(f"{sec.get('id')}.subs={len(subs)}<{b['sub_min']}")
+        if len(subs) > b["sub_max"]:
+            audit["shortfalls"].append(f"{sec.get('id')}.subs={len(subs)}>{b['sub_max']}")
         for sub in subs:
             seeds = sub.get("depth_seeds")
             if not isinstance(seeds, list):
@@ -401,13 +568,26 @@ def _normalize(plan: dict, *, archetype: str | None = None) -> None:
             # subsection are writer-observably identical (writer sees empty
             # list in both cases). Count them identically in the audit so
             # diagnostics are comparable across plan vintages.
+            #
+            # Wave 2 §1.2: archetypes that disallow H4 (seed_max == 0,
+            # e.g. list-all / compare) treat an empty depth_seeds list
+            # as CORRECT rather than as a missing-seeds shortfall.
+            if b["seed_max"] == 0:
+                # No H4 tier for this archetype; only flag the upper bound
+                # if the architect emitted seeds against contract.
+                audit["n_seeds_total"] += len(seeds)
+                if len(seeds) > b["seed_max"]:
+                    audit["shortfalls"].append(
+                        f"{sub.get('id')}.seeds={len(seeds)}>{b['seed_max']} (archetype `{archetype}` is flat — no H4 leaves)"
+                    )
+                continue
             if not seeds:
                 audit["subsections_missing_seeds"] += 1
             audit["n_seeds_total"] += len(seeds)
-            if len(seeds) < _SEEDS_MIN:
-                audit["shortfalls"].append(f"{sub.get('id')}.seeds={len(seeds)}<{_SEEDS_MIN}")
-            if len(seeds) > _SEEDS_MAX:
-                audit["shortfalls"].append(f"{sub.get('id')}.seeds={len(seeds)}>{_SEEDS_MAX}")
+            if len(seeds) < b["seed_min"]:
+                audit["shortfalls"].append(f"{sub.get('id')}.seeds={len(seeds)}<{b['seed_min']}")
+            if len(seeds) > b["seed_max"]:
+                audit["shortfalls"].append(f"{sub.get('id')}.seeds={len(seeds)}>{b['seed_max']}")
 
     # P2-Option-A-#7 (2026-05-23): entity_matrix audit + backfill for
     # list-all and compare archetypes. The matrix is the article's spine
