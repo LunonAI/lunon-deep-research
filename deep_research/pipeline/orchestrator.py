@@ -190,7 +190,20 @@ def run(plan, prompt, language, archetype, domain):
         except concurrent.futures.TimeoutError:
             # Hard cap exceeded — drop this specialist's findings entirely,
             # log the breakage so the dev-run reader sees it, continue.
+            # Greptile PR #26 follow-up round 2 (2026-05-26): added the
+            # stderr print for parity with the gap-fill handler below.
+            # The digest entry alone isn't real-time — it's only visible
+            # after the run completes and may be _compact'd away by the
+            # COMPACT_EVERY=8 boundary. An operator tailing stderr during
+            # a dev-run needs to see the timeout in the moment, otherwise
+            # the operational-visibility goal that motivated the original
+            # diagnostic logging is half-defeated.
             n_specialist_timeouts += 1
+            print(
+                f"[orchestrator] main-loop role={role} TIMEOUT after {_SPECIALIST_TIMEOUT_S}s; skipping",
+                file=sys.stderr,
+                flush=True,
+            )
             digest_parts.append(
                 f"[{role}] (specialist TIMEOUT after {_SPECIALIST_TIMEOUT_S}s; proceeding without its findings)"
             )
