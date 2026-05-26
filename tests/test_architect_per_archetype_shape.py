@@ -21,6 +21,27 @@ emission + per-archetype retry-feedback interpolation.
 from deep_research.pipeline import architect
 
 
+def test_bounds_for_archetype_returns_fresh_copy_not_mutable_reference():
+    """Greptile PR #30 round-3 follow-up: `_bounds_for_archetype` must
+    return a fresh copy, not a mutable reference to the module-level
+    constant. Pre-fix a caller mutating the returned dict (e.g.
+    `b = _bounds_for_archetype('predict'); b['top_min'] = 99`) would
+    silently corrupt the constant for every subsequent call. Mirrors
+    the `writing_rules.insight_distribution` fix from PR #30 round-2."""
+    original = dict(architect._ARCHETYPE_OUTLINE_SHAPE["predict"])
+    b = architect._bounds_for_archetype("predict")
+    b["top_min"] = 999
+    b["seed_max"] = 99
+    # Module-level constant must be UNTOUCHED.
+    assert architect._ARCHETYPE_OUTLINE_SHAPE["predict"] == original, (
+        "_bounds_for_archetype returned a mutable reference — caller "
+        "mutation corrupted the module-level constant. Wrap return in dict(...)."
+    )
+    # Subsequent call must return the uncorrupted values.
+    b2 = architect._bounds_for_archetype("predict")
+    assert b2 == original
+
+
 def test_bounds_for_archetype_dispatches_correctly():
     """Each archetype with a preset must return its dispatched bounds.
     Unknown archetypes fall back to the DEFAULT shape."""

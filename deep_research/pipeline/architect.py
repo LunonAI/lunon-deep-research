@@ -261,8 +261,16 @@ def _bounds_for_archetype(archetype: str | None) -> dict[str, int]:
     Falls back to `_DEFAULT_OUTLINE_SHAPE` when archetype is unknown
     (back-compat with callers that don't pass archetype, e.g. tests
     of `_normalize` that don't run the full build cycle).
+
+    Greptile PR #30 round-3 follow-up (2026-05-26): wraps the `.get()`
+    result in `dict(...)` so the return is ALWAYS a fresh copy.
+    Pre-fix the known-archetype path returned the actual module-level
+    dict object — a caller mutating the returned dict (e.g.
+    `b = _bounds_for_archetype('predict'); b['top_min'] = 99`) would
+    silently corrupt the constant. Mirrors the
+    `writing_rules.insight_distribution` fix from PR #30 round-2.
     """
-    return _ARCHETYPE_OUTLINE_SHAPE.get(archetype or "", _DEFAULT_OUTLINE_SHAPE)
+    return dict(_ARCHETYPE_OUTLINE_SHAPE.get(archetype or "", _DEFAULT_OUTLINE_SHAPE))
 
 
 def _format_retry_feedback(audit: dict, archetype: str | None = None) -> str:

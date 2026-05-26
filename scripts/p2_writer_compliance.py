@@ -118,12 +118,18 @@ _FORWARD_RE = re.compile(
     re.IGNORECASE,
 )
 _CONTRARIAN_RE = re.compile(
+    # Greptile PR #30 round-3 follow-up (2026-05-26): `\byet\b` removed.
+    # The previous negative lookahead `(?!,? \w+ ago)` was logically
+    # inverted — it checked what comes AFTER "yet", not before, so
+    # "not yet" / "yet another" / "5 years ago, yet the pattern
+    # continues" all still matched. The other contrarian phrases below
+    # cover genuine adversative framing without the false-positive risk.
     r"(\bdespite\b|\bcontrary to\b|"
     r"challenges? the (?:view|consensus|standard|prevailing|conventional)|"
     r"against (?:the )?(?:consensus|commonly|conventional)|"
     r"counter to (?:the )?(?:consensus|conventional|standard|received)|"
     r"argue(?:s|d)? against|push(?:es|ed)? back (?:on|against)|"
-    r"\bin fact\b|\byet\b(?!,? \w+ ago)|"  # "yet" but not "X years ago, yet ..."
+    r"\bin fact\b|"
     r"contrary to popular|differs from the standard|"
     r"尽管|与.{0,8}相反|挑战.{0,8}共识|反直觉|实际上|事实上|"
     r"反观|相反地)",
@@ -255,9 +261,21 @@ def _line_semantic_depth(line: str) -> int:
 
 
 def _classify_leaf_elements(leaf_body: str) -> dict[str, bool]:
-    """For a single leaf, return which `_INSIGHT_MIN` elements fire."""
+    """For a single leaf, return which `_INSIGHT_MIN` elements fire.
+
+    Greptile PR #30 round-3 follow-up (2026-05-26): `_DATE_RE` removed
+    from the forward-looking detector. `_DATE_RE` captures any year in
+    `20[2-9]\\d` (2020-2099), so a retrospective sentence like "In 2023,
+    the recession hit market valuations" was scoring as forward-looking
+    — inflating the count and masking genuine under-performance on the
+    element §3.2 was meant to surface. Only `_FORWARD_RE` (which uses
+    explicit forward markers like "by 20XX", "through 20XX", "expected
+    to", "looking ahead", "trajectory") drives the classification now.
+    `_DATE_RE` is retained at module level for callers that explicitly
+    need date detection (none currently).
+    """
     return {
-        "forward_looking": bool(_FORWARD_RE.search(leaf_body) or _DATE_RE.search(leaf_body)),
+        "forward_looking": bool(_FORWARD_RE.search(leaf_body)),
         "contrarian": bool(_CONTRARIAN_RE.search(leaf_body)),
         "quant": bool(_QUANT_RE.search(leaf_body)),
         "alternative": bool(_ALTERNATIVE_RE.search(leaf_body)),

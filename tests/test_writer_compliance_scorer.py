@@ -155,18 +155,64 @@ def test_classify_alternative_catches_expanded_idioms():
         assert _classify_leaf_elements(s)["alternative"], f"missed: {s!r}"
 
 
-def test_classify_contrarian_yet_word_scoped():
-    """The bare `yet` word fires contrarian when used as an adversative
-    ('yet the data shows X') but NOT when used as a temporal phrase
-    ('X happened, yet 5 years ago'). Pin the scope guard."""
-    # Adversative use — should fire.
-    adversative = "The model claims success, yet the data shows failure."
-    assert _classify_leaf_elements(adversative)["contrarian"]
-    # Temporal use — the regex's negative lookahead should block this.
-    # Test pins the current behavior; if it changes we want to know.
-    # (Note: this is a soft guard; not all temporal uses are caught.)
-    # The point is to verify the regex isn't INDISCRIMINATELY firing
-    # on every "yet" occurrence.
+def test_classify_contrarian_does_not_fire_on_bare_yet():
+    """Greptile PR #30 round-3 follow-up: the `\\byet\\b` pattern was
+    REMOVED from the contrarian regex. The previous negative-lookahead
+    `(?!,? \\w+ ago)` was logically inverted — it checked what came
+    AFTER 'yet', not before — so all the common non-contrarian uses
+    ('not yet', 'yet another', '5 years ago, yet the pattern...')
+    still matched, inflating contrarian leaf counts.
+
+    Pin: 'not yet' and 'yet another' must NOT fire contrarian. Genuine
+    contrarian framing must still fire via the other patterns (despite,
+    contrary to, argue against, in fact, etc.)."""
+    # Common non-contrarian uses that previously false-fired.
+    false_uses = [
+        "The data is not yet conclusive.",
+        "Yet another study confirms the trend.",
+        "Five years ago, yet the pattern continues today.",
+    ]
+    for s in false_uses:
+        assert not _classify_leaf_elements(s)["contrarian"], f"false positive: {s!r}"
+    # Genuine contrarian framing still fires via OTHER patterns.
+    real_contrarian = [
+        "Despite the standard reading, the data shows otherwise.",
+        "Critics argue against the consensus view.",
+        "In fact, the opposite holds.",
+        "Contrary to popular belief, the model predicts X.",
+    ]
+    for s in real_contrarian:
+        assert _classify_leaf_elements(s)["contrarian"], f"missed: {s!r}"
+
+
+def test_classify_forward_looking_does_not_fire_on_retrospective_date():
+    """Greptile PR #30 round-3 follow-up: `_DATE_RE` was REMOVED from
+    the forward-looking detector. Pre-fix, ANY year in 20XX (2020-2099)
+    would fire forward-looking, including retrospective sentences like
+    'In 2023, the recession hit market valuations.' This inflated the
+    most under-fired element's count and masked the genuine §3.2 gap.
+
+    Pin: retrospective date mentions must NOT fire forward-looking.
+    Genuine forward-looking phrases (by 20XX / through 20XX / looking
+    ahead / trajectory / etc.) must still fire via `_FORWARD_RE`."""
+    # Retrospective sentences with dates — must NOT fire forward-looking.
+    retrospective = [
+        "In 2023, the recession hit market valuations.",
+        "The 2022 dataset showed three patterns.",
+        "Released in 2024, the model achieved 80% accuracy.",
+        "Historical records from 2020 to 2024 reveal a cyclic pattern.",
+    ]
+    for s in retrospective:
+        assert not _classify_leaf_elements(s)["forward_looking"], f"false positive: {s!r}"
+    # Genuine forward-looking still fires.
+    forward = [
+        "By 2027, the cohort will likely expand.",
+        "Through 2030, the trend is expected to continue.",
+        "Looking ahead, three constraints will bind.",
+        "Over the next 5 years, several shifts will emerge.",
+    ]
+    for s in forward:
+        assert _classify_leaf_elements(s)["forward_looking"], f"missed: {s!r}"
 
 
 def test_split_into_leaves_flat_archetype_uses_h2():
