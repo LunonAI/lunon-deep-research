@@ -82,12 +82,14 @@ def test_collapses_doubled_whitespace_left_behind():
 def test_empty_input_returns_empty():
     out, stats = strip_capel_markers("")
     assert out == ""
-    # Wave 0 §11 expanded the stats dict with repair counters; pin the full shape.
+    # Wave 0 §11 + Wave 0.1 §11.7 stats dict shape — pin so drift-log
+    # consumers don't break silently on a future stats-shape change.
     assert stats == {
         "n_markers_stripped": 0,
         "n_violations": 0,
         "n_word_repairs": 0,
         "n_heading_repairs": 0,
+        "n_bracket_repairs": 0,
     }
 
 
@@ -365,9 +367,9 @@ def test_word_repair_does_not_run_without_markers():
 
 
 def test_stats_dict_contains_all_wave0_keys():
-    # The Wave 0 expansion adds `n_word_repairs` and `n_heading_repairs`
-    # to the stats dict. Pin all keys so drift-log consumers don't break
-    # silently on a future stats-shape change.
+    # Wave 0 §11 added `n_word_repairs` + `n_heading_repairs`; Wave 0.1
+    # §11.7 added `n_bracket_repairs`. Pin all keys so drift-log
+    # consumers don't break silently on a future stats-shape change.
     text = "<3>The<2>quick<1>fox<0>"
     _, stats = strip_capel_markers(text)
     assert set(stats.keys()) == {
@@ -375,4 +377,74 @@ def test_stats_dict_contains_all_wave0_keys():
         "n_violations",
         "n_word_repairs",
         "n_heading_repairs",
+        "n_bracket_repairs",
     }
+
+
+# ---- Wave 0.1 §11.7: footnote-bracket whitespace repair ----------------
+
+
+def test_footnote_bracket_trailing_space_repaired():
+    # Canonical id=91 smoke pattern: writer split `[^S1-1]` across CAPEL
+    # markers as `[^S1-1<N>]`, strip left `[^S1-1 ]`. Normalize's regex
+    # `\[\^([A-Za-z0-9._-]+)\]` rejects the trailing space, so 47 of 180
+    # markers were silently dropped + zero defs were parsed downstream.
+    text = "<5>see<4> [^S1-1<3>]<2> for<1> source<0>"
+    out, stats = strip_capel_markers(text)
+    assert "[^S1-1]" in out
+    assert "[^S1-1 ]" not in out
+    assert stats["n_bracket_repairs"] >= 1
+
+
+def test_footnote_bracket_internal_spaces_repaired():
+    # The more aggressive id=91 case: `[^ S8 -1 ]` (whitespace before AND
+    # after each piece of the token because the writer treated `S8`, `-`,
+    # `1` as three subword tokens with CAPEL markers between them).
+    text = "<10>cite<9> [^<8>S8<7>-<6>1<5>]<4> here<3> end<0>"
+    out, stats = strip_capel_markers(text)
+    assert "[^S8-1]" in out
+    assert "[^ " not in out
+    assert " ]" not in out or "[^" not in out  # no internal space in any bracket
+    assert stats["n_bracket_repairs"] >= 1
+
+
+def test_footnote_bracket_already_clean_not_counted():
+    # A well-formed `[^S1-3]` with no whitespace inside must NOT bump the
+    # repair counter — n_bracket_repairs measures BPE-corruption recovery,
+    # not every bracket the strip touches.
+    text = "<5>cite<4> [^S1-3]<3> for<2> details<1>.<0>"
+    out, stats = strip_capel_markers(text)
+    assert "[^S1-3]" in out
+    assert stats["n_bracket_repairs"] == 0
+
+
+def test_footnote_bracket_definition_line_also_repaired():
+    # Definition lines `[^S1-3]: source` carry the same bracket form as
+    # inline markers; if the writer subword-split the token there too,
+    # the definition would also be unparseable by `_DEFINITION_RE`
+    # (same token char class). Repair must clean both.
+    text = "<5>[^S1<4>-<3>3]<2>:<1> McKinsey 2025<0>"
+    out, stats = strip_capel_markers(text)
+    assert "[^S1-3]" in out
+    assert stats["n_bracket_repairs"] >= 1
+
+
+def test_footnote_bracket_repair_does_not_touch_non_footnote_brackets():
+    # Markdown link reference syntax like `[footnote text][1]` is NOT a
+    # caret-bracket footnote. The repair regex only matches `[^...]`,
+    # so the bracketed reference text stays untouched.
+    text = "<5>see<4> [link text][1]<3> and<2> footnote<1>.<0>"
+    out, stats = strip_capel_markers(text)
+    assert "[link text][1]" in out
+    assert stats["n_bracket_repairs"] == 0
+
+
+def test_footnote_bracket_repair_does_not_run_without_markers():
+    # The no-markers-equals-verbatim contract applies to bracket repair
+    # too — if no CAPEL markers were stripped, a `[^S1-1 ]` already in
+    # the source text stays as-is. (The bug only exists in the CAPEL
+    # output path, so the repair is gated on marker presence.)
+    text = "Pre-existing [^S1-1 ] in source text."
+    out, stats = strip_capel_markers(text)
+    assert out == text
+    assert stats["n_bracket_repairs"] == 0
