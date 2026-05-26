@@ -350,15 +350,27 @@ def _repair_word_fragments(text: str) -> tuple[str, int]:
         joined = a + b
         if len(joined) < 5:
             return f"{a} {b}"
-        # Consonant-start guard on the second piece (only when it's ≥3
-        # chars — 2-char suffixes like `ra` in `Lib ra` are too short
-        # to discriminate). BPE-fragmented suffixes (`orpio`, `oga`,
-        # `anon`, `arius`) typically start with a vowel because the
-        # subword split lands inside a syllable; standalone short
-        # English content words (`wore`, `ran`, `man`, `lit`, `set`)
-        # typically start with a consonant. Without this guard,
-        # `Mu wore` → `Muwore` (Saint Seiya proper noun + verb falsely
-        # joined).
+        # Consonant-start guard on the second piece, gated on ≥3-char
+        # length. BPE-fragmented suffixes (`orpio`, `oga`, `anon`,
+        # `arius`) typically start with a vowel because the subword
+        # split lands inside a syllable; standalone short English
+        # content words (`wore`, `ran`, `man`, `lit`, `set`) typically
+        # start with a consonant. Without this guard, `Mu wore` →
+        # `Muwore` (Saint Seiya proper noun + verb falsely joined).
+        #
+        # Why ≥3-char gate (Greptile PR #28 follow-up): 2-char suffixes
+        # bypass this guard unconditionally. The bypass is intentional
+        # and load-bearing — `Lib ra` → `Libra` requires it (`ra` is
+        # 2-char consonant-start, blocked if the guard fired). The
+        # bypass is safe in practice because the 2-char-consonant-start
+        # non-stopword vocabulary is vanishingly small in English (no
+        # `ns`, `rs`, `ts` etc. exist as standalone words; the
+        # stopword-eligible `we`, `me`, `he`, `be`, `do`, `go`, `no`,
+        # `so`, `to`, `by` are already blocked by the stopword check
+        # above). Synthetic false positives like `Cap nd` → `Capnd`
+        # remain theoretically possible but require a non-stopword
+        # 2-char consonant-start suffix that does not exist as a real
+        # English word — encountered only in adversarial inputs.
         if len(b) >= 3 and b[0] not in _VOWELS:
             return f"{a} {b}"
         n_repairs += 1
@@ -370,13 +382,15 @@ def _repair_word_fragments(text: str) -> tuple[str, int]:
         nonlocal n_repairs
         run = match.group(0)
         parts = run.split()
+        # Stopword filter — the regex's negative lookahead only blocks
+        # FIRST-piece stopwords; trailing-piece stopwords (e.g. `the` /
+        # `and` / `was` in middle or final position) still need to be
+        # caught here. The alphabetic-only / ≤5-char / lowercase-suffix
+        # properties Greptile flagged are already enforced by
+        # `_THREE_PLUS_RUN_RE` itself (first piece `[A-Za-z][a-z]{0,4}`,
+        # subsequent `[a-z]{1,5}`); the redundant guards were removed in
+        # the PR #28 Greptile follow-up.
         if any(p.lower() in _STOPWORDS for p in parts):
-            return run
-        if any(not p.isalpha() for p in parts):
-            return run
-        if any(len(p) > 5 for p in parts):
-            return run
-        if any(p[0].isupper() for p in parts[1:]):
             return run
         joined = "".join(parts)
         # Joined-length band [8, 12] is the empirical sweet spot for real
