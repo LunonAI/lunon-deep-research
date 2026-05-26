@@ -124,3 +124,20 @@ class PipelineState:
     # auto-suppressed `_DEDUP_RULE` for this task. Decision is task-level
     # (archetype + W9 read score), not per-section, so a single bool suffices.
     g_dedup_suppressed: bool = False
+    # Wave 1 §7.1 (2026-05-26): per-task count of specialist-call wall-
+    # clock timeouts the orchestrator's `_research_with_timeout` wrapper
+    # caught. Populated from `orchestrator.run` return dict (added in
+    # PR #26 reliability layer). Pre-Wave-1 the field lived only on the
+    # orchestrator's local return — never surfaced into drift telemetry,
+    # so dev4 / W13 analysers couldn't correlate timeout pressure with
+    # quality drift. 0 = clean run; > 0 = some specialist hit the
+    # `_SPECIALIST_TIMEOUT_S` cap and the orchestrator fell back to
+    # whatever partial content was available.
+    n_specialist_timeouts: int = 0
+    # Wave 1 §7.2 (2026-05-26): per-task footnote_normalize stats dict.
+    # Populated from FootnoteNormalizeOutput at end of pipeline; the
+    # `_persist_drift` writer adds a derived `inline_def_ratio` field
+    # before logging so analysers can spot "writer is making fresh marker
+    # per cite, no reuse" failure mode without computing the ratio every
+    # time downstream.
+    footnote_normalize_stats: dict = field(default_factory=dict)
