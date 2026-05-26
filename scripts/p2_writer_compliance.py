@@ -64,12 +64,21 @@ import re
 import sys
 from pathlib import Path
 
-# Import the per-archetype shape preset + insight distribution so this
-# scorer measures against the SAME thresholds the writer was prompted
-# with — single source of truth for both contract and audit.
+# Import the per-archetype shape accessor + insight distribution so
+# this scorer measures against the SAME thresholds the writer was
+# prompted with — single source of truth for both contract and audit.
+#
+# Greptile PR #30 round-4 follow-up (2026-05-26): import the canonical
+# `_bounds_for_archetype()` ACCESSOR instead of the raw
+# `_ARCHETYPE_OUTLINE_SHAPE` dict. Going through the accessor matters
+# because (a) it returns a defensive copy (mirrors the
+# `insight_distribution` mutation-safety contract), and (b) if the
+# accessor ever grows normalization / clamping logic the scorer
+# automatically tracks the writer's view rather than measuring against
+# raw unclamped values.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
-from deep_research.pipeline.architect import _ARCHETYPE_OUTLINE_SHAPE, _DEFAULT_OUTLINE_SHAPE  # noqa: E402
+from deep_research.pipeline.architect import _bounds_for_archetype  # noqa: E402
 from deep_research.writing_rules import insight_distribution  # noqa: E402
 
 # Footnote inline marker pattern — same shape as
@@ -345,8 +354,14 @@ def _score_insight_distribution(article: str, archetype: str) -> dict:
 
 
 def _score_outline_shape(article: str, archetype: str) -> dict:
-    """Outline-bound compliance (§1.2) — H2/H3/H4 counts vs per-archetype preset."""
-    bounds = _ARCHETYPE_OUTLINE_SHAPE.get(archetype, _DEFAULT_OUTLINE_SHAPE)
+    """Outline-bound compliance (§1.2) — H2/H3/H4 counts vs per-archetype preset.
+
+    Greptile PR #30 round-4 follow-up: routes through the canonical
+    `_bounds_for_archetype()` accessor instead of bypassing it with a
+    direct dict lookup. Guarantees the scorer measures against the
+    same bounds the writer was prompted with — single source of truth.
+    """
+    bounds = _bounds_for_archetype(archetype)
     counts = {2: 0, 3: 0, 4: 0}
     for m in _HEADING_RE.finditer(article):
         md_depth = len(m.group("hashes"))
