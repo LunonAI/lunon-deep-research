@@ -71,11 +71,19 @@ def test_research_with_timeout_kills_hung_specialist(monkeypatch):
     assert elapsed < 5.0, f"_research_with_timeout took {elapsed:.1f}s; should have surfaced near the 1.5s cap"
 
 
-def test_orchestrator_continues_after_specialist_timeout(monkeypatch):
+def test_orchestrator_continues_after_specialist_timeout(monkeypatch, capsys):
     """When one specialist hangs and times out, the orchestrator must
     complete the task (without that specialist's findings) — NOT raise
     an exception or stall the whole pipeline. This is the regression
-    fix for the 2026-05-25 CAPEL smoke incident."""
+    fix for the 2026-05-25 CAPEL smoke incident.
+
+    Greptile PR #26 round-3 follow-up (2026-05-26): also asserts the
+    main-loop timeout handler emits a `[orchestrator] main-loop role=X
+    TIMEOUT after Ns; skipping` line on stderr — symmetric with the
+    gap-fill handler. Pre-fix the main loop only appended to digest_parts
+    (which isn't real-time and may be compacted away by COMPACT_EVERY=8),
+    leaving an operator tailing stderr during a dev-run with no signal
+    that a specialist had timed out."""
     calls = {"hang": 0, "fast": 0}
 
     def fake_research(role, qlist, **kw):
@@ -121,6 +129,15 @@ def test_orchestrator_continues_after_specialist_timeout(monkeypatch):
     # Wall clock should be bounded — single hang timeout, not multiplied.
     # Allow generous slack (10s) for thread scheduling + healthy specialists' work.
     assert elapsed < 10.0, f"total elapsed {elapsed:.1f}s suggests multiple hangs were not bounded"
+
+    # Greptile PR #26 round-3 follow-up: stderr line must fire in real time
+    # for operator visibility. The digest entry alone is not sufficient
+    # because it's only visible after the run completes and may be
+    # compacted away by COMPACT_EVERY=8.
+    captured = capsys.readouterr()
+    assert "main-loop" in captured.err and "TIMEOUT" in captured.err and "horizon_scanner" in captured.err, (
+        f"main-loop timeout must emit a stderr line naming the hung role for operator visibility; got: {captured.err!r}"
+    )
 
 
 def test_orchestrator_run_returns_zero_timeouts_when_all_specialists_complete(monkeypatch):
