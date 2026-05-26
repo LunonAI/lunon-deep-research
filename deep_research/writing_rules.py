@@ -243,25 +243,49 @@ _INSIGHT_MIN = (
 # 2026-05-26 id=91 smoke showed that wasn't landing (forward-looking
 # 7× short, contrarian 1.77× over). Wave 2 mirrors to the user prompt
 # with explicit per-archetype targets the writer can self-check against.
+#
+# Wave 2 PR #30 self-review (gap #3 calibration, 2026-05-26): targets
+# CALIBRATED against the 10-doc Qianfan reference corpus via
+# `scripts/p2_writer_compliance.py` weighted-mean profile. Pre-fix
+# targets were reasoning-derived ("pick 30/20/20/20"); the Qianfan
+# corpus revealed several pre-fix targets were way off:
+#   - list-all: pre-fix said 30% forward-looking; Qianfan does 69%
+#   - explain-mech: pre-fix said 20% contrarian; Qianfan does 10%
+#   - trend: pre-fix said 15% contrarian; Qianfan does 2%
+# Wave 2 PR #30 targets are set to ≈80% of the observed Qianfan
+# weighted mean per element per archetype, so they're MEASURABLE
+# floors (writer can clear them with some variance) without
+# overspecifying. The compliance scorer (`p2_writer_compliance.py`)
+# uses these targets to compute per-element gap percentages on every
+# smoke output.
 _INSIGHT_DISTRIBUTION_DEFAULT = {
     "forward_looking_min": 30,
-    "contrarian_min": 20,
-    "quant_min": 20,
-    "alternative_min": 20,
+    "contrarian_min": 8,
+    "quant_min": 5,
+    "alternative_min": 30,
 }
 _INSIGHT_DISTRIBUTION_BY_ARCHETYPE: dict[str, dict[str, int]] = {
-    # Forward-looking-by-mission archetypes: bias (a) UP to ≥50% at the
-    # expense of (b) and (d). Keep (c) at ≥20% for quantified anchors.
-    "predict": {"forward_looking_min": 50, "contrarian_min": 15, "quant_min": 20, "alternative_min": 15},
-    "trend": {"forward_looking_min": 50, "contrarian_min": 15, "quant_min": 20, "alternative_min": 15},
-    "recommend": {"forward_looking_min": 50, "contrarian_min": 15, "quant_min": 20, "alternative_min": 15},
-    # Entity-enumerated archetypes: bias (d) UP to ≥30% (most leaves are
-    # inherently comparisons across the matrix). Keep (a) at ≥30% so the
-    # forward-looking gap doesn't reopen.
-    "list-all": {"forward_looking_min": 30, "contrarian_min": 20, "quant_min": 20, "alternative_min": 30},
-    "compare": {"forward_looking_min": 30, "contrarian_min": 20, "quant_min": 20, "alternative_min": 30},
-    # Default balanced distribution for explain-mechanism and unknowns.
-    "explain-mechanism": dict(_INSIGHT_DISTRIBUTION_DEFAULT),
+    # Forward-looking-by-mission archetypes. Qianfan trend (id=38)
+    # observed: fwd 58% / contr 2% / quant 3% / alt 7%. Predict and
+    # recommend extrapolated (no direct Qianfan corpus data) with
+    # slightly higher alt/contr for analytical depth.
+    "predict": {"forward_looking_min": 45, "contrarian_min": 5, "quant_min": 5, "alternative_min": 10},
+    "trend": {"forward_looking_min": 45, "contrarian_min": 1, "quant_min": 2, "alternative_min": 5},
+    "recommend": {"forward_looking_min": 40, "contrarian_min": 5, "quant_min": 5, "alternative_min": 15},
+    # Entity-enumerated archetypes. Qianfan list-all (id=8, 14, 44, 91)
+    # weighted mean: fwd 69% / contr 13% / quant 21% / alt 59%. The
+    # forward-looking rate is SURPRISINGLY HIGH for an enumeration
+    # archetype — Qianfan entity profiles consistently project trends
+    # ("by 2027 this lineage will...") rather than purely cataloguing.
+    "list-all": {"forward_looking_min": 55, "contrarian_min": 10, "quant_min": 17, "alternative_min": 47},
+    # compare: no direct Qianfan corpus data; use list-all calibration
+    # as the closest neighbor (both are entity-table archetypes).
+    "compare": {"forward_looking_min": 50, "contrarian_min": 10, "quant_min": 17, "alternative_min": 47},
+    # Deep analytical archetype. Qianfan explain-mech (id=20, 37, 56,
+    # 89) weighted mean: fwd 35% / contr 10% / quant 2% / alt 53%.
+    # Notably LOW on quant/contrarian (Qianfan explains with
+    # alternatives + forward-looking, not contrarian framing).
+    "explain-mechanism": {"forward_looking_min": 28, "contrarian_min": 8, "quant_min": 1, "alternative_min": 42},
 }
 
 
@@ -440,6 +464,7 @@ def writer_system(
     *,
     task_id: int | None = None,
     suppress_dedup: bool = False,
+    outline_shape: dict | None = None,
 ) -> str:
     """Assemble the writer system prompt.
 
@@ -448,6 +473,17 @@ def writer_system(
     >= 0.50 AND task_id supplied), `_DEDUP_RULE` is omitted. The W9
     cross-reference identifies id=56 as the canonical fragile-density
     case; under the current rule no other W9 task triggers G.
+
+    Wave 2 §1.2 follow-up (2026-05-26 PR #30 self-review): `outline_shape`
+    accepts the per-archetype outline bounds dict from
+    `pipeline.architect._bounds_for_archetype(archetype)`. When provided
+    the STRUCTURAL CAPS block + HEADING-HASH MAPPING block interpolate
+    the per-archetype `sub_min-sub_max` and the H4-allowed status,
+    eliminating the system-prompt-vs-user-prompt contradiction the
+    Wave 2 PR otherwise carried (system said "3-6 subsections" while
+    user prompt said "0-2" for list-all). Falls back to the historical
+    3-6 / 4-level defaults when `outline_shape=None` for back-compat
+    with any caller that doesn't yet thread the bounds through.
     """
     ceil = length_ceiling(domain)
 
@@ -476,6 +512,72 @@ def writer_system(
     middle_rules.extend([_INSIGHT_MIN, CLEANING_RESISTANT_RULE, _SECTION_OPENING_RECAP_RULE])
     middle_block = "\n\n".join(middle_rules)
 
+    # Wave 2 §1.2 follow-up: interpolate per-archetype outline bounds into
+    # STRUCTURAL CAPS + HEADING-HASH MAPPING. Falls back to the historical
+    # 3-6 / 4-level defaults when `outline_shape=None`.
+    sub_min = (outline_shape or {}).get("sub_min", 3)
+    sub_max = (outline_shape or {}).get("sub_max", 6)
+    seed_max = (outline_shape or {}).get("seed_max", 4)
+    if seed_max == 0:
+        # Flat archetypes (list-all / compare): NO H4 leaves, NO `####`
+        # heading depth — outline collapses to article title + flat H2
+        # body sections with optional H3 cross-cutting subsections.
+        structural_caps_block = (
+            f"STRUCTURAL CAPS — HARD (per-archetype, archetype=`{archetype}`): "
+            f"this is a FLAT outline. Use {sub_min}-{sub_max} subsections per "
+            f"major section (most flat archetypes use 0 — every body section "
+            f"stands on its own). NEVER emit H4 (`####`) headings — this "
+            f"archetype's outline preset disallows H4 leaves per the "
+            f"Wave-2 Qianfan-corpus-calibrated shape (Qianfan id=91 / id=14 "
+            f"/ id=8 use 0 H4). Maximum heading depth = 3 (e.g. `# Title`, "
+            f"`## N`, `### N.N`). Skip the H3 tier rather than break these "
+            f"limits."
+        )
+        heading_hash_block = (
+            f"HEADING-HASH MAPPING — STRICT (per-archetype, flat):\n"
+            f"- `# Title` (one `#`) — the REPORT TITLE only. Exactly ONE per "
+            f"  article. Never numbered.\n"
+            f"- `## 1 Section name` (two `##`) — top-level section. "
+            f"  Single-digit number (1, 2, 3, ...).\n"
+            f"- `### 1.1 Sub-section name` (three `###`) — sub-section "
+            f"  (use sparingly for flat archetypes; most sections do NOT "
+            f"  need H3 subdivision).\n"
+            f"- `#### ...` (four `####`) — FORBIDDEN for this archetype. "
+            f"  Do NOT emit H4 leaves.\n"
+            f"FORBIDDEN: emitting `# 1. Introduction` or `# 1.2 Bronze Saints` "
+            f"— a numbered chapter is NEVER an H1. Use `## 1 Introduction` "
+            f"and `### 1.2 Bronze Saints` instead. Re-using `#` after the "
+            f"title is the single most common heading bug; do not do it. "
+            f"Also FORBIDDEN: any `####` heading on this archetype."
+        )
+    else:
+        # Deep archetypes (explain-mechanism / predict / trend / recommend):
+        # H4 leaves are the leaf tier, one per depth_seed.
+        structural_caps_block = (
+            f"STRUCTURAL CAPS — HARD (per-archetype, archetype=`{archetype}`): "
+            f"use {sub_min}-{sub_max} subsections per major section "
+            f"(aligned to the per-archetype outline preset, calibrated "
+            f"against the Qianfan corpus). Never exceed 4 levels of heading "
+            f"depth (`# Title`, `## N`, `### N.N`, `#### N.N.N` — never "
+            f"`##### N.N.N.N`). Skip a subsection rather than break these "
+            f"limits."
+        )
+        heading_hash_block = (
+            f"HEADING-HASH MAPPING — STRICT (per-archetype, hierarchical):\n"
+            f"- `# Title` (one `#`) — the REPORT TITLE only. Exactly ONE per "
+            f"  article. Never numbered.\n"
+            f"- `## 1 Section name` (two `##`) — top-level section. "
+            f"  Single-digit number (1, 2, 3, ...).\n"
+            f"- `### 1.1 Sub-section name` (three `###`) — sub-section. "
+            f"  Two-dot number (1.1, 1.2, ...).\n"
+            f"- `#### 1.1.1 Sub-sub-section name` (four `####`) — H4 leaf "
+            f"  (maximum depth). Three-dot number. One per depth_seed.\n"
+            f"FORBIDDEN: emitting `# 1. Introduction` or `# 1.2 Bronze Saints` "
+            f"— a numbered chapter is NEVER an H1. Use `## 1 Introduction` "
+            f"and `### 1.2 Bronze Saints` instead. Re-using `#` after the "
+            f"title is the single most common heading bug; do not do it."
+        )
+
     return (
         f"You are an elite research-report writer. Language: {language}. "
         f"Write partner-grade analytical prose (not bullet dumps), with "
@@ -497,27 +599,11 @@ def writer_system(
         f"process, your methodology, your evidence sourcing, or your writing "
         f"approach. Output ONLY the report content itself. The reader does "
         f"not see (and is not told) how the report was produced."
-        f"\n\nSTRUCTURAL CAPS — HARD: use 3-6 subsections per major section "
-        f"(post-#1: aligned to the architect's 3-6 subsection bound, which "
-        f"matches the high-scoring-corpus mean of ~4); never exceed 3 levels "
-        f"of heading depth (e.g. 1, 1.1, 1.1.1 — never 1.1.1.1). Skip a "
-        f"subsection rather than break these limits."
+        f"\n\n{structural_caps_block}"
         # Internal label (P2-Option-A-#2) intentionally kept OUT of the
         # prompt string below — earlier draft had it inline and the LLM
         # might have treated it as part of the spec or echoed it back.
-        f"\n\nHEADING-HASH MAPPING — STRICT:\n"
-        f"- `# Title` (one `#`) — the REPORT TITLE only. Exactly ONE per "
-        f"  article. Never numbered.\n"
-        f"- `## 1 Section name` (two `##`) — top-level section. Single-digit "
-        f"  number (1, 2, 3, ...).\n"
-        f"- `### 1.1 Sub-section name` (three `###`) — sub-section. Two-dot "
-        f"  number (1.1, 1.2, ...).\n"
-        f"- `#### 1.1.1 Sub-sub-section name` (four `####`) — sub-sub-section "
-        f"  (maximum depth). Three-dot number.\n"
-        f"FORBIDDEN: emitting `# 1. Introduction` or `# 1.2 Bronze Saints` — "
-        f"a numbered chapter is NEVER an H1. Use `## 1 Introduction` and "
-        f"`### 1.2 Bronze Saints` instead. Re-using `#` after the title is "
-        f"the single most common heading bug; do not do it."
+        f"\n\n{heading_hash_block}"
         f"\n\n{opening_directive()}\n\n{middle_block}"
         f"\n\nLENGTH TARGET — SOFT: aim for ≈{ceil} words total ({int(ceil * 0.7)}"
         f"-{int(ceil * 1.4)} acceptable range; this is a calibration band, NOT "

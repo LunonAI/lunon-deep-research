@@ -67,9 +67,7 @@ def test_v2_mandates_prose_before_table(monkeypatch):
     with no prose lead. v2 must explicitly mandate prose-paragraph-then-table."""
     sys = _sys(monkeypatch)
     body = sys.lower()
-    assert "prose-paragraph-then-table" in body or (
-        "prose paragraph" in body and "before any data block" in body
-    )
+    assert "prose-paragraph-then-table" in body or ("prose paragraph" in body and "before any data block" in body)
 
 
 def test_v2_forbids_table_first_openings(monkeypatch):
@@ -100,8 +98,4 @@ def test_v2_template_demonstrates_prose_then_table(monkeypatch):
     concrete examples — not just abstractly mandate it. The writer copies
     patterns it sees in the prompt; abstract mandates are weaker."""
     sys = _sys(monkeypatch)
-    assert (
-        "table below records" in sys
-        or "matrix below" in sys
-        or "table records" in sys
-    )
+    assert "table below records" in sys or "matrix below" in sys or "table records" in sys

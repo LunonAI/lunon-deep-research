@@ -94,30 +94,68 @@ _CORRUPT_HEADING_RE = re.compile(r"^#+[ \t]+\d+[ \t]+\.[ \t]+\d+", re.MULTILINE)
 # detector returns True if the leaf contains at least one phrase matching
 # its element. False positives are bounded by the heuristic nature —
 # this scorer is iteration feedback, not a judge.
+#
+# Wave 2 PR #30 self-review (gap #4): regex coverage expanded after
+# manual review of Qianfan corpus idioms. Forward-looking gains
+# "looking ahead" / "trajectory" / "going forward" / "anticipate" /
+# ZH "前景" / "展望". Quant tightened — bare "range" was too broad
+# (matches "wide range of topics" etc.); replaced with scoped patterns
+# like "in the range of N" + "range of N-N". Alternative gains
+# "compared to" / "as opposed to" / "rather than" / ZH "对比" /
+# "相比". Contrarian gains "yet" (when scoped) / "in fact" / "argue
+# against" / ZH "实际上" / "事实上".
 _DATE_RE = re.compile(
     r"\b(20[2-9]\d|in \d+ years|by Q[1-4]|H[12] 20\d\d|"
     r"\d{4}[-–]\d{2,4}|未来|到 ?20\d\d|20\d\d ?年)\b"
 )
 _FORWARD_RE = re.compile(
     r"(by 20\d\d|through 20\d\d|likely to|expected to|projected to|"
-    r"will (?:likely|probably)?|forecast|predict|未来|到20\d\d|预计|"
-    r"by H[12] 20\d\d|in the next \d+ years)",
+    r"will (?:likely|probably|continue|see|need|require)|"
+    r"forecast|predict|anticipate|looking ahead|going forward|"
+    r"in the (?:next|coming) \d+ years|over the next \d+ years|"
+    r"trajectory|outlook|near-term|long-term horizon|"
+    r"by H[12] 20\d\d|"
+    r"未来|到 ?20\d\d|预计|展望|前景|趋势|发展方向)",
     re.IGNORECASE,
 )
 _CONTRARIAN_RE = re.compile(
-    r"(despite|contrary to|challenges? the (?:view|consensus|standard|prevailing)|"
-    r"against (?:the )?(?:consensus|commonly)|counter to (?:the )?(?:consensus|conventional|standard)|"
-    r"尽管|与.{0,8}相反|挑战.{0,8}共识|反直觉)",
+    r"(\bdespite\b|\bcontrary to\b|"
+    r"challenges? the (?:view|consensus|standard|prevailing|conventional)|"
+    r"against (?:the )?(?:consensus|commonly|conventional)|"
+    r"counter to (?:the )?(?:consensus|conventional|standard|received)|"
+    r"argue(?:s|d)? against|push(?:es|ed)? back (?:on|against)|"
+    r"\bin fact\b|\byet\b(?!,? \w+ ago)|"  # "yet" but not "X years ago, yet ..."
+    r"contrary to popular|differs from the standard|"
+    r"尽管|与.{0,8}相反|挑战.{0,8}共识|反直觉|实际上|事实上|"
+    r"反观|相反地)",
     re.IGNORECASE,
 )
 _QUANT_RE = re.compile(
-    r"(±|\+/-|range|区间|置信|confidence|\d+%\s*[-–]\s*\d+%|\d+\s*[-–]\s*\d+x|\d+-\d+%)",
+    r"(±|\+/-|"
+    r"in the range of \d+|"  # tighter than bare "range"
+    r"\d+\s*[-–]\s*\d+\s*(?:%|×|x|percent)|"  # "60-75%" or "2-5x"
+    r"range of \d+[-–]\d+|"
+    r"\d+%\s*[-–]\s*\d+%|"
+    r"\d+-\d+%|"
+    r"confidence interval|"
+    r"credible interval|"
+    r"\d+\s*(?:to|-)\s*\d+\s*(?:hour|day|week|month|year)|"
+    r"approximately \d+|roughly \d+|"
+    r"on the order of \d+|"
+    r"区间|置信|大约 ?\d+)",
     re.IGNORECASE,
 )
 _ALTERNATIVE_RE = re.compile(
-    r"(alternative(?:ly)?|whereas|however|on the other hand|by contrast|conversely|"
-    r"instead|in contrast|trade-?off|versus|vs\.?\s|另一种|另一方面|然而|相比之下|相较|"
-    r"相对而言|与之相对|替代方案|相反|不同于|反观|权衡)",
+    r"(\balternative(?:ly|s)?\b|"
+    r"\bwhereas\b|\bhowever\b|\bon the other hand\b|"
+    r"\bby contrast\b|\bin contrast\b|\bconversely\b|"
+    r"\binstead of\b|\brather than\b|"
+    r"\bcompared (?:to|with)\b|\bas opposed to\b|"
+    r"\btrade-?off\b|"
+    r"\bversus\b|\bvs\.?\s|"
+    r"另一种|另一方面|然而|相比之下|相较|相比|对比|"
+    r"相对而言|与之相对|替代方案|相反|不同于|反观|权衡|"
+    r"取舍|不如|优于|劣于|胜过)",
     re.IGNORECASE,
 )
 
@@ -125,29 +163,52 @@ _ALTERNATIVE_RE = re.compile(
 def _split_into_leaves(article: str, archetype: str) -> list[str]:
     """Split article into per-leaf chunks for element-distribution scoring.
 
-    Deep-hierarchy archetypes (explain-mech / predict / trend / recommend):
-    leaves are H4 sections (`#### ...`).
-    Flat archetypes (list-all / compare): leaves are H2 body sections
-    (`## N Title`) since Wave 2 §1.2 dropped H4 for these archetypes.
+    Leaf detection is ADAPTIVE per article: the leaf tier is the
+    DEEPEST observed semantic heading depth in the article (capped at
+    the archetype's expected leaf depth — flat archetypes use H2 as
+    the cap; deep archetypes allow up to H4). This handles the
+    Qianfan-vs-Lunon convention mismatch:
+      - Qianfan id=56 (explain-mech) tops out at H3 — leaves are H3
+      - Our Lunon explain-mech may use H4 — leaves are H4
+      - Qianfan id=91 (list-all) tops out at H2 — leaves are H2
+      - Our Lunon list-all may use H4 (pre-Wave-2) or H2 (post-Wave-2)
+
+    Wave 2 PR #30 self-review (gap #3 corpus calibration): without the
+    adaptive depth, Qianfan corpus articles measured zero leaves
+    (because we were looking for H4 but they only have H3), making
+    per-archetype distribution-target calibration impossible.
 
     Returns the body text of each leaf, in document order. Excludes
     the article opening (pre-§1 frame) and the References block.
     """
     deep_archetypes = {"explain-mechanism", "predict", "trend", "recommend"}
     is_deep = archetype in deep_archetypes
-    leaf_prefix = "####" if is_deep else "##"
+    cap_depth = 4 if is_deep else 2
+    # First pass: find the deepest semantic depth in the article (capped).
+    observed_max = 0
+    for line in article.splitlines():
+        if re.match(r"^[ \t]*#+[ \t]+\d*\.?[ \t]*References?\b", line, re.IGNORECASE):
+            break
+        if re.match(r"^[ \t]*\d+(?:\.\d+){0,4}\.?[ \t]+References?\b", line, re.IGNORECASE):
+            break
+        d = _line_semantic_depth(line)
+        if d:
+            observed_max = max(observed_max, d)
+    # Leaf depth = min(observed_max, cap). If observed_max < 2 (article
+    # had no real headings), fall back to depth 2 so the splitter
+    # doesn't degenerately treat the entire article as one leaf.
+    leaf_depth = min(observed_max, cap_depth) if observed_max >= 2 else 2
+
     leaves: list[str] = []
     current_lines: list[str] = []
     in_leaf = False
     for line in article.splitlines():
-        # Stop at References block — leaves don't extend past it.
-        # Pattern allows optional dotted numbering between `#+` and
-        # `References` (e.g. `## 3 References` or `## 29 References`)
-        # mirroring `footnote_normalize._WRITER_REFS_SECTION_RE`.
         if re.match(r"^[ \t]*#+[ \t]+\d*\.?[ \t]*References?\b", line, re.IGNORECASE):
             break
-        stripped = line.lstrip()
-        if stripped.startswith(leaf_prefix + " ") and not stripped.startswith(leaf_prefix + "#"):
+        if re.match(r"^[ \t]*\d+(?:\.\d+){0,4}\.?[ \t]+References?\b", line, re.IGNORECASE):
+            break
+        depth = _line_semantic_depth(line)
+        if depth == leaf_depth:
             # New leaf heading boundary — flush prior leaf, start new.
             if in_leaf and current_lines:
                 leaves.append("\n".join(current_lines))
@@ -159,6 +220,26 @@ def _split_into_leaves(article: str, archetype: str) -> list[str]:
     if in_leaf and current_lines:
         leaves.append("\n".join(current_lines))
     return leaves
+
+
+def _line_semantic_depth(line: str) -> int:
+    """Derive semantic heading depth for a line, handling both markdown
+    (`## Foo`) and bare-numbered (`1.1 Foo`) conventions.
+
+    Returns 0 for non-heading lines, else depth in [1, 4+].
+    Bare-numbered headings use `dot_count + 1` (Qianfan convention).
+    Hybrid `## 1.1.1 Foo` returns `max(hash_depth, dot_count + 1)`.
+    """
+    md_match = re.match(r"^[ \t]*(#{1,6})[ \t]+(.*)$", line)
+    md_depth = len(md_match.group(1)) if md_match else 0
+    rest = md_match.group(2) if md_match else line.lstrip()
+    num_match = re.match(r"^(\d+(?:\.\d+){0,4})\.?[ \t]+\S", rest)
+    num_depth = (num_match.group(1).count(".") + 1) if num_match else 0
+    if md_depth == 0 and num_depth == 0:
+        return 0
+    if md_depth == 0:
+        return num_depth
+    return max(md_depth, num_depth)
 
 
 def _classify_leaf_elements(leaf_body: str) -> dict[str, bool]:
