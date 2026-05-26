@@ -145,6 +145,65 @@ def test_classify_contrarian_catches_expanded_idioms():
         assert _classify_leaf_elements(s)["contrarian"], f"missed: {s!r}"
 
 
+def test_classify_alternative_does_not_fire_on_bare_however():
+    """Greptile PR #30 round-7 follow-up: `\\bhowever\\b` was REMOVED
+    from the alternative regex. The bare word is a high-frequency
+    discourse connector in analytical prose ('This approach is
+    effective; however, it has one drawback') that does NOT signal a
+    named-alternative comparison. Over-counting inflates
+    `per_element_rate_pct['alternative']` and masks genuine under-
+    performance — same problem `\\byet\\b` was removed for in round-3.
+
+    Pin: bare 'however' must NOT fire alternative; genuine named-
+    alternative idioms (whereas, on the other hand, compared to, etc.)
+    must still fire via the other patterns."""
+    # Common discourse-connector uses of "however" — must NOT fire.
+    false_positives = [
+        "This approach is effective; however, it has one drawback.",
+        "The results were positive. However, the sample size was small.",
+        "However many entries the table has, the schema applies.",
+    ]
+    for s in false_positives:
+        assert not _classify_leaf_elements(s)["alternative"], f"false positive: {s!r}"
+    # Genuine named-alternative still fires via other patterns.
+    real_alternatives = [
+        "Whereas Method A optimises for speed, Method B optimises for accuracy.",
+        "On the other hand, the alternative model handles edge cases better.",
+        "Compared to the consensus approach, this method uses fewer parameters.",
+        "Rather than the symmetric case, the asymmetric one requires...",
+    ]
+    for s in real_alternatives:
+        assert _classify_leaf_elements(s)["alternative"], f"missed: {s!r}"
+
+
+def test_score_outline_shape_stops_at_references_section():
+    """Greptile PR #30 round-7 follow-up: `_score_outline_shape` now
+    bounds its heading scan at the References boundary, matching the
+    stop semantics of `_split_into_leaves`. Without the guard, headings
+    inside the References block (or any post-refs appendix) would
+    pollute the per-archetype outline-shape counts.
+
+    Pin: a numbered References heading (`## 15 References`) + headings
+    AFTER it must NOT count toward rendered_h2 / rendered_h3 / etc."""
+    article = (
+        "# T\n\n" + "\n\n".join(f"## {i + 1} Section" for i in range(10)) + "\n\n## 15 References\n\n"
+        # These post-refs headings must NOT be counted.
+        "## 16 Appendix A\n\n"
+        "## 17 Appendix B\n\n"
+        "### 17.1 Sub-appendix\n"
+    )
+    scores = _score_outline_shape(article, "explain-mechanism")
+    # 10 real H2 sections; the post-refs appendix headings + References
+    # itself must NOT inflate the count.
+    assert scores["rendered_h2"] == 10, (
+        f"References-stop guard didn't bound the scan: rendered_h2={scores['rendered_h2']}"
+    )
+    # Post-refs H3 sub-appendix must also not count.
+    assert scores["rendered_h3"] == 0, (
+        f"Sub-appendix H3 leaked past References stop: rendered_h3={scores['rendered_h3']}"
+    )
+
+
 def test_classify_alternative_catches_expanded_idioms():
     """Pre-fix regex caught 'whereas' / 'however' but missed common
     comparative idioms like 'compared to' / 'as opposed to' / 'rather

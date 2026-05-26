@@ -95,6 +95,20 @@ _HEADING_RE = re.compile(r"^(?P<hashes>#+)[ \t]+(?P<num>\d+(?:\.\d+){0,5})?\.?[ 
 # with spaces around dots. Should match 0 lines post-Wave-0.
 _CORRUPT_HEADING_RE = re.compile(r"^#+[ \t]+\d+[ \t]+\.[ \t]+\d+", re.MULTILINE)
 
+# Greptile PR #30 round-7 follow-up (2026-05-26): shared References-stop
+# regex used by `_score_outline_shape` and `_split_into_leaves` so both
+# functions stop counting / splitting at the canonical References
+# heading boundary. Mirrors the same pattern footnote_normalize uses
+# for its writer-emitted-refs strip. Without this guard,
+# `_score_outline_shape` would count headings inside the References
+# block (or any appendix past it) against the per-archetype outline
+# bounds — inflating h2/h3 totals when an article has a numbered
+# appendix like `## 15 References`.
+_REF_STOP_RE = re.compile(
+    r"^[ \t]*#+[ \t]+\d*\.?[ \t]*References?\b",
+    re.IGNORECASE | re.MULTILINE,
+)
+
 
 # `_INSIGHT_MIN` element detectors — regex heuristics derived from the
 # rule's exemplar phrases + the existing
@@ -169,9 +183,19 @@ _QUANT_RE = re.compile(
     re.IGNORECASE,
 )
 _ALTERNATIVE_RE = re.compile(
+    # Greptile PR #30 round-7 follow-up (2026-05-26): `\bhowever\b` and
+    # `\bin contrast\b` removed. `however` is a high-frequency discourse
+    # connector in analytical prose ("This approach is effective;
+    # however, it has one drawback") that does NOT specifically signal
+    # a named-alternative comparison; over-counting inflates the
+    # alternative-element rate and masks genuine under-performance —
+    # same problem `\byet\b` was removed for in round-3. The other
+    # patterns (whereas, on the other hand, by contrast, alternatively,
+    # rather than, instead of, conversely, etc.) cover the intent
+    # without the false-positive risk.
     r"(\balternative(?:ly|s)?\b|"
-    r"\bwhereas\b|\bhowever\b|\bon the other hand\b|"
-    r"\bby contrast\b|\bin contrast\b|\bconversely\b|"
+    r"\bwhereas\b|\bon the other hand\b|"
+    r"\bby contrast\b|\bconversely\b|"
     r"\binstead of\b|\brather than\b|"
     r"\bcompared (?:to|with)\b|\bas opposed to\b|"
     r"\btrade-?off\b|"
@@ -372,7 +396,13 @@ def _score_outline_shape(article: str, archetype: str) -> dict:
     """
     bounds = _bounds_for_archetype(archetype)
     counts = {2: 0, 3: 0, 4: 0}
-    for m in _HEADING_RE.finditer(article):
+    # Greptile PR #30 round-7 follow-up: bound the scan at the
+    # References heading so the outline shape isn't polluted by
+    # headings inside the refs block or any post-refs appendix
+    # (matching the stop semantics of `_split_into_leaves`).
+    ref_stop = _REF_STOP_RE.search(article)
+    scan_text = article[: ref_stop.start()] if ref_stop else article
+    for m in _HEADING_RE.finditer(scan_text):
         md_depth = len(m.group("hashes"))
         num = m.group("num")
         num_depth = (num.count(".") + 1) if num else 0
