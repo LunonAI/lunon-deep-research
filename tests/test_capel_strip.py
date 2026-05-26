@@ -8,6 +8,9 @@ Covers:
   (HTML-ish tags, comparison `<` operators).
 - Empty / None-ish input fail-soft.
 - Stats accounting.
+- Wave 0 §11 (2026-05-26): heading-number repair + word-fragment repair
+  safety-net passes that catch BPE-subword splits the writer leaks past
+  the strengthened CAPEL directive.
 """
 
 from deep_research.pipeline._capel_strip import strip_capel_markers
@@ -79,7 +82,13 @@ def test_collapses_doubled_whitespace_left_behind():
 def test_empty_input_returns_empty():
     out, stats = strip_capel_markers("")
     assert out == ""
-    assert stats == {"n_markers_stripped": 0, "n_violations": 0}
+    # Wave 0 §11 expanded the stats dict with repair counters; pin the full shape.
+    assert stats == {
+        "n_markers_stripped": 0,
+        "n_violations": 0,
+        "n_word_repairs": 0,
+        "n_heading_repairs": 0,
+    }
 
 
 def test_no_markers_returns_unchanged_text_with_zero_stats():
@@ -131,3 +140,239 @@ def test_newlines_preserved_through_strip():
     text = "Heading\n<5>line<4>one\n\n<3>line<2>two<1>here<0>"
     out, _ = strip_capel_markers(text)
     assert "\n\n" in out  # paragraph break survives
+
+
+# ---- Wave 0 §11: heading-number repair ----------------------------------
+
+
+def test_heading_dot_number_two_level_repaired():
+    # `## 4 . 1` (writer split the dotted number across CAPEL markers) →
+    # `## 4.1`. The repair must trigger only after markers were stripped
+    # so we route through a real CAPEL strip.
+    text = "<5>##<4> 4<3> .<2> 1<1> Section<0>"
+    out, stats = strip_capel_markers(text)
+    assert "## 4.1 Section" in out
+    assert stats["n_heading_repairs"] >= 1
+
+
+def test_heading_dot_number_three_level_repaired():
+    # `## 4 . 1 . 1` → `## 4.1.1`. Multi-pass loop required because a
+    # single pass `(\d) \. (\d)` would rewrite to `4.1 . 1` and need
+    # another iteration.
+    text = "<7>##<6> 4<5> .<4> 1<3> .<2> 1<1> Sub<0>"
+    out, stats = strip_capel_markers(text)
+    assert "## 4.1.1 Sub" in out
+    assert stats["n_heading_repairs"] >= 2
+
+
+def test_heading_dot_repair_only_touches_heading_lines():
+    # Prose like "section 4 . 1 . 1" (rare but legal in citation patterns)
+    # MUST NOT be silently rewritten — the heading-line constraint
+    # (`^#+\s+`) is the precision guard.
+    text = "<10>This<9> is<8> section<7> 4<6> .<5> 1<4> in<3> our<2> paper<1>.<0>"
+    out, stats = strip_capel_markers(text)
+    # The prose form survives intact (note: the word-fragment repair
+    # might not run since the tokens aren't subword-shaped; what matters
+    # is the heading repair didn't fire on this prose).
+    assert "4 . 1" in out
+    assert stats["n_heading_repairs"] == 0
+
+
+def test_heading_dot_repair_no_trigger_without_markers():
+    # Input with no CAPEL markers MUST be returned verbatim — the repair
+    # runs only when markers were actually stripped. This protects code
+    # blocks or quoted text that legitimately contain `## 4 . 1`.
+    text = "## 4 . 1 Already-spaced heading"
+    out, stats = strip_capel_markers(text)
+    assert out == text
+    assert stats["n_heading_repairs"] == 0
+
+
+# ---- Wave 0 §11: word-fragment repair -----------------------------------
+
+
+def test_three_fragment_proper_noun_run_repaired():
+    # The id=91 smoke canonical example: `Sagittarius` landed as `Sag itt
+    # arius`. Three-tier rule should rejoin.
+    text = "<5>The<4> Sag<3> itt<2> arius<1> Cloth<0>"
+    out, stats = strip_capel_markers(text)
+    assert "Sagittarius" in out
+    assert "Sag itt arius" not in out
+    assert stats["n_word_repairs"] >= 1
+
+
+def test_three_fragment_lowercase_content_word_repaired():
+    # `ass ault ist` → `assaultist`. All lowercase, three short pieces,
+    # none in stopwords, joined length 10 — three-tier rule should fire.
+    text = "<5>The<4> ass<3> ault<2> ist<1> struck<0>"
+    out, stats = strip_capel_markers(text)
+    assert "assaultist" in out
+    assert stats["n_word_repairs"] >= 1
+
+
+def test_three_fragment_mixed_case_first_letter_repaired():
+    # `A ldebar an` → `Aldebaran`. First piece is 1-char capitalized,
+    # second 6 chars (over threshold for individual piece but the rule
+    # allows up to 5 per piece — `ldebar` is 6 so this would not match
+    # the 3+ rule. This test pins the boundary: 6-char middle pieces
+    # are NOT repaired, leaving them as-is. We expect no repair here.
+    text = "<5>The<4> A<3> ldebar<2> an<1> star<0>"
+    out, _ = strip_capel_markers(text)
+    # The repair MUST NOT fire because a 6-char middle piece exceeds the
+    # 5-char-per-fragment limit. Better to leave fragmented than to
+    # falsely rejoin something that may not be a word.
+    assert "A ldebar an" in out
+
+
+def test_three_fragment_run_blocked_by_stopword():
+    # `the cat sat` — three short alphabetic adjacent tokens but `the`
+    # and `sat` are stopwords. The repair MUST NOT fire.
+    text = "<5>So<4> the<3> cat<2> sat<1> here<0>"
+    out, stats = strip_capel_markers(text)
+    assert "the cat sat" in out
+    assert stats["n_word_repairs"] == 0
+
+
+def test_three_fragment_run_blocked_by_short_joined_length():
+    # `a b c` — three single-char tokens. Joined "abc" is only 3 chars,
+    # well below the 8-char "this is a real word" threshold. Plus "a" is
+    # a stopword. MUST NOT fire.
+    text = "<5>x<4> a<3> b<2> c<1> y<0>"
+    out, stats = strip_capel_markers(text)
+    assert "a b c" in out
+    assert stats["n_word_repairs"] == 0
+
+
+def test_two_fragment_capital_lowercase_short_first_repaired():
+    # `Sc orpio` → `Scorpio`. First piece 2-char capitalized (≤2 BPE-shape
+    # signature), second piece 5-char lowercase, neither stopword, joined
+    # 7 chars. Two-tier rule should fire.
+    text = "<5>The<4> Sc<3> orpio<2> sign<1> rules<0>"
+    out, stats = strip_capel_markers(text)
+    assert "Scorpio" in out
+    assert stats["n_word_repairs"] >= 1
+
+
+def test_two_fragment_capital_lowercase_short_second_repaired():
+    # `Lib ra` → `Libra`. First 3-char cap, second 2-char lowercase (≤2
+    # BPE signature on the second piece).
+    text = "<5>The<4> Lib<3> ra<2> constellation<1> rises<0>"
+    out, stats = strip_capel_markers(text)
+    assert "Libra" in out
+    assert stats["n_word_repairs"] >= 1
+
+
+def test_two_fragment_both_three_chars_NOT_repaired():
+    # `Tax man` (3+3) — neither piece ≤2 chars, so the BPE-signature
+    # guard blocks the rejoin even though the joined form `Taxman` is a
+    # word. Better to leave the legitimate "Tax man" intact than to
+    # falsely glue compound nouns.
+    text = "<5>The<4> Tax<3> man<2> arrived<1> late<0>"
+    out, stats = strip_capel_markers(text)
+    assert "Tax man" in out
+    assert stats["n_word_repairs"] == 0
+
+
+def test_two_fragment_short_proper_noun_plus_consonant_verb_NOT_repaired():
+    # `Mu wore` — Mu is a real 2-char proper noun (Saint Seiya canon,
+    # which is precisely the id=91 archetype). Without the consonant-
+    # start guard on the second piece, this would falsely join to
+    # `Muwore`. The guard recognises that "wore" begins with a consonant
+    # (typical of standalone English content words) whereas BPE-frag
+    # suffixes like `oga`/`orpio`/`anon` begin with vowels.
+    text = "<5>The<4> Mu<3> wore<2> the<1> cloth<0>"
+    out, stats = strip_capel_markers(text)
+    assert "Mu wore" in out
+    assert stats["n_word_repairs"] == 0
+
+
+def test_two_fragment_short_proper_noun_plus_consonant_3char_NOT_repaired():
+    # `Mu ran` — same logic, 3-char content verb starting with consonant.
+    # The ≥3-char + consonant-start guard blocks even though the joined
+    # form `Muran` is 5 chars (meets the joined-length floor).
+    text = "<5>Then<4> Mu<3> ran<2> away<1> fast<0>"
+    out, stats = strip_capel_markers(text)
+    assert "Mu ran" in out
+    assert stats["n_word_repairs"] == 0
+
+
+def test_two_fragment_short_proper_noun_plus_vowel_suffix_repaired():
+    # `Hy oga` — the consonant-start guard does NOT block when the
+    # second piece starts with a vowel (BPE-fragmentation signature).
+    # This is the canonical Saint-Seiya proper-noun rejoin case from
+    # the id=91 smoke.
+    text = "<5>The<4> Hy<3> oga<2> arrived<1> swiftly<0>"
+    out, stats = strip_capel_markers(text)
+    assert "Hyoga" in out
+    assert stats["n_word_repairs"] >= 1
+
+
+def test_two_fragment_single_letter_first_piece_repaired():
+    # `K anon` — single-uppercase-letter first piece, lowercase suffix
+    # starting with vowel. The regex `[A-Z][a-z]{0,4}` accepts the
+    # 1-char first piece; the stopword filter on "i"/"a"/etc. prevents
+    # false positives like "I am" / "A few" (where the first letter is
+    # in the stopword set).
+    text = "<5>The<4> K<3> anon<2> wielded<1> Saga<0>"
+    out, stats = strip_capel_markers(text)
+    assert "Kanon" in out
+    assert stats["n_word_repairs"] >= 1
+
+
+def test_two_fragment_single_letter_stopword_first_NOT_repaired():
+    # `I am` / `A few` — single-letter first pieces that ARE stopwords
+    # (`i`, `a`). The stopword filter must block even though the regex
+    # matches the surface pattern.
+    text = "<5>Yes<4> I<3> am<2> here<1> now<0>"
+    out, stats = strip_capel_markers(text)
+    assert "I am" in out
+    assert stats["n_word_repairs"] == 0
+
+
+def test_two_fragment_pair_blocked_by_stopword():
+    # `He saw` — He is a stopword. MUST NOT fire even though pattern matches.
+    text = "<5>Yesterday<4> He<3> saw<2> something<1> strange<0>"
+    out, stats = strip_capel_markers(text)
+    assert "He saw" in out
+    assert stats["n_word_repairs"] == 0
+
+
+def test_two_fragment_pair_blocked_by_lowercase_first():
+    # `to me` — first piece "to" is lowercase (not capitalized), so the
+    # Capital+lowercase pattern doesn't even match. But also stopword.
+    text = "<5>handed<4> to<3> me<2> the<1> book<0>"
+    out, _ = strip_capel_markers(text)
+    assert "to me" in out
+
+
+def test_two_fragment_pair_blocked_by_second_capital():
+    # `New York` — second piece is capitalized, signals two independent
+    # proper nouns rather than a fragmented single word. The pattern
+    # `([A-Z][a-z]{1,4}) ([a-z]{2,5})` requires second-piece lowercase.
+    text = "<5>visited<4> New<3> York<2> last<1> spring<0>"
+    out, _ = strip_capel_markers(text)
+    assert "New York" in out
+
+
+def test_word_repair_does_not_run_without_markers():
+    # Plain text containing `Sag itt arius` already in the source MUST be
+    # left alone — the repair runs only when CAPEL markers were stripped,
+    # because the bug exists only in the CAPEL output path.
+    text = "Sag itt arius is a constellation."
+    out, stats = strip_capel_markers(text)
+    assert out == text
+    assert stats["n_word_repairs"] == 0
+
+
+def test_stats_dict_contains_all_wave0_keys():
+    # The Wave 0 expansion adds `n_word_repairs` and `n_heading_repairs`
+    # to the stats dict. Pin all keys so drift-log consumers don't break
+    # silently on a future stats-shape change.
+    text = "<3>The<2>quick<1>fox<0>"
+    _, stats = strip_capel_markers(text)
+    assert set(stats.keys()) == {
+        "n_markers_stripped",
+        "n_violations",
+        "n_word_repairs",
+        "n_heading_repairs",
+    }

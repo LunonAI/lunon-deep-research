@@ -298,25 +298,59 @@ def capel_directive(target_tokens: int) -> str:
     ≈ 0.75×) so a 1200-token section emits ~900 markers, keeping the count
     inside the "reliable counting" envelope the paper flags for current
     frontier models.
+
+    Wave 0 §11 (2026-05-26): the directive was previously ambiguous on what
+    "one content token" means. The writer interpreted it at the BPE-subword
+    level, splitting `Sagittarius` as `<N> Sag <N-1> itt <N-2> arius` (3
+    markers, 3 fragments). After post-strip, the fragments persisted in the
+    article body as `Sag itt arius` and dotted heading numbers landed as
+    `## 4 . 1 . 1`. The strengthened directive below makes "ONE COMPLETE
+    WORD per marker" explicit, gives a worked FORBIDDEN example, and
+    enumerates the dotted-number and short-acronym cases that count as
+    single tokens.
     """
     n_markers = max(50, int(target_tokens * 0.75))
     return (
         "CAPEL LENGTH CONTROL — INLINE COUNTDOWN MARKERS (arXiv 2508.13805):\n"
         f"Emit this section's content interleaved with countdown markers. "
         f"Begin with `<{n_markers}>` immediately followed by one content "
-        f"token (a word in EN, a single character or short token in ZH), "
-        f"then `<{n_markers - 1}>`, then one content token, and so on, "
-        f"decrementing to `<0>` at the section's end. "
+        f"token, then `<{n_markers - 1}>`, then one content token, and so "
+        f"on, decrementing to `<0>` at the section's end.\n\n"
+        "ONE COMPLETE WORD PER MARKER (CRITICAL — read this twice):\n"
+        "A 'content token' here means ONE COMPLETE ENGLISH WORD (e.g. "
+        "`Sagittarius`, `astrophysics`, `recalibration`) OR ONE CJK "
+        "CHARACTER in ZH, not a BPE subword piece. NEVER split a multi-"
+        "syllable word across multiple markers. Examples:\n"
+        "  CORRECT:    `<N> Sagittarius <N-1> emerged <N-2> from <N-3>`\n"
+        "  FORBIDDEN:  `<N> Sag <N-1> itt <N-2> arius <N-3> emerged`\n"
+        "  FORBIDDEN:  `<N> Sagitt <N-1> arius <N-2> emerged`\n"
+        "Splitting a word across markers leaves visible fragmentation in "
+        "the article after post-processing strips the markers — the reader "
+        "sees `Sag itt arius` instead of `Sagittarius`. This destroys "
+        "Readability scores and signals broken English to the judge.\n\n"
+        "DOTTED NUMBERS AND ACRONYMS COUNT AS ONE TOKEN:\n"
+        "  - `4.1.1` is ONE token: `<N> 4.1.1 <N-1>`, NOT "
+        "`<N> 4 <N-1> . <N-2> 1 <N-3> . <N-4> 1 <N-5>`.\n"
+        "  - `H4` is ONE token. `arXiv` is ONE token. `2026-05-26` is "
+        "ONE token. `[^S1-3]` is ONE token (footnote markers are single "
+        "atomic units — never split them).\n"
+        "  - URLs, code identifiers, equations are ONE token even if long.\n"
+        "If a single word or atom is too long to fit comfortably in your "
+        "remaining marker budget, REPHRASE to use shorter words OR STOP "
+        "the section early — DO NOT subword-split to make the counter "
+        "land precisely.\n\n"
         "Two markers MUST NEVER appear back-to-back — every marker must be "
         "followed by at least one content token before the next marker. "
-        "Headings, subheadings, and tables are part of the content stream — "
-        "embed markers around their words too. Post-processing strips every "
-        "`<digits>` marker before the section is shown to the judge, so "
-        "write naturally; the markers exist only to enforce the target "
-        f"length of approximately {n_markers} content tokens for this "
-        "section. If you run out of substantive content before reaching "
-        "`<0>`, STOP early rather than padding — under-length is acceptable; "
-        "padding to hit the counter is not."
+        "Headings, subheadings, and tables are part of the content stream "
+        "— embed markers around their words too (but treat `## 4.1.1 "
+        "Section name` as `## | 4.1.1 | Section | name` — four tokens, not "
+        "eleven). Post-processing strips every `<digits>` marker before the "
+        "section is shown to the judge, so write naturally; the markers "
+        f"exist only to enforce the target length of approximately "
+        f"{n_markers} content tokens for this section. If you run out of "
+        "substantive content before reaching `<0>`, STOP early rather than "
+        "padding — under-length is acceptable; padding to hit the counter "
+        "is not; subword-splitting to hit the counter is FORBIDDEN."
     )
 
 
