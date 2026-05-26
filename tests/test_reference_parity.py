@@ -110,6 +110,76 @@ def test_writer_section_user_prompt_carries_citation_contract():
     )
 
 
+def test_reuse_guidance_uses_scoped_form_consistently():
+    """Greptile PR #27 follow-up (2026-05-26): the REUSE bullets in BOTH
+    the user-prompt CITATION CONTRACT and the system-prompt
+    CLEANING_RESISTANT_RULE previously used bare `[^N]` as the example —
+    while every other bullet around them used the scoped `[^{sid}-N]` /
+    `[^{section_id}-N]` form. A writer LLM anchoring on the bare example
+    would emit bare markers for repeated citations and have them stripped
+    as orphans by footnote_normalize — silently dropping exactly the
+    citations the PR was trying to preserve.
+
+    Pin that the REUSE bullets explicitly demonstrate the scoped form."""
+    src = inspect.getsource(writer.write_section)
+    rule = writing_rules.CLEANING_RESISTANT_RULE
+
+    # User prompt: REUSE bullet must use `{sid}-N`, not bare `[^N]` alone.
+    # The substring search has to be careful — `[^N]` appears as part of
+    # `[^{sid}-N]` so we test for the explicit "reuses each `[^{sid}-N]`"
+    # phrase that the PR-27 follow-up established.
+    assert "reuses each `[^{sid}-N]`" in src, (
+        "writer.write_section REUSE bullet must use the section-scoped "
+        "`[^{sid}-N]` form in its example — a bare `[^N]` example would "
+        "anchor the LLM toward unscoped reused markers that "
+        "footnote_normalize strips as orphans."
+    )
+
+    # System prompt: same requirement, with `{section_id}` template var.
+    assert "reuses each `[^{section_id}-N]`" in rule, (
+        "CLEANING_RESISTANT_RULE rule 3 REUSE clause must use the "
+        "section-scoped `[^{section_id}-N]` form in its example — "
+        "consistency with the rest of the rule prevents the LLM from "
+        "inferring bare `[^N]` is acceptable for reused markers."
+    )
+
+    # And explicit anti-bare guidance — both files must call out that
+    # bare `[^N]` (no section scope) gets stripped as orphan.
+    assert "stripped as orphans" in src, (
+        "writer.write_section REUSE bullet must spell out the orphan-"
+        "stripping consequence so the LLM doesn't infer bare `[^N]` is "
+        "tolerated."
+    )
+    assert "stripped as orphans" in rule, (
+        "CLEANING_RESISTANT_RULE REUSE bullet must spell out the orphan-"
+        "stripping consequence symmetric to writer.write_section."
+    )
+
+
+def test_length_ceiling_docstring_does_not_hardcode_stale_multiplier():
+    """Greptile PR #27 follow-up (2026-05-26): the `length_ceiling`
+    docstring previously hard-coded "Bumped 2.2x post-#1" and told
+    callers to compute "length_ceiling(domain) / 2.2" to recover the W9
+    baseline. When `_LENGTH_TARGET_MULT` jumped 2.2 → 4.0 the docstring's
+    advice silently went stale (would return 1.8× too high a value).
+
+    Fix: docstring references the constant rather than hardcoding the
+    number, so future multiplier bumps stay in sync automatically."""
+    doc = writing_rules.length_ceiling.__doc__ or ""
+    # The stale hard-coded "2.2" must be gone.
+    assert "/ 2.2" not in doc and "2.2x" not in doc and "2.2×" not in doc, (
+        "length_ceiling docstring still references the stale 2.2× "
+        "multiplier — must be updated to reference _LENGTH_TARGET_MULT "
+        "by name so future calibration bumps don't silently invalidate "
+        "the docstring's caller advice."
+    )
+    # Must reference the constant by name so the advice stays current.
+    assert "_LENGTH_TARGET_MULT" in doc, (
+        "length_ceiling docstring must reference the `_LENGTH_TARGET_MULT` "
+        "constant by name so callers and the docstring stay in sync."
+    )
+
+
 def test_writer_section_user_prompt_uses_section_id_template():
     """The CITATION CONTRACT must use `[^{sid}-N]` form (section-scoped
     via the actual section id at write time), not bare `[^N]`.

@@ -70,8 +70,11 @@ CLEANING_RESISTANT_RULE = (
     "block; without the section-scope your markers WILL collide with other "
     "sections' markers and get stripped as orphans.\n"
     "   REUSE markers across multiple mentions of the SAME source — "
-    "the reference reuses each `[^N]` ~7× on average. Don't invent a new number "
-    "per sentence when citing the same paper repeatedly.\n"
+    "the reference reuses each `[^{section_id}-N]` ~7× on average. Don't invent "
+    "a new number per sentence when citing the same paper repeatedly. The "
+    "`{section_id}-` scope prefix is REQUIRED on reused markers too — "
+    "bare `[^N]` (no section scope) WILL be stripped as orphans by "
+    "footnote_normalize, silently dropping every reused citation.\n"
     "4. Never place a fact, name, date, or figure ONLY inside a citation mark, "
     "footnote, or the reference list. The inline prose still carries the "
     "claim; footnotes are SUPPLEMENTARY URL citation, not the substantive "
@@ -267,10 +270,14 @@ _LENGTH_TARGET_MULT = 4.0
 
 
 def length_ceiling(domain: str) -> int:
-    """Per-domain SOFT word target. Bumped 2.2x post-#1 to match reference-corpus
-    structural depth. The writer prompt now frames this as a soft target rather
-    than a hard ceiling — see writer_system below. Callers that want the
-    historical (pre-#1) value should compute `length_ceiling(domain) / 2.2`.
+    """Per-domain SOFT word target. Bumped `_LENGTH_TARGET_MULT`× above
+    the historical W9-era catalog medians to push toward reference-corpus
+    structural depth. The writer prompt now frames this as a soft target
+    rather than a hard ceiling — see writer_system below. Callers that
+    want the historical W9 baseline should compute
+    `length_ceiling(domain) / _LENGTH_TARGET_MULT` — referencing the
+    constant by name so future calibration bumps stay in sync with this
+    docstring.
     """
     key = _DOMAIN_KEY.get(domain, "_overall")
     raw = _MED.get(key, _MED["_overall"])
