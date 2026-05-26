@@ -292,8 +292,16 @@ _INSIGHT_DISTRIBUTION_BY_ARCHETYPE: dict[str, dict[str, int]] = {
 def insight_distribution(archetype: str | None) -> dict[str, int]:
     """Return the per-archetype `_INSIGHT_MIN` distribution targets dict
     (Wave 2 §3.2). Falls back to the balanced default for unknown
-    archetypes."""
-    return _INSIGHT_DISTRIBUTION_BY_ARCHETYPE.get(archetype or "", dict(_INSIGHT_DISTRIBUTION_DEFAULT))
+    archetypes.
+
+    Greptile PR #30 follow-up (2026-05-26): wraps the `.get()` result
+    in `dict(...)` so the return is ALWAYS a fresh copy regardless of
+    whether the archetype was known. Pre-fix the known-archetype path
+    returned the actual module-level dict object — a caller mutating
+    the returned dict would have silently corrupted the
+    `_INSIGHT_DISTRIBUTION_BY_ARCHETYPE` constant.
+    """
+    return dict(_INSIGHT_DISTRIBUTION_BY_ARCHETYPE.get(archetype or "", _INSIGHT_DISTRIBUTION_DEFAULT))
 
 
 # NEW (W9 diagnostic 2026-05-21): the judge cited "inconsistent section
@@ -534,21 +542,21 @@ def writer_system(
             f"limits."
         )
         heading_hash_block = (
-            f"HEADING-HASH MAPPING — STRICT (per-archetype, flat):\n"
-            f"- `# Title` (one `#`) — the REPORT TITLE only. Exactly ONE per "
-            f"  article. Never numbered.\n"
-            f"- `## 1 Section name` (two `##`) — top-level section. "
-            f"  Single-digit number (1, 2, 3, ...).\n"
-            f"- `### 1.1 Sub-section name` (three `###`) — sub-section "
-            f"  (use sparingly for flat archetypes; most sections do NOT "
-            f"  need H3 subdivision).\n"
-            f"- `#### ...` (four `####`) — FORBIDDEN for this archetype. "
-            f"  Do NOT emit H4 leaves.\n"
-            f"FORBIDDEN: emitting `# 1. Introduction` or `# 1.2 Bronze Saints` "
-            f"— a numbered chapter is NEVER an H1. Use `## 1 Introduction` "
-            f"and `### 1.2 Bronze Saints` instead. Re-using `#` after the "
-            f"title is the single most common heading bug; do not do it. "
-            f"Also FORBIDDEN: any `####` heading on this archetype."
+            "HEADING-HASH MAPPING — STRICT (per-archetype, flat):\n"
+            "- `# Title` (one `#`) — the REPORT TITLE only. Exactly ONE per "
+            "  article. Never numbered.\n"
+            "- `## 1 Section name` (two `##`) — top-level section. "
+            "  Single-digit number (1, 2, 3, ...).\n"
+            "- `### 1.1 Sub-section name` (three `###`) — sub-section "
+            "  (use sparingly for flat archetypes; most sections do NOT "
+            "  need H3 subdivision).\n"
+            "- `#### ...` (four `####`) — FORBIDDEN for this archetype. "
+            "  Do NOT emit H4 leaves.\n"
+            "FORBIDDEN: emitting `# 1. Introduction` or `# 1.2 Bronze Saints` "
+            "— a numbered chapter is NEVER an H1. Use `## 1 Introduction` "
+            "and `### 1.2 Bronze Saints` instead. Re-using `#` after the "
+            "title is the single most common heading bug; do not do it. "
+            "Also FORBIDDEN: any `####` heading on this archetype."
         )
     else:
         # Deep archetypes (explain-mechanism / predict / trend / recommend):
@@ -563,19 +571,19 @@ def writer_system(
             f"limits."
         )
         heading_hash_block = (
-            f"HEADING-HASH MAPPING — STRICT (per-archetype, hierarchical):\n"
-            f"- `# Title` (one `#`) — the REPORT TITLE only. Exactly ONE per "
-            f"  article. Never numbered.\n"
-            f"- `## 1 Section name` (two `##`) — top-level section. "
-            f"  Single-digit number (1, 2, 3, ...).\n"
-            f"- `### 1.1 Sub-section name` (three `###`) — sub-section. "
-            f"  Two-dot number (1.1, 1.2, ...).\n"
-            f"- `#### 1.1.1 Sub-sub-section name` (four `####`) — H4 leaf "
-            f"  (maximum depth). Three-dot number. One per depth_seed.\n"
-            f"FORBIDDEN: emitting `# 1. Introduction` or `# 1.2 Bronze Saints` "
-            f"— a numbered chapter is NEVER an H1. Use `## 1 Introduction` "
-            f"and `### 1.2 Bronze Saints` instead. Re-using `#` after the "
-            f"title is the single most common heading bug; do not do it."
+            "HEADING-HASH MAPPING — STRICT (per-archetype, hierarchical):\n"
+            "- `# Title` (one `#`) — the REPORT TITLE only. Exactly ONE per "
+            "  article. Never numbered.\n"
+            "- `## 1 Section name` (two `##`) — top-level section. "
+            "  Single-digit number (1, 2, 3, ...).\n"
+            "- `### 1.1 Sub-section name` (three `###`) — sub-section. "
+            "  Two-dot number (1.1, 1.2, ...).\n"
+            "- `#### 1.1.1 Sub-sub-section name` (four `####`) — H4 leaf "
+            "  (maximum depth). Three-dot number. One per depth_seed.\n"
+            "FORBIDDEN: emitting `# 1. Introduction` or `# 1.2 Bronze Saints` "
+            "— a numbered chapter is NEVER an H1. Use `## 1 Introduction` "
+            "and `### 1.2 Bronze Saints` instead. Re-using `#` after the "
+            "title is the single most common heading bug; do not do it."
         )
 
     return (

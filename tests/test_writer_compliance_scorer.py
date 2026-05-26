@@ -275,6 +275,66 @@ def test_section_opening_recap_compliance_excludes_first_section():
     assert scores["recap_compliance_rate"] == 0.5
 
 
+def test_section_opening_recap_subheading_is_not_prose_recap():
+    """Greptile PR #30 follow-up: a section whose first non-blank
+    content line is a subheading (`### 1.1 Foo` or `#### 1.1.1 Bar`)
+    must NOT be counted as prose-recap-compliant. Pre-fix the prefix
+    list omitted `#`, inflating the rate and hiding the real failure
+    mode (heading-first openings)."""
+    article = (
+        "# T\n\n"
+        "## 1 Intro\n"
+        "Some intro text.\n\n"
+        "## 2 Body\n"
+        "### 2.1 First sub\n"  # subheading-first opening — should NOT count as prose recap
+        "Sub body text.\n\n"
+        "## 3 More\n"
+        "Real prose recap of framework from §1 applied here.\n"
+    )
+    scores = _score_section_opening_recap(article)
+    # 2 non-first sections (§2 + §3). §2 opens with `###` subheading
+    # (NOT prose), §3 opens with prose. So only 1 of 2 is compliant.
+    assert scores["n_non_first_sections"] == 2
+    assert scores["n_with_recap"] == 1
+    assert scores["recap_compliance_rate"] == 0.5
+
+
+def test_split_into_leaves_does_not_absorb_inter_h4_headings_into_preceding_leaf():
+    """Greptile PR #30 follow-up: when in a deep-archetype H4 leaf and
+    we hit a higher-level heading (`## Section 2` or `### 2.1 Sub`),
+    flush + exit leaf mode. Pre-fix every non-H4 line after a leaf was
+    appended to that leaf's body until the next H4, leaking sibling-
+    section heading text into the leaf and producing false element
+    detections."""
+    article = (
+        "# Title\n\n"
+        "## 1 First\n### 1.1 Sub\n"
+        "#### 1.1.1 Leaf A\n"
+        "Body of leaf A.\n\n"
+        # Inter-leaf H2/H3 boundary — must NOT bleed into leaf A's body.
+        "## 2 Second\n"
+        "Second section frame.\n"
+        "### 2.1 Another sub with a By 2030 trend description that mentions forward-looking forecasting\n"
+        "#### 2.1.1 Leaf B\n"
+        "Body of leaf B.\n"
+    )
+    leaves = _split_into_leaves(article, "explain-mechanism")
+    # 2 H4 leaves.
+    assert len(leaves) == 2
+    leaf_a = leaves[0]
+    leaf_b = leaves[1]
+    # Leaf A must NOT contain the heading text from §2 or §2.1.
+    assert "Second section frame" not in leaf_a, (
+        "leaf A absorbed §2's heading body — flush-on-shallower-heading didn't fire"
+    )
+    assert "By 2030 trend description" not in leaf_a, (
+        "leaf A absorbed §2.1's heading text — would trigger false forward-looking detection"
+    )
+    # Leaf B should have only its own body (no leakage from prior).
+    assert "Body of leaf B" in leaf_b
+    assert "Body of leaf A" not in leaf_b
+
+
 def test_compute_compliance_returns_all_rule_scores():
     """The top-level `compute_compliance` must return every rule's
     score dict so downstream tooling (drift log + JSON output) can
