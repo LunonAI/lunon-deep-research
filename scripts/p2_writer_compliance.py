@@ -433,7 +433,15 @@ def _score_section_opening_recap(article: str) -> dict:
         # previously counted as prose-recap-compliant, inflating the
         # rate and hiding the real failure mode the recap rule is meant
         # to catch (table-first / list-first / heading-first openings).
-        if first_line and not first_line.startswith(("|", "- ", "* ", "1.", "2.", "3.", "#")):
+        #
+        # Greptile PR #30 round-6 follow-up (2026-05-26): switched the
+        # ordered-list detection from the literal-prefix tuple
+        # `("1.", "2.", "3.")` to a regex match (`^\d+\.`). The literal
+        # tuple only caught items 1-3; list-all sections numbered into
+        # the 30-80 range can plausibly open with `"4. ..."` or
+        # higher-numbered items, which were falsely counted as prose
+        # recap.
+        if first_line and not re.match(r"^(\||- |\* |#|\d+\.)", first_line):
             n_recap += 1
     rate = (n_recap / n_total) if n_total else 0.0
     return {

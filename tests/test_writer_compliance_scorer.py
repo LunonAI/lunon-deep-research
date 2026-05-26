@@ -355,6 +355,36 @@ def test_section_opening_recap_compliance_excludes_first_section():
     assert scores["recap_compliance_rate"] == 0.5
 
 
+def test_section_opening_recap_high_numbered_list_is_not_prose_recap():
+    """Greptile PR #30 round-6 follow-up: the ordered-list detection
+    was previously a literal prefix tuple `("1.", "2.", "3.")` which
+    only caught items 1-3. A section opening with `"4. Fourth item"`
+    or any higher-numbered item was falsely counted as prose recap,
+    inflating the rate.
+
+    list-all archetype articles can have 30-80 top-level sections,
+    each potentially containing independently-numbered sub-lists that
+    open at 4+ (e.g. when content from a larger enumeration is
+    extracted). Pin: any `^\\d+\\.` numbered-list opener must be
+    excluded from prose-recap-compliant counting."""
+    article = (
+        "# T\n\n"
+        "## 1 Intro\nIntro prose.\n\n"
+        # §2 opens with item 7 of a numbered list — pre-fix this was
+        # FALSELY counted as prose recap.
+        "## 2 Section Two\n7. Seventh item from a larger enumeration.\n8. Eighth item.\n\n"
+        # §3 opens with item 12 — also pre-fix false-positive.
+        "## 3 Section Three\n12. Twelfth item from yet another list.\n\n"
+        # §4 has genuine prose recap.
+        "## 4 Section Four\nThis section recaps the framework from §1.\n"
+    )
+    scores = _score_section_opening_recap(article)
+    # 3 non-first sections (§2, §3, §4). §2 + §3 are list-first (NOT
+    # prose), §4 is prose-recap-compliant. So 1 of 3 compliant.
+    assert scores["n_non_first_sections"] == 3
+    assert scores["n_with_recap"] == 1, f"high-numbered list items wrongly counted as prose recap: {scores}"
+
+
 def test_section_opening_recap_subheading_is_not_prose_recap():
     """Greptile PR #30 follow-up: a section whose first non-blank
     content line is a subheading (`### 1.1 Foo` or `#### 1.1.1 Bar`)
