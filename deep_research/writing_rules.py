@@ -51,17 +51,27 @@ CLEANING_RESISTANT_RULE = (
     "2. No sentence may be semantically dependent on a citation mark surviving. "
     "Every sentence must read complete after all [n]/[^n] and reference/"
     "footnote blocks are deleted.\n"
-    "3. SUPPLEMENTARY FOOTNOTE CITATION (post-#6) is ENCOURAGED when an "
-    "evidence atom has a non-empty `url` field. Pattern:\n"
-    "   - inline: ...according to McKinsey 2025[^{section_id}-1]...\n"
-    "   - definition (at the END of YOUR section): "
-    "[^{section_id}-1]: McKinsey 2025 — https://example.com/...\n"
+    "3. SUPPLEMENTARY FOOTNOTE CITATION is MANDATORY for every "
+    "load-bearing claim sourced from a specific evidence atom (URL is "
+    "OPTIONAL, not required — the #1 reference-leaderboard articles use "
+    "academic-citation footnotes WITHOUT URLs and produce ~326 inline "
+    "markers per long article; URL-conditional emission produced 0 "
+    "footnotes in the 2026-05-26 CAPEL smoke). Pattern:\n"
+    "   - inline: ...as Lebrun (1999) showed[^{section_id}-3]...\n"
+    "   - definition (at the END of YOUR section, one per UNIQUE source):\n"
+    '       [^{section_id}-3]: Lebrun, B. (1999), "First-Price Auctions in '
+    'the Asymmetric N-Bidder Case," International Economic Review 40(1).\n'
+    "       Include ` — <url>` at the end ONLY if the evidence atom's "
+    "`url` is non-empty; otherwise omit the URL entirely.\n"
     "   The `{section_id}-N` scope is REQUIRED — substitute YOUR current "
     "section's id (e.g. S1, S3.2) and number sequentially from 1 within "
     "this section. The post-process step (footnote_normalize) globally "
     "renumbers across sections and builds the article's ## References "
     "block; without the section-scope your markers WILL collide with other "
     "sections' markers and get stripped as orphans.\n"
+    "   REUSE markers across multiple mentions of the SAME source — "
+    "the reference reuses each `[^N]` ~7× on average. Don't invent a new number "
+    "per sentence when citing the same paper repeatedly.\n"
     "4. Never place a fact, name, date, or figure ONLY inside a citation mark, "
     "footnote, or the reference list. The inline prose still carries the "
     "claim; footnotes are SUPPLEMENTARY URL citation, not the substantive "
@@ -232,14 +242,28 @@ _ARCH_REFINE_EMPHASIS = {
 }
 
 
-# P2-Option-A-#1 length target multiplier. The historical _MED catalog was
-# calibrated to Lunon's W9 outputs (~9k word median); the #1-leaderboard
-# the reference corpus runs ~22k words mean across 100 articles (and ~99k on the
-# explain-mechanism extreme like id=56). 2.2x roughly bridges the gap on the
-# typical task without overshooting the deepest tasks. Per-domain medians
-# remain the relative shape — finance and science still run longer than
-# travel/literature, just at a higher absolute floor.
-_LENGTH_TARGET_MULT = 2.2
+# Length target multiplier. The historical _MED catalog was calibrated to
+# Lunon's W9 outputs (~9k word median); the #1-leaderboard the reference corpus
+# runs ~99k mean and ~80k on the explain-mechanism extreme (id=56).
+#
+# Calibration history:
+#  - W9 baseline: 1.0× → ~9k words/article
+#  - PR #20 (2026-05-22): 2.2× → ~20k words/article (still 4.3× short of
+#    the reference id=56's 80k)
+#  - Post-2026-05-26 smoke: 4.0× → target ~36k words/article. The smoke
+#    at 2.2× produced 18.8k words for id=56 (1.34× W9, but still 4.26×
+#    short of the reference). Bumped to 4.0× to get to ~36k target, a
+#    meaningful step toward reference-class length without overshooting
+#    cost envelope (~$17 → ~$35/task projected).
+#
+# Per-domain medians remain the relative shape — finance and science still
+# run longer than travel/literature, just at a higher absolute floor.
+# A multiplier higher than ~5-6 risks the writer producing repetitive
+# content to fill space when the architect's outline depth doesn't keep
+# pace; the architect's _SYSTEM HARD RULES (8-12 H2 × 3-6 H3 × 2-4 H4)
+# need to be honored simultaneously for length growth to convert to
+# substantive depth rather than filler.
+_LENGTH_TARGET_MULT = 4.0
 
 
 def length_ceiling(domain: str) -> int:
