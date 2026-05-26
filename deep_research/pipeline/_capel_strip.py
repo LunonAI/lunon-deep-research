@@ -315,21 +315,28 @@ def _repair_word_fragments(text: str) -> tuple[str, int]:
     **3+ adjacent short tokens** (high precision when joined-length is
     in the typical real-word band): runs of 3-5 adjacent alphabetic
     tokens, each ≤5 chars, none in `_STOPWORDS`, joined length in
-    [8, 14] chars (the empirical band that real BPE-fragmented English
+    [8, 12] chars (the empirical band that real BPE-fragmented English
     words live in: Sagittarius=11, Kurumada=8, assaultist=10,
-    Encyclopedia=12, etc.), only first capitalized. The upper bound
-    blocks runs of 4+ legitimate short content words from being joined
-    into impossibly long pseudo-compounds.
+    Encyclopedia=12), only first capitalized. The upper bound blocks
+    runs of 4+ legitimate short content words from being joined into
+    impossibly long pseudo-compounds (e.g. `Mu ran away fast` joins
+    to a 13-char pseudo-compound and is correctly skipped).
 
     **Known limitations** (acceptable because the directive is the
     primary defense):
       - Lowercase 2-piece content-word fragments like `calibr ated`
         not caught (2-piece rule requires capitalized first piece).
-      - Real words >14 chars when joined not caught (rare).
+      - Real words >12 chars when joined not caught (rare —
+        `Constellation`=13 misses).
+      - 2-piece fragments where the second piece collides with a
+        stopword not caught (`Cygn us` blocked because `us` is a
+        stopword).
+      - Middle pieces >5 chars not caught (`A ldebar an` — middle
+        piece `ldebar` is 6 chars).
       - Synthetic adjacency of 3 short non-stopword content words
-        (e.g. `extra word play`) would false-positively join. In real
-        prose this is rare; in CAPEL-fragmented text the directive
-        eliminates the upstream cause.
+        with joined length in [8, 12] would false-positively join.
+        In real prose this is rare; in CAPEL-fragmented text the
+        directive eliminates the upstream cause.
     """
     n_repairs = 0
 
