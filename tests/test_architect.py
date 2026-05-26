@@ -7,7 +7,44 @@ Covers the post-Wave-2.5-#1 schema additions:
 - back-compat: an empty plan still normalizes without crashing
 """
 
+import inspect
+
 from deep_research.pipeline import architect
+
+
+def test_architect_max_tokens_bounded_under_edge_cut_zone():
+    """Smoke-5 (2026-05-25) discovered that the architect at
+    max_tokens=32000 + think=True produced ~17-min streaming responses
+    that Anthropic's edge consistently cut with `httpx.RemoteProtocolError`.
+    Reverted to 24000 (smoke-5 follow-up). Pin an UPPER bound at 28000
+    so a future bump back toward the edge-cut zone fails this test —
+    forcing the next person to either find a way to keep architect
+    output shorter OR add streaming-cut tolerance before re-bumping.
+
+    The lower bound matters too (architect output is 12-15k tokens
+    nominal), but is implicitly enforced by the schema: if max_tokens
+    is too low we get truncated JSON and _coerce_to_dict returns {}.
+    """
+    src = inspect.getsource(architect.build)
+    # The architect.build function calls llm.call_json with a max_tokens=
+    # literal. Extract and pin the upper bound.
+    import re
+
+    matches = re.findall(r"max_tokens\s*=\s*(\d+)", src)
+    assert matches, "could not find max_tokens= in architect.build source"
+    architect_max_tokens = max(int(m) for m in matches)
+    assert architect_max_tokens <= 28000, (
+        f"architect max_tokens={architect_max_tokens} is in the Anthropic-edge-cut "
+        f"zone (smoke-5 hit RemoteProtocolError at 32000). Either drop back to "
+        f"≤28000 or first add layered streaming-cut tolerance to anthropic_client."
+    )
+    # Also pin a sensible lower bound — if someone drops it under 16000,
+    # the architect's JSON output (48-64 queries + 24-32 ACs + report_toc +
+    # entity_matrix + depth_seeds ≈ 12-15k tokens) gets truncated.
+    assert architect_max_tokens >= 16000, (
+        f"architect max_tokens={architect_max_tokens} too low; the schema "
+        f"output is 12-15k tokens nominal and lower values risk truncation."
+    )
 
 
 def _bare_plan():

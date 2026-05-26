@@ -165,16 +165,18 @@ def test_unknown_override_warning_dedupes_per_model(capsys):
 
 
 def test_orchestrator_budget_can_actually_realise_max_searches_per_specialist():
-    """Greptile PR #22 round 3: the orchestrator's BUDGET must be large
-    enough that all 5 specialists can each run their full
-    _MAX_SEARCHES_PER_SPECIALIST queries AND the gap-fill phase can still
-    fire its up-to-2 calls. Pre-fix BUDGET was 24 → capped each specialist
-    at 5 searches regardless of the post-#4 12-query bump in
-    specialists.py, silently dropping the post-#4 raw-hit ceiling from
-    the advertised 5×12×10=600 to the real 5×5×10=250.
+    """The orchestrator's BUDGET must be large enough that all 5 specialists
+    can each run their full _MAX_SEARCHES_PER_SPECIALIST queries AND the
+    gap-fill phase can still fire its up-to-2 calls. Pre-fix BUDGET was 24
+    → capped each specialist at 5 searches regardless of the post-#4
+    12-query bump in specialists.py, silently dropping the post-#4 raw-hit
+    ceiling from the advertised 5×12×10=600 to the real 5×5×10=250.
 
-    This test pins the math invariant: any future BUDGET change must
-    keep room for (5 × _MAX_SEARCHES_PER_SPECIALIST) + GAP_FILL_HEADROOM."""
+    Re-engaged 2026-05-25 Stage 1c after the per-specialist timeout layer
+    in orchestrator._research_with_timeout made BUDGET=64 safe. The
+    2026-05-25 CAPEL smoke incident hung indefinitely at BUDGET=64 WITHOUT
+    the timeout layer; with the timeout, the worst case is one specialist
+    dropping its findings rather than stalling the whole task."""
     from deep_research.pipeline import orchestrator
 
     n_specialists_in_main_loop = 5  # see _ARCH_PRIORITY entries
@@ -184,13 +186,12 @@ def test_orchestrator_budget_can_actually_realise_max_searches_per_specialist():
         f"orchestrator.BUDGET={orchestrator.BUDGET} is too low — needs at "
         f"least {required_minimum} to fit 5×{specialists._MAX_SEARCHES_PER_SPECIALIST}="
         f"{n_specialists_in_main_loop * specialists._MAX_SEARCHES_PER_SPECIALIST} "
-        f"main-loop searches + {gap_fill_max_calls} gap-fill calls. Pre-fix "
-        f"BUDGET=24 silently capped specialists at 5 queries."
+        f"main-loop searches + {gap_fill_max_calls} gap-fill calls."
     )
 
 
 def test_orchestrator_dispatch_uses_specialists_max_searches_constant(monkeypatch):
-    """Behavioral regression test for Greptile PR #22 round 3.
+    """Behavioral regression test for the orchestrator dispatch cap.
 
     The orchestrator's per-specialist dispatch slice
     (`qlist[:max(1, min(..., BUDGET - tool_calls))]`) MUST source the
@@ -200,13 +201,16 @@ def test_orchestrator_dispatch_uses_specialists_max_searches_constant(monkeypatc
 
     This test feeds a plan with 12 queries for ONE specialist role,
     captures what `research()` actually receives, and asserts the qlist
-    is length 12 (the constant) — NOT 5 (the old hardcoded cap)."""
+    is length 12 (the constant) — NOT 5 (the old hardcoded cap).
+
+    The 2026-05-25 Stage-1b timeout layer makes this safe to ship: if any
+    one specialist hangs at the 12-query throughput, _research_with_timeout
+    bounds it at _SPECIALIST_TIMEOUT_S and the task continues."""
     from deep_research.pipeline import orchestrator
 
-    # Build a minimal plan: 12 queries all routed to the 'evidence_gatherer'
-    # specialist. The architect's list-all archetype priority puts
-    # evidence_gatherer FIRST so the dispatch sees its queries before
-    # budget exhaustion can hide a bug.
+    # 12 queries all routed to the 'evidence_gatherer' specialist (which
+    # list-all archetype priority dispatches FIRST, so the slice sees its
+    # full payload before budget exhaustion could hide a bug).
     plan = {
         "queries": [
             {
@@ -240,7 +244,8 @@ def test_orchestrator_dispatch_uses_specialists_max_searches_constant(monkeypatc
     orchestrator.run(plan, prompt="p", language="en", archetype="list-all", domain="default")
 
     # The evidence_gatherer specialist must have received ALL 12 queries
-    # in its dispatch — NOT 5. This is the regression Greptile flagged.
+    # in its dispatch — NOT 5. If you see 5 here, the orchestrator's
+    # dispatch cap regressed back to a hardcoded literal.
     eg_queries = captured.get("evidence_gatherer", [])
     assert len(eg_queries) == specialists._MAX_SEARCHES_PER_SPECIALIST, (
         f"evidence_gatherer received {len(eg_queries)} queries; expected "
