@@ -65,9 +65,19 @@ _INLINE_RE = re.compile(r"\[\^([A-Za-z0-9._-]+)\](?!:)")
 # heading per the writer prompt's HEADING-HASH MAPPING rule), optional
 # numbering (``29 ``, ``12. ``, ``5 `` etc.), then ``References`` or
 # ``Reference`` followed by a word boundary. The match extends to the
-# next level-2 (or level-1) heading or end-of-string.
+# next markdown heading of ANY depth (``#+``) or end-of-string.
+#
+# Greptile PR #29 follow-up (2026-05-26): the lookahead originally used
+# ``#{1,2}`` which only stopped at H1/H2 headings. An H3+ heading
+# (``### M Sub-section``) appearing directly after the writer's bogus
+# References block — before any H2 — would have been silently swallowed
+# along with the refs content. The writer's HEADING-HASH MAPPING rule
+# conventionally puts ``##`` for top-level sections so this scenario is
+# unusual, but the failure is content-destructive. Widening to ``#+``
+# (any heading depth) makes the strip stop at the first heading after
+# the References block regardless of depth.
 _WRITER_REFS_SECTION_RE = re.compile(
-    r"^[ \t]*##[ \t]+\d*\.?[ \t]*References?\b.*?(?=^[ \t]*#{1,2}[ \t]|\Z)",
+    r"^[ \t]*##[ \t]+\d*\.?[ \t]*References?\b.*?(?=^[ \t]*#+[ \t]|\Z)",
     re.MULTILINE | re.DOTALL | re.IGNORECASE,
 )
 

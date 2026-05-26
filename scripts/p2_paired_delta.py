@@ -163,33 +163,51 @@ def _render_human(per_task: list[dict], verdict: dict, baseline_path: Path, new_
     header = f"{'task':>5}  {'baseline':>9}  {'new':>9}  {'ΔO':>9}  {'ΔInsight':>9}  {'ΔComp':>9}  {'ΔInst':>9}  {'ΔRead':>9}"
     lines.append(header)
     lines.append("-" * len(header))
+
+    # Greptile PR #29 follow-up (2026-05-26): a `None` per-dim delta
+    # means "data unavailable on at least one side" (one of the harness
+    # raw_results rows was missing that field). The pre-fix renderer used
+    # `r.get('delta_X') or 0` which rendered `+0.0000` indistinguishably
+    # from a genuine zero delta — operator inspecting the table couldn't
+    # tell "no change" from "data missing". Render `N/A` for None so the
+    # gap is visible without breaking column alignment.
+    def _fmt_dim(v: float | None) -> str:
+        return f"{v:>+9.4f}" if v is not None else "    N/A  "
+
     for r in sorted(per_task, key=lambda x: x["id"]):
         cells = [
             f"{r['id']:>5}",
             f"{r['baseline_overall']:>9.4f}",
             f"{r['new_overall']:>9.4f}",
             f"{r['delta_overall']:>+9.4f}",
-            f"{r.get('delta_insight') or 0:>+9.4f}",
-            f"{r.get('delta_comprehensiveness') or 0:>+9.4f}",
-            f"{r.get('delta_instruction_following') or 0:>+9.4f}",
-            f"{r.get('delta_readability') or 0:>+9.4f}",
+            _fmt_dim(r.get("delta_insight")),
+            _fmt_dim(r.get("delta_comprehensiveness")),
+            _fmt_dim(r.get("delta_instruction_following")),
+            _fmt_dim(r.get("delta_readability")),
         ]
         lines.append("  ".join(cells))
     lines.append("-" * len(header))
     # Per-dim cumulative deltas (mean across tasks) — useful diagnostic
-    # for spotting which dim moved most.
+    # for spotting which dim moved most. Same Greptile follow-up: skip
+    # `None` values when averaging so a missing-dim task doesn't drag the
+    # mean toward zero. If EVERY task is missing the dim, render `N/A`.
     if per_task:
-        dim_means = {dim: statistics.mean(r.get(f"delta_{dim}") or 0 for r in per_task) for dim in _DIM_FIELDS}
+
+        def _dim_mean(dim: str) -> float | None:
+            vals = [r.get(f"delta_{dim}") for r in per_task if r.get(f"delta_{dim}") is not None]
+            return statistics.mean(vals) if vals else None
+
+        dim_means = {dim: _dim_mean(dim) for dim in _DIM_FIELDS}
         cumulative_overall = statistics.mean(r["delta_overall"] for r in per_task)
         cum_cells = [
             "  MEAN",
             "    -    ",
             "    -    ",
             f"{cumulative_overall:>+9.4f}",
-            f"{dim_means['insight']:>+9.4f}",
-            f"{dim_means['comprehensiveness']:>+9.4f}",
-            f"{dim_means['instruction_following']:>+9.4f}",
-            f"{dim_means['readability']:>+9.4f}",
+            _fmt_dim(dim_means["insight"]),
+            _fmt_dim(dim_means["comprehensiveness"]),
+            _fmt_dim(dim_means["instruction_following"]),
+            _fmt_dim(dim_means["readability"]),
         ]
         lines.append("  ".join(cum_cells))
     lines.append("")

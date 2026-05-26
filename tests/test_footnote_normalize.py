@@ -268,7 +268,7 @@ def test_no_writer_refs_section_telemetry_zero():
 
 
 def test_writer_refs_section_does_not_swallow_following_section():
-    """The pre-strip regex must stop at the next `## ` heading so it
+    """The pre-strip regex must stop at the next markdown heading so it
     doesn't accidentally swallow a following body section that happens
     to come after the writer's References block."""
     article = (
@@ -284,3 +284,36 @@ def test_writer_refs_section_does_not_swallow_following_section():
     # The following section's heading + content must still be in the body.
     assert "## 6 Following Section" in out.article
     assert "Important content that must survive" in out.article
+
+
+def test_writer_refs_section_stops_at_h3_following_heading():
+    """Greptile PR #29 follow-up: the pre-Wave-1 regex used `#{1,2}` in
+    the lookahead, which only stopped at H1/H2 headings. An H3+ heading
+    directly after the writer's bogus References block — with no H2 in
+    between — would have been silently swallowed, deleting the H3
+    section's heading + body. The fix widens the lookahead to `#+` so
+    any heading depth terminates the strip.
+
+    This is a content-destructive edge case (rare because the writer
+    conventionally uses ## for top-level sections, but unbounded in
+    severity when it happens). Pin so a future regex tightening that
+    re-introduces `#{1,2}` is caught immediately."""
+    article = (
+        "# Title\n\n## 1 Intro\n\n"
+        "Claim per Source A[^S1-1].\n\n"
+        "## 5 References\n\n"
+        "[^S1-1]: Source A\n\n"
+        "### 6.1 Important Subsection\n\n"
+        "H3 content that must survive the writer-refs strip.\n\n"
+        "#### 6.1.1 Deeper Leaf\n\n"
+        "H4 content that must also survive.\n"
+    )
+    out = footnote_normalize.normalize(article)
+    assert out.n_writer_refs_sections_stripped == 1
+    # H3 heading + body survives (would have been destroyed pre-fix).
+    assert "### 6.1 Important Subsection" in out.article
+    assert "H3 content that must survive" in out.article
+    # H4 (the heading even deeper) also survives — the regex terminates
+    # at the first `#+` heading regardless of depth.
+    assert "#### 6.1.1 Deeper Leaf" in out.article
+    assert "H4 content that must also survive" in out.article
