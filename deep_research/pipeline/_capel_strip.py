@@ -264,6 +264,21 @@ _TWO_FRAG_CAP_LOWER_RE = re.compile(r"\b([A-Z][a-z]{0,4}) ([a-z]{2,5})\b")
 # which typically begin with a consonant.
 _VOWELS = frozenset("aeiou")
 
+# Wave 0.1 §11.7 (2026-05-26 smoke-validation follow-up): footnote-bracket
+# whitespace repair. The 2026-05-26 post-Wave-0 id=91 smoke surfaced 47
+# of 180 footnote markers in the form `[^S1-1 ]`, `[^ S8 -1 ]` — the
+# writer subword-split the FOOTNOTE TOKEN itself across CAPEL markers
+# (`[^<N>S1<N-1>-<N-2>1<N-3>]`), the strip removed the `<N>` tokens and
+# left single spaces inside the brackets, and `footnote_normalize`'s
+# inline-marker regex `\[\^([A-Za-z0-9._-]+)\]` rejected every such
+# marker (whitespace is not in the token char class). Result: 47
+# footnotes silently dropped + zero definition lines parsed + no
+# References block in the article. The Wave 0 directive added `[^S1-3]`
+# to the "ONE TOKEN" enumeration but the writer ignored it under
+# retry-storm pressure. This repair pass is the safety net: strip ALL
+# whitespace from inside `[^...]` brackets after marker strip.
+_FOOTNOTE_BRACKET_RE = re.compile(r"\[\^([^\]]*)\]")
+
 
 def _repair_heading_numbers(text: str) -> tuple[str, int]:
     """Repair `## 4 . 1 . 1` → `## 4.1.1` in heading lines.
@@ -408,6 +423,40 @@ def _repair_word_fragments(text: str) -> tuple[str, int]:
     return text, n_repairs
 
 
+def _repair_footnote_brackets(text: str) -> tuple[str, int]:
+    """Strip whitespace inside `[^...]` brackets left by CAPEL subword
+    fragmentation of the footnote token (Wave 0.1 §11.7).
+
+    The writer sometimes treats footnote markers like `[^S1-3]` as
+    multiple "content tokens" and interleaves CAPEL markers between the
+    bracket contents — producing post-strip output like `[^ S8 -1 ]`,
+    `[^S1-1 ]`. `footnote_normalize`'s inline-marker regex requires the
+    inner token to match `[A-Za-z0-9._-]+` (no whitespace), so a single
+    space inside the brackets makes the marker invisible to normalize
+    and the footnote is silently dropped — destroying the entire
+    References block downstream (verified on the 2026-05-26 id=91
+    post-Wave-0 smoke: 47 of 180 markers broken, 0 def lines parsed).
+
+    Conservative: only strips whitespace INSIDE `[^...]` brackets;
+    leaves the surrounding text alone. The inner content may legitimately
+    contain `[A-Za-z0-9._-]` characters (matching the normalize token
+    char class). Anything else inside the brackets is whitespace OR a
+    rendering artifact — both safe to remove.
+    """
+    n_repairs = 0
+
+    def _fix(match: re.Match) -> str:
+        nonlocal n_repairs
+        inner = match.group(1)
+        cleaned = re.sub(r"\s+", "", inner)
+        if cleaned == inner:
+            return match.group(0)
+        n_repairs += 1
+        return f"[^{cleaned}]"
+
+    return _FOOTNOTE_BRACKET_RE.sub(_fix, text), n_repairs
+
+
 def strip_capel_markers(text: str) -> tuple[str, dict]:
     """Strip CAPEL markers from writer output.
 
@@ -427,6 +476,7 @@ def strip_capel_markers(text: str) -> tuple[str, dict]:
         "n_violations": 0,
         "n_word_repairs": 0,
         "n_heading_repairs": 0,
+        "n_bracket_repairs": 0,
     }
     if not text:
         return text, zero_stats
@@ -447,9 +497,11 @@ def strip_capel_markers(text: str) -> tuple[str, dict]:
     # contract above.
     stripped, n_heading_repairs = _repair_heading_numbers(stripped)
     stripped, n_word_repairs = _repair_word_fragments(stripped)
+    stripped, n_bracket_repairs = _repair_footnote_brackets(stripped)
     return stripped, {
         "n_markers_stripped": n_stripped,
         "n_violations": n_violations,
         "n_word_repairs": n_word_repairs,
         "n_heading_repairs": n_heading_repairs,
+        "n_bracket_repairs": n_bracket_repairs,
     }
