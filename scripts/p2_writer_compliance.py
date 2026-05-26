@@ -72,7 +72,6 @@ sys.path.insert(0, str(_REPO_ROOT))
 from deep_research.pipeline.architect import _ARCHETYPE_OUTLINE_SHAPE, _DEFAULT_OUTLINE_SHAPE  # noqa: E402
 from deep_research.writing_rules import insight_distribution  # noqa: E402
 
-
 # Footnote inline marker pattern — same shape as
 # `deep_research.pipeline.footnote_normalize._INLINE_RE` (negative
 # lookahead for `:` so def lines aren't counted as inline markers).
@@ -214,6 +213,19 @@ def _split_into_leaves(article: str, archetype: str) -> list[str]:
                 leaves.append("\n".join(current_lines))
             current_lines = []
             in_leaf = True
+            continue
+        # Greptile PR #30 follow-up (2026-05-26): when we're inside a
+        # leaf and we hit a SHALLOWER heading (H2/H3 boundary for a
+        # H4 leaf, H1 boundary for a H2 leaf), flush + exit leaf mode.
+        # Without this, the next H2/H3 section's heading text leaks
+        # into the preceding leaf's body — heading strings like
+        # "By 2030 trends in X" would fire false element detections
+        # against the wrong leaf, skewing per_element_rate_pct.
+        if 0 < depth < leaf_depth and in_leaf:
+            if current_lines:
+                leaves.append("\n".join(current_lines))
+            current_lines = []
+            in_leaf = False
             continue
         if in_leaf:
             current_lines.append(line)
@@ -373,7 +385,13 @@ def _score_section_opening_recap(article: str) -> dict:
             if stripped:
                 first_line = stripped
                 break
-        if first_line and not first_line.startswith(("|", "- ", "* ", "1.", "2.", "3.")):
+        # Greptile PR #30 follow-up (2026-05-26): `#` added to the
+        # non-prose prefix list. Sections whose first non-blank content
+        # line is a subheading (`### 1.1 Foo` or `#### 1.1.1 Bar`) were
+        # previously counted as prose-recap-compliant, inflating the
+        # rate and hiding the real failure mode the recap rule is meant
+        # to catch (table-first / list-first / heading-first openings).
+        if first_line and not first_line.startswith(("|", "- ", "* ", "1.", "2.", "3.", "#")):
             n_recap += 1
     rate = (n_recap / n_total) if n_total else 0.0
     return {

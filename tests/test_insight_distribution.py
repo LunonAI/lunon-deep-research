@@ -103,6 +103,39 @@ def test_insight_distribution_unknown_archetype_falls_back_to_default():
     assert d2 == _INSIGHT_DISTRIBUTION_DEFAULT
 
 
+def test_insight_distribution_returns_fresh_copy_for_known_archetype():
+    """Greptile PR #30 follow-up: caller mutation of the returned dict
+    must NOT corrupt the module-level `_INSIGHT_DISTRIBUTION_BY_ARCHETYPE`
+    constant. Pre-fix the known-archetype path returned the actual stored
+    dict object (mutable reference) — a caller doing
+    `d = insight_distribution('predict'); d['forward_looking_min'] = 99`
+    would silently corrupt the default for every subsequent call."""
+    # Snapshot the pre-call canonical value.
+    original = dict(_INSIGHT_DISTRIBUTION_BY_ARCHETYPE["predict"])
+    d = insight_distribution("predict")
+    # Mutate the returned dict.
+    d["forward_looking_min"] = 999
+    # The module-level constant must be UNTOUCHED.
+    assert _INSIGHT_DISTRIBUTION_BY_ARCHETYPE["predict"] == original, (
+        "insight_distribution returned a mutable reference — caller mutation "
+        "corrupted the module-level constant. Wrap return in dict(...)."
+    )
+    # And subsequent calls must return the original (uncorrupted) value.
+    d2 = insight_distribution("predict")
+    assert d2["forward_looking_min"] == original["forward_looking_min"]
+
+
+def test_insight_distribution_returns_fresh_copy_for_unknown_archetype():
+    """Symmetric guard: unknown-archetype path must also return a fresh
+    copy (this was the pre-fix behaviour but pinning so the
+    `dict(...)` wrapper isn't accidentally removed in a refactor)."""
+    original = dict(_INSIGHT_DISTRIBUTION_DEFAULT)
+    d = insight_distribution("unknown-archetype")
+    d["forward_looking_min"] = 999
+    # The module-level default must be UNTOUCHED.
+    assert _INSIGHT_DISTRIBUTION_DEFAULT == original
+
+
 def test_insight_distribution_writer_prompt_mirrors_targets():
     """The writer.write_section user prompt must include the per-
     archetype distribution targets so the writer sees the numbers
