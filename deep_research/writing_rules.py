@@ -158,11 +158,38 @@ _SECTION_OPENING_RECAP_RULE = (
 # unit from PR #20). "Grounded" stays — every insight element must be tied
 # to a named source / concrete data, not free speculation.
 _INSIGHT_MIN = (
-    "INSIGHT DENSITY — REQUIRED CLOSE-OF-LEAF (post-#3):\n"
-    "Every H4 leaf section (#### 1.1.1 Foo) must close with AT LEAST ONE of "
-    "the following four elements. The element is the leaf's analytical "
-    "payoff — not a tacked-on sentence, but the substantive synthesis that "
-    "makes the leaf worth reading:\n"
+    "INSIGHT DENSITY — DISTRIBUTIONAL COVERAGE (Wave 2 §3.2 rewrite):\n"
+    "Every leaf section (H4 `#### 1.1.1 Foo` in deep-hierarchy archetypes, "
+    "or H2 `## N Foo` body in flat archetypes like list-all) must close with "
+    "a substantive analytical payoff drawn from the four elements below. "
+    "Pre-Wave-2 the rule said 'pick AT LEAST ONE of the four' — the verified "
+    "id=91 smoke (2026-05-26) showed the writer over-fires the EASY elements "
+    "(contrarian 1.77× over, quant 2.44× over) and under-fires the HARD one "
+    "(forward-looking 0.14× short, 7× below Qianfan's density). Path of "
+    "least resistance defeats the rule's intent. Wave 2 now requires "
+    "DISTRIBUTIONAL coverage across the section's leaves rather than "
+    "per-leaf ANY-of-four:\n"
+    "\n"
+    "TARGET DISTRIBUTION (across all leaves in YOUR section — count "
+    "each leaf once for whichever element it primarily uses):\n"
+    "  • Element (a) FORWARD-LOOKING IMPLICATION: AIM ≥30% of leaves\n"
+    "  • Element (b) NAMED CONTRARIAN FRAMING:    AIM ≥20% of leaves\n"
+    "  • Element (c) QUANTIFIED PROJECTION:       AIM ≥20% of leaves\n"
+    "  • Element (d) NAMED-ALTERNATIVE COMPARISON: AIM ≥20% of leaves\n"
+    "(Totals can exceed 100% when a leaf carries two elements; the "
+    "primary-element count is what targets above measure. The post-process "
+    "scorer `scripts/p2_writer_compliance.py` measures each element's "
+    "landing rate per section so a sustained imbalance shows up in drift "
+    "logs.)\n"
+    "\n"
+    "PER-ARCHETYPE BIAS — predict / trend / recommend archetypes are "
+    "forward-looking-by-mission; bias the (a) share UP to ≥50% (at the "
+    "expense of (b) and (d), keeping (c) at ≥20% for quantified anchors). "
+    "list-all / compare archetypes are entity-enumerated; bias (d) UP to "
+    "≥30% (most leaves are inherently comparisons) while keeping (a) at "
+    "≥30%. explain-mechanism keeps the balanced 30/20/20/20 default.\n"
+    "\n"
+    "FOUR ELEMENTS (unchanged from PR #21 / Option-A-#3):\n"
     "\n"
     "  (a) FORWARD-LOOKING IMPLICATION — a stated consequence, follow-on "
     "      effect, or downstream condition, grounded in a named source and "
@@ -201,10 +228,49 @@ _INSIGHT_MIN = (
     "narrow definitional or list-membership leaf, for instance — state the "
     "leaf's bounded scope explicitly (e.g. 'the canonical record does not "
     "extend to X; the cross-arc comparison in §N.M handles the projection') "
-    "and STOP. Do NOT drop or skip the H4 leaf — every depth_seed in the "
-    "outline must produce a leaf section, in order. Under-payoff on one "
-    "leaf is preferable to a generic forecast the judge will read as filler."
+    "and STOP. Do NOT drop or skip the leaf — every depth_seed (or body "
+    "leaf in flat archetypes) in the outline must produce content. "
+    "Under-payoff on one leaf is preferable to a generic forecast the "
+    "judge will read as filler."
 )
+
+
+# Wave 2 §3.2 (2026-05-26): per-archetype distribution targets for the
+# four `_INSIGHT_MIN` elements. Surfaced via `insight_distribution(archetype)`
+# so the user-prompt mirror block in writer.write_section can interpolate
+# the right percentages for the archetype being written. Pre-Wave-2 the
+# rule lived ONLY in the system prompt as "pick ONE of (a)-(d)"; the
+# 2026-05-26 id=91 smoke showed that wasn't landing (forward-looking
+# 7× short, contrarian 1.77× over). Wave 2 mirrors to the user prompt
+# with explicit per-archetype targets the writer can self-check against.
+_INSIGHT_DISTRIBUTION_DEFAULT = {
+    "forward_looking_min": 30,
+    "contrarian_min": 20,
+    "quant_min": 20,
+    "alternative_min": 20,
+}
+_INSIGHT_DISTRIBUTION_BY_ARCHETYPE: dict[str, dict[str, int]] = {
+    # Forward-looking-by-mission archetypes: bias (a) UP to ≥50% at the
+    # expense of (b) and (d). Keep (c) at ≥20% for quantified anchors.
+    "predict": {"forward_looking_min": 50, "contrarian_min": 15, "quant_min": 20, "alternative_min": 15},
+    "trend": {"forward_looking_min": 50, "contrarian_min": 15, "quant_min": 20, "alternative_min": 15},
+    "recommend": {"forward_looking_min": 50, "contrarian_min": 15, "quant_min": 20, "alternative_min": 15},
+    # Entity-enumerated archetypes: bias (d) UP to ≥30% (most leaves are
+    # inherently comparisons across the matrix). Keep (a) at ≥30% so the
+    # forward-looking gap doesn't reopen.
+    "list-all": {"forward_looking_min": 30, "contrarian_min": 20, "quant_min": 20, "alternative_min": 30},
+    "compare": {"forward_looking_min": 30, "contrarian_min": 20, "quant_min": 20, "alternative_min": 30},
+    # Default balanced distribution for explain-mechanism and unknowns.
+    "explain-mechanism": dict(_INSIGHT_DISTRIBUTION_DEFAULT),
+}
+
+
+def insight_distribution(archetype: str | None) -> dict[str, int]:
+    """Return the per-archetype `_INSIGHT_MIN` distribution targets dict
+    (Wave 2 §3.2). Falls back to the balanced default for unknown
+    archetypes."""
+    return _INSIGHT_DISTRIBUTION_BY_ARCHETYPE.get(archetype or "", dict(_INSIGHT_DISTRIBUTION_DEFAULT))
+
 
 # NEW (W9 diagnostic 2026-05-21): the judge cited "inconsistent section
 # numbering" / "duplicated headings" as 30%+ of Readability losses. Make
