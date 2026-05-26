@@ -80,12 +80,29 @@ def _load_by_id(path: Path) -> dict[int, dict]:
 
 def _delta_row(baseline_row: dict, new_row: dict) -> dict:
     """Per-task delta dict with overall + per-dim Δ + the raw scores
-    on both sides for downstream rendering."""
+    on both sides for downstream rendering.
+
+    Greptile PR #29 follow-up (2026-05-26): the `overall_score` field is
+    now accessed via `.get()` with a None fallback (mirroring the
+    per-dim field handling below), so a harness row missing
+    `overall_score` (partial write, scorer crash mid-run) surfaces as a
+    clean None-marked row that `main()` filters with an explicit stderr
+    message — instead of raising an unhandled KeyError that propagates
+    through the list comprehension and crashes the script. The
+    `delta_overall` downstream consumers (`_gate_decision`,
+    `_render_human`) keep their non-None assumption; `main()` is
+    responsible for filtering None-overall rows before passing per_task
+    to those consumers.
+    """
+    baseline_overall = baseline_row.get(_OVERALL_FIELD)
+    new_overall = new_row.get(_OVERALL_FIELD)
     out = {
         "id": baseline_row.get("id"),
-        "delta_overall": new_row[_OVERALL_FIELD] - baseline_row[_OVERALL_FIELD],
-        "baseline_overall": baseline_row[_OVERALL_FIELD],
-        "new_overall": new_row[_OVERALL_FIELD],
+        "delta_overall": (new_overall - baseline_overall)
+        if (new_overall is not None and baseline_overall is not None)
+        else None,
+        "baseline_overall": baseline_overall,
+        "new_overall": new_overall,
     }
     for dim in _DIM_FIELDS:
         b = baseline_row.get(dim)
@@ -259,6 +276,23 @@ def main() -> None:
         sys.exit(2)
 
     per_task = [_delta_row(baseline[i], new[i]) for i in paired_ids]
+    # Greptile PR #29 follow-up: filter rows where overall_score was
+    # missing on either side. Downstream `_gate_decision` and
+    # `_render_human` assume `delta_overall` is a float; surfacing the
+    # missing-field gap here keeps them simple.
+    dropped = [r["id"] for r in per_task if r["delta_overall"] is None]
+    if dropped:
+        print(
+            f"warning: {len(dropped)} task(s) dropped — missing `{_OVERALL_FIELD}` on baseline or new (ids: {dropped})",
+            file=sys.stderr,
+        )
+        per_task = [r for r in per_task if r["delta_overall"] is not None]
+    if not per_task:
+        print(
+            f"error: every paired task was missing `{_OVERALL_FIELD}` — nothing to score",
+            file=sys.stderr,
+        )
+        sys.exit(2)
     verdict = _gate_decision(per_task, args.gate_cumulative, args.gate_per_task_floor)
 
     print(_render_human(per_task, verdict, args.baseline, args.new))
