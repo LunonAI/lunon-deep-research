@@ -17,6 +17,7 @@ memory bank keyed by the producing query's target_sections (items 13/25).
 
 import concurrent.futures
 import json
+import sys
 
 from .. import llm
 from . import specialists
@@ -216,7 +217,21 @@ def run(plan, prompt, language, archetype, domain):
                 role, gq, language=language, domain=domain, exa_mode=exa_mode, model_override=model_override
             )
         except concurrent.futures.TimeoutError:
+            # Greptile PR #26 follow-up (2026-05-26): make gap-fill timeouts
+            # visible — match the main-loop handler's pattern. Pre-fix
+            # gap-fill timeouts only bumped n_specialist_timeouts with no
+            # corresponding digest entry or stderr line, leaving a downstream
+            # drift-log reader unable to distinguish main-loop vs gap-fill
+            # contributions to the counter.
             n_specialist_timeouts += 1
+            print(
+                f"[orchestrator] gap-fill role={role} TIMEOUT after {_SPECIALIST_TIMEOUT_S}s; skipping",
+                file=sys.stderr,
+                flush=True,
+            )
+            digest_parts.append(
+                f"[{role}] (gap-fill TIMEOUT after {_SPECIALIST_TIMEOUT_S}s; proceeding without its findings)"
+            )
             continue
         except Exception:  # noqa: BLE001
             continue

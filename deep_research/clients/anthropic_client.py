@@ -28,6 +28,14 @@ _BASE = get("ANTHROPIC_BASE_URL") or None  # SDK default if empty
 # aggressive (the CLOSE_WAIT pile-up we observed suggests pool issues).
 _TIMEOUT = httpx.Timeout(connect=10.0, read=600.0, write=60.0, pool=10.0)
 
+# Greptile PR #26 follow-up (2026-05-26): cap the empty-content max_tokens
+# escalation (raw_call line ~142) at the same value tests/test_architect.py
+# pins for architect's initial literal — 28000. Below that ceiling we stay
+# inside Anthropic's edge-cut tolerance window (smoke-5 proved 32000 + think
+# streams reliably get cut). When the next person raises this, the test pin
+# in test_architect.py + tests below should be raised in lockstep.
+_MAX_TOKENS_ESCALATION_CEILING = 28000
+
 _client = anthropic.Anthropic(
     api_key=_KEY,
     timeout=_TIMEOUT,
@@ -43,14 +51,19 @@ _RETRYABLE = (
     # `httpx.RemoteProtocolError: peer closed connection without sending
     # complete message body (incomplete chunked read)` mid-architect-stream.
     # The anthropic SDK does NOT wrap mid-stream httpx errors as
-    # APIConnectionError — they propagate up unwrapped. Catching the broader
-    # httpx.HTTPError covers RemoteProtocolError + ReadTimeout + ConnectError
-    # + any other transient httpx-layer issue. Without this the adapter's
+    # APIConnectionError — they propagate up unwrapped. Catching
+    # httpx.TransportError covers the transport-layer errors we actually
+    # want to retry: RemoteProtocolError, ReadTimeout, ConnectError, plus
+    # the rest of the transport family. Greptile PR #26 follow-up
+    # (2026-05-26): narrowed from `httpx.HTTPError` (the whole-tree root)
+    # to `httpx.TransportError` so we DON'T accidentally retry on
+    # httpx.HTTPStatusError (4xx/5xx after .raise_for_status), which
+    # should fail fast. Without this transport-layer catch the adapter's
     # outer task-level retry (deep_research/adapter.py:112) fires instead,
     # which means redoing the whole task's planning + research from scratch
     # — observed cost: $1.21 burned on a doubled architect attempt with no
     # article output.
-    httpx.HTTPError,
+    httpx.TransportError,
 )
 
 
@@ -134,5 +147,14 @@ def raw_call(model, user, system="", max_tokens=8000, think=False, effort="low",
         if text:
             return text, usage
         last = f"empty content (stop={resp.stop_reason})"
-        kw["max_tokens"] = min(int(kw["max_tokens"] * 1.6), 32000)
+        # Greptile PR #26 follow-up (2026-05-26): empty-content escalation
+        # cap held at _MAX_TOKENS_ESCALATION_CEILING (28000), matching the
+        # `architect max_tokens ≤ 28000` pin in tests/test_architect.py.
+        # Pre-fix the cap was 32000 — exactly the value smoke-5 proved
+        # Anthropic's edge cuts. With messages.create() the SDK's pre-flight
+        # guard would refuse a 32000-token non-streaming retry; with
+        # messages.stream() (the smoke-5 follow-up switch) that guard is
+        # absent, so an empty-content retry could escalate the architect's
+        # initial 24000 → 32000 → re-enter the same edge-cut failure mode.
+        kw["max_tokens"] = min(int(kw["max_tokens"] * 1.6), _MAX_TOKENS_ESCALATION_CEILING)
     raise RuntimeError(f"Anthropic {model} failed after {max_retries} retries: {last}")

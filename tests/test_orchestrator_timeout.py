@@ -147,3 +147,58 @@ def test_specialist_timeout_constant_is_set_and_sane():
     to avoid effectively-unbounded behavior the pre-fix code had)."""
     assert hasattr(orchestrator, "_SPECIALIST_TIMEOUT_S")
     assert 60 <= orchestrator._SPECIALIST_TIMEOUT_S <= 600
+
+
+def test_gap_fill_timeout_logs_to_stderr_and_digest(monkeypatch, capsys):
+    """Greptile PR #26 follow-up (2026-05-26): gap-fill timeouts MUST be
+    visible — pre-fix the gap-fill handler only bumped
+    `n_specialist_timeouts` without a digest entry or stderr line, leaving
+    a downstream drift-log reader unable to distinguish main-loop vs
+    gap-fill contributions to the counter. The fix makes gap-fill match
+    the main-loop's digest-append + stderr-print pattern.
+
+    This test feeds a plan that completes its main loop fast, then has
+    _gap_review return a gap_fill item whose research() hangs — verifying
+    both the stderr message AND the digest marker fire."""
+
+    def fake_research(role, qlist, **_kw):
+        # First call (main loop) returns fast.
+        if qlist and qlist[0].get("id") != "gapfill":
+            return _fast_research(role=role)
+        # Gap-fill call hangs past the timeout.
+        time.sleep(60)
+        return {"role": role, "findings": [], "n_searches": 0}
+
+    monkeypatch.setattr(orchestrator, "research", fake_research)
+    monkeypatch.setattr(
+        orchestrator,
+        "_gap_review",
+        lambda *_a, **_kw: {
+            "review": [],
+            "gap_fill": [{"specialist_role": "evidence_gatherer", "brief": "fill the gap"}],
+        },
+    )
+    # Stub _compact to a deterministic join so the digest assertion below
+    # can look for the gap-fill TIMEOUT marker without invoking the real LLM.
+    monkeypatch.setattr(orchestrator, "_compact", lambda parts: "\n".join(parts) if parts else "")
+    monkeypatch.setattr(orchestrator, "_SPECIALIST_TIMEOUT_S", 1.5)
+
+    plan = {
+        "queries": [
+            {"id": "Q1", "text": "q1", "specialist_role": "evidence_gatherer", "target_sections": ["S1"]},
+        ],
+        "report_toc": [{"id": "S1", "title": "x"}],
+    }
+    result = orchestrator.run(plan, prompt="p", language="en", archetype="explain-mechanism", domain="default")
+
+    # The gap-fill hang must show as a stderr line — operator visibility.
+    captured = capsys.readouterr()
+    assert "gap-fill" in captured.err and "TIMEOUT" in captured.err, (
+        f"gap-fill timeout must emit a stderr line for operator visibility; got: {captured.err!r}"
+    )
+    # And as a digest entry — drift-log readers see the marker in the
+    # compacted digest.
+    digest = result.get("digest", "")
+    assert "gap-fill TIMEOUT" in digest, f"gap-fill timeout must append a digest marker; got: {digest!r}"
+    # Counter increments.
+    assert result["n_specialist_timeouts"] >= 1
