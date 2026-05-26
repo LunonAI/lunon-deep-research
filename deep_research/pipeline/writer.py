@@ -229,9 +229,41 @@ def write_section(
         f"{json.dumps(prior_titles, ensure_ascii=False)}\n\n"
         f"ACCEPTANCE CRITERIA THIS SECTION MUST SATISFY:\n"
         f"{json.dumps(_acs_for_section(plan, sid), ensure_ascii=False)}\n\n"
-        f"EVIDENCE FOR THIS SECTION ONLY (cite by inline source NAME; you may "
-        f"also add a numeric [n] but the sentence must stand without it):\n"
-        f"{json.dumps(ev_view, ensure_ascii=False)[:42000]}\n"
+        f"EVIDENCE FOR THIS SECTION ONLY — see CITATION CONTRACT below:\n"
+        f"{json.dumps(ev_view, ensure_ascii=False)[:42000]}\n\n"
+        f"CITATION CONTRACT — MANDATORY (post-2026-05-26 smoke; matches "
+        f"Qianfan #1-leaderboard footnote pattern):\n"
+        f"• Every load-bearing claim that came from a specific evidence "
+        f"atom MUST carry an inline `[^{sid}-N]` marker right after the "
+        f"sentence's citation context (e.g. `...as Lebrun (1999) showed[^{sid}-3]`). "
+        f"This is the format `footnote_normalize` parses to build the "
+        f"article's `## References` block — without it, your section "
+        f"silently produces ZERO footnotes and the judge sees an "
+        f"un-cited article (Qianfan id=56 has 326 inline markers; the "
+        f"2026-05-26 smoke produced 0 because earlier prompts did not "
+        f"make the inline marker mandatory).\n"
+        f"• REUSE markers across mentions of the SAME source — Qianfan "
+        f"reuses each `[^{sid}-N]` ~7× on average. Don't invent a new number "
+        f"per sentence when citing the same paper repeatedly. The "
+        f"section-scope `{sid}-` prefix is REQUIRED on reused markers too "
+        f"— bare `[^N]` (no section scope) WILL be stripped as orphans by "
+        f"footnote_normalize, silently dropping every reused citation.\n"
+        f"• Define each marker EXACTLY ONCE at the end of YOUR section, "
+        f'on its own line: `[^{sid}-1]: Author/Source (year), "Title," '
+        f"Publisher/Journal volume, pages.` URL is OPTIONAL — if the "
+        f"evidence atom's `url` is non-empty include it as ` — <url>` "
+        f"at the end, otherwise omit it. Academic citation metadata "
+        f"(author, year, title, venue) is the substantive payload; "
+        f"the URL is supplementary.\n"
+        f"• Section-scope `{sid}-N` is REQUIRED so markers from different "
+        f"sections don't collide; the post-process step renumbers "
+        f"globally. A bare `[^N]` without the section-scope WILL be "
+        f"stripped as orphan.\n"
+        f"• Inline NAME citations stay too: every sentence must still "
+        f"read complete if all `[^X]` markers are deleted. Footnotes "
+        f"are SUPPLEMENTARY identifiers, not the substantive claim.\n"
+        f"• Numeric `[n]` markers (without the `^`) are NOT used in this "
+        f"pipeline — only `[^{sid}-N]` form.\n"
         f"{capel_block}"
     )
     if feedback:
@@ -247,7 +279,7 @@ def write_section(
     # 7k; (c) refiner-pass output that needs room to grow. The "depth uplift"
     # PR #20 promises lands primarily via (i) the architect's deeper outline
     # (more sections × more H3 × explicit depth_seeds payload) and (ii) the
-    # length_ceiling 2.2× bump that lifts the per-section CAPEL target —
+    # length_ceiling 4.0× bump that lifts the per-section CAPEL target —
     # NOT primarily via this max_tokens headroom.
     raw = llm.call("writer", user, system=sys, max_tokens=14000, note=f"writer.sec.{sid}")
     if capel_active:
