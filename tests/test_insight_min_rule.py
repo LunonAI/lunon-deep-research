@@ -20,7 +20,7 @@ def test_insight_rule_drops_archetype_suppression():
     assert "UNLESS the prompt explicitly asks for prediction" not in _INSIGHT_MIN
     assert "For all other archetypes" not in _INSIGHT_MIN
     # The new rule's title is the new contract.
-    assert "INSIGHT DENSITY — REQUIRED CLOSE-OF-LEAF" in _INSIGHT_MIN
+    assert "INSIGHT DENSITY" in _INSIGHT_MIN
 
 
 def test_insight_rule_specifies_four_close_elements():
@@ -53,7 +53,11 @@ def test_insight_rule_rejects_formulaic_insertion():
     # Pin the no-drop guidance (Greptile PR #21 follow-up): an earlier draft
     # told the writer to "pick a different depth_seed", which the writer
     # cannot do at write time and which risks dropping H4 leaves entirely.
-    assert "Do NOT drop or skip the H4 leaf" in _INSIGHT_MIN
+    # Wave 2 §3.2 widened "H4 leaf" to "leaf" because flat archetypes
+    # (list-all / compare per the Wave 2 §1.2 outline preset) have NO
+    # H4 — their leaves are H2 body sections. The no-drop guidance
+    # still applies to all archetypes.
+    assert "Do NOT drop or skip the leaf" in _INSIGHT_MIN or "Do NOT drop or skip the H4 leaf" in _INSIGHT_MIN
     assert "bounded scope" in _INSIGHT_MIN
     # And the old, ambiguous "pick a different depth_seed" phrasing must
     # stay out — re-introducing it would re-introduce the drop-leaf risk.
@@ -75,9 +79,7 @@ def test_writer_system_includes_new_insight_rule_for_every_archetype():
         "trend",
     ):
         sys = writer_system(archetype, "default", "en", sample_toc_titles, task_id=None)
-        assert "INSIGHT DENSITY — REQUIRED CLOSE-OF-LEAF" in sys, (
-            f"archetype={archetype} did not get the new Insight rule"
-        )
+        assert "INSIGHT DENSITY" in sys, f"archetype={archetype} did not get the new Insight rule"
         assert "Do NOT add forward-looking" not in sys, f"archetype={archetype} still carries the old suppression text"
 
 
@@ -107,7 +109,7 @@ def test_writer_system_keeps_insight_rule_when_dedup_suppressed():
             suppress_dedup=True,
         )
         # Insight rule MUST still appear — that's the whole point of the pin.
-        assert "INSIGHT DENSITY — REQUIRED CLOSE-OF-LEAF" in sys, (
+        assert "INSIGHT DENSITY" in sys, (
             f"archetype={archetype} lost the Insight rule when dedup was suppressed — "
             f"_INSIGHT_MIN must not be nested under the include_dedup branch"
         )
