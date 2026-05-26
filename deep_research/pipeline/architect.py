@@ -219,11 +219,19 @@ def build(
     # W1 smoke. Latency decision (logged).
     # Token budget calibration:
     # - PR #20 bumped 16k → 24k for the depth_seeds payload (200-450 seeds).
-    # - PR #22 (#4) bumps 24k → 32k for the doubled query count (48-64) on
-    #   top of the existing payload. 32k leaves headroom for verbose
-    #   query rationales without truncation.
+    # - PR #22 (#4) tried 24k → 32k for the doubled query count (48-64) but
+    #   2026-05-25 reverted: the 32k cap with think=True produced ~17-min
+    #   streaming responses that Anthropic's edge consistently cut with
+    #   `httpx.RemoteProtocolError: peer closed connection without sending
+    #   complete message body`. Each architect attempt burned the full 17min
+    #   then failed; both adapter-level retries hit the same wall.
+    # - At 24k the architect's expected output (48-64 queries × ~100 tok +
+    #   24-32 ACs × ~80 tok + report_toc + entity_matrix + depth_seeds ≈
+    #   12-15k tok) fits with 1.5-2× headroom, and the call typically
+    #   completes in 5-8 min — well inside Anthropic's stream-duration
+    #   tolerance.
     plan = llm.call_json(
-        "architect", user, system=_SYSTEM, max_tokens=32000, effort="low", think=True, note="architect"
+        "architect", user, system=_SYSTEM, max_tokens=24000, effort="low", think=True, note="architect"
     )
     plan = _coerce_to_dict(plan)
     _normalize(plan, archetype=archetype)

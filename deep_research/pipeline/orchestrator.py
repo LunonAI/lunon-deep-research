@@ -3,11 +3,11 @@
 Plan-once → research 3-5 cycles → one forced gap-review → ≤2 gap-fill → stop
 (AI-Q orchestrator.j2 shape). Enforces:
 - Hard tool-call budget = 64 (each Exa search = 1 tool call; halts, never
-  exceeds). Sized to fit 5 specialists × _MAX_SEARCHES_PER_SPECIALIST (12) +
-  2 gap-fill calls + 2 calls of headroom = 60 + 2 + 2 = 64. Pre-PR-22-round-3
-  the budget was 24 — which CAPPED actual dispatches at ~5 per specialist
-  regardless of `_MAX_SEARCHES_PER_SPECIALIST=12`, silently neutering the
-  evidence-volume scaling shipped by PR #22.
+  exceeds). Sized to fit 5 specialists × specialists._MAX_SEARCHES_PER_SPECIALIST
+  (12) + 2 gap-fill calls + 2 calls of headroom = 64. Made safe by the
+  per-specialist wall-clock timeout (_SPECIALIST_TIMEOUT_S) that bounds
+  any single specialist's research() call — the 2026-05-25 CAPEL smoke
+  incident proved the BUDGET bump alone was unsafe without it.
 - Forced reflection: a `think` gap-review marking each acceptance criterion
   SATISFIED/PARTIAL/UNSAT, picking ≤2 critical gaps.
 - IterResearch compressed-report memory, bounded compaction every N=8 tool calls.
@@ -15,6 +15,7 @@ Specialists run in ISOLATED context (item 24); findings land in the WebWeaver
 memory bank keyed by the producing query's target_sections (items 13/25).
 """
 
+import concurrent.futures
 import json
 
 from .. import llm
@@ -22,19 +23,68 @@ from . import specialists
 from .memory_bank import MemoryBank
 from .specialists import research
 
-# P2-Option-A-#4 Greptile PR #22 follow-up round 3 (2026-05-25): BUDGET
-# bumped 24 → 64 to actually realise the 12-queries-per-specialist evidence
-# volume that PR #22 advertised. The dispatch math:
+# Per-specialist wall-clock cap (2026-05-25 follow-up after the CAPEL smoke
+# hang on id=56 where horizon_scanner hung mid-flight, stalling the whole
+# task indefinitely). 4 min is sized to cover the worst nominal case at
+# BUDGET=64 (12 Exa @ ~5s = 60s, + Nemotron extract @ up to 180s, + ~60s
+# buffer for compaction / network jitter). When the timeout fires the
+# specialist is dropped from the digest with no findings — the article
+# still ships with degraded evidence for that role rather than hanging.
+# Pre-fix the orchestrator's `for role in order` loop had no per-iteration
+# wall-clock bound; only the OpenRouter HTTP layer's 180s × 3 retries
+# capped any single LLM call, leaving inter-call hangs unbounded.
+_SPECIALIST_TIMEOUT_S = 240
+
+
+def _research_with_timeout(role, qlist, *, language, domain, exa_mode, model_override, timeout_s=None):
+    """Wrap `research()` in a wall-clock cap. Raises `concurrent.futures.TimeoutError`
+    on expiry; raises the underlying exception otherwise.
+
+    `timeout_s=None` resolves to the module-level `_SPECIALIST_TIMEOUT_S`
+    at CALL time (not import time) so monkeypatching the constant in tests
+    actually takes effect — and so a runtime tuning bump to the constant
+    propagates to every call site without code changes.
+
+    Thread lifecycle: on timeout the underlying network call cannot be safely
+    cancelled (Python can't kill threads mid-syscall), so we
+    `shutdown(wait=False)` the executor and let the hung thread continue
+    in the background. It will eventually die when the adapter process
+    exits. This is the right trade for our use case (single-task adapter
+    runs that exit after writing the jsonl) — preferable to never
+    completing the task.
+    """
+    if timeout_s is None:
+        timeout_s = _SPECIALIST_TIMEOUT_S
+    ex = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"specialist-{role}")
+    try:
+        fut = ex.submit(
+            research,
+            role,
+            qlist,
+            language=language,
+            domain=domain,
+            exa_mode=exa_mode,
+            model_override=model_override,
+        )
+        return fut.result(timeout=timeout_s)
+    finally:
+        # `wait=False` so we don't block on a hung worker thread. The thread
+        # will continue running in the background until the process exits.
+        ex.shutdown(wait=False)
+
+
+# P2-Option-A-#4 dispatch budget re-engaged at 64 (2026-05-25, Stage 1c of
+# the post-CAPEL-smoke follow-up). Sized to fit:
 #   5 specialists × specialists._MAX_SEARCHES_PER_SPECIALIST (12) = 60 main-loop
-#   + 2 gap-fill calls (max gap_fill items × 1 query each) = 62 minimum
-#   + 2 calls of headroom (rounding + safety margin) = 64.
-# Pre-fix the 24-budget plus the per-dispatch `min(5, BUDGET - tool_calls)`
-# slice (line 110 below) meant each specialist actually saw at most 5
-# queries — dropping the post-#4 raw-hit ceiling from the advertised
-# 5×12×10=600 to the real 5×5×10=250. Greptile caught this on round 3.
-# Cost note: ~+$1-3 per task (extra Exa searches) + ~+$0.50-1 per task in
-# additional `_compact` LLM calls at the COMPACT_EVERY=8 boundary (digest
-# now triggers compaction ~8x per task instead of 3x).
+#   + 2 gap-fill calls (max gap_fill items × 1 query each)         =  2
+#   + 2 calls of headroom (rounding + safety margin)               =  2
+#   total                                                          = 64
+# Safe to re-engage because `_research_with_timeout` (above) now bounds any
+# single specialist's research() call at _SPECIALIST_TIMEOUT_S (240s). The
+# 2026-05-25 CAPEL smoke incident at BUDGET=64 without that bound hung
+# indefinitely on horizon_scanner; with the bound, the worst case is one
+# specialist's findings dropped (digest gets a TIMEOUT marker) and the
+# task completes on the other 4 specialists' evidence.
 BUDGET = 64
 COMPACT_EVERY = 8
 
@@ -121,21 +171,29 @@ def run(plan, prompt, language, archetype, domain):
     # Per-archetype researcher routing (W9 diagnostic decision)
     model_override = TONGYI_MODEL if archetype in TONGYI_ROUTED_ARCHETYPES else ""
 
+    n_specialist_timeouts = 0  # telemetry for the post-2026-05-25 timeout layer
     for role in order:
         if tool_calls >= BUDGET:
             break
         qlist = groups.get(role, [])
         # Budget-aware: never let a dispatch push total past BUDGET. The
         # per-specialist cap is sourced from `specialists._MAX_SEARCHES_PER_SPECIALIST`
-        # (Greptile PR #22 round 3, 2026-05-25) — pre-fix the cap was a
-        # hardcoded `5` here, which silently overrode the post-#4 12-query
-        # bump in specialists.py and pinned every specialist at 5 queries
-        # regardless. Now both numbers move together from a single source.
+        # so both the orchestrator BUDGET and per-specialist cap move from
+        # a single source of truth (re-engaged 2026-05-25 Stage 1c after
+        # the timeout layer above made BUDGET=64 safe to ship).
         qlist = qlist[: max(1, min(specialists._MAX_SEARCHES_PER_SPECIALIST, BUDGET - tool_calls))]
         try:
-            res = research(
+            res = _research_with_timeout(
                 role, qlist, language=language, domain=domain, exa_mode=exa_mode, model_override=model_override
             )
+        except concurrent.futures.TimeoutError:
+            # Hard cap exceeded — drop this specialist's findings entirely,
+            # log the breakage so the dev-run reader sees it, continue.
+            n_specialist_timeouts += 1
+            digest_parts.append(
+                f"[{role}] (specialist TIMEOUT after {_SPECIALIST_TIMEOUT_S}s; proceeding without its findings)"
+            )
+            continue
         except Exception as e:  # noqa: BLE001  per-specialist resilience
             digest_parts.append(f"[{role}] (specialist failed: {type(e).__name__}; proceeding)")
             continue
@@ -152,7 +210,14 @@ def run(plan, prompt, language, archetype, domain):
         role = g.get("specialist_role", "generalist")
         gq = [{"id": "gapfill", "text": g.get("brief", ""), "target_sections": []}]
         try:
-            res = research(role, gq, language=language, domain=domain, exa_mode=exa_mode, model_override=model_override)
+            # Gap-fill also gets the wall-clock cap — same hang surface as
+            # the main loop (single Exa + Nemotron call), just smaller scope.
+            res = _research_with_timeout(
+                role, gq, language=language, domain=domain, exa_mode=exa_mode, model_override=model_override
+            )
+        except concurrent.futures.TimeoutError:
+            n_specialist_timeouts += 1
+            continue
         except Exception:  # noqa: BLE001
             continue
         tool_calls += res.get("n_searches", 0)
@@ -177,6 +242,13 @@ def run(plan, prompt, language, archetype, domain):
         "gap_review": gap.get("review", []),
         "tool_calls": tool_calls,
         "digest": _compact(digest_parts),
+        # Telemetry for the post-2026-05-25 timeout layer. Downstream nodes
+        # (orchestrate._persist_drift) can forward this into inner_loop_drift.jsonl
+        # to track how often specialists are hitting the wall-clock cap in
+        # production — non-zero values indicate either a specific specialist
+        # role is degraded (rate-limited / consistently slow) or BUDGET=64
+        # is sized too aggressively for current infra.
+        "n_specialist_timeouts": n_specialist_timeouts,
     }
 
 
