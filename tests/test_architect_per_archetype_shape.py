@@ -170,6 +170,89 @@ def test_format_retry_feedback_falls_back_to_default_when_archetype_none():
     assert "8-12 top sections" in feedback, feedback
 
 
+def test_writer_system_interpolates_per_archetype_subsection_bounds():
+    """Wave 2 PR #30 self-review: the system prompt's STRUCTURAL CAPS
+    block must reflect per-archetype `sub_min-sub_max` when
+    `outline_shape` is provided. Pre-fix it hardcoded "3-6 subsections"
+    which contradicted list-all's `0-2` user-prompt bounds. Pin both
+    that the hardcoded value is GONE and the per-archetype value
+    appears."""
+    from deep_research.pipeline.architect import _bounds_for_archetype
+    from deep_research.writing_rules import writer_system
+
+    # list-all preset: 0-2 subsections, seed_max=0 (flat, no H4)
+    list_all_bounds = _bounds_for_archetype("list-all")
+    sys_la = writer_system("list-all", "default", "en", ["A", "B"], task_id=None, outline_shape=list_all_bounds)
+    # System prompt must mention list-all's 0-2 sub range (not the
+    # hardcoded "3-6 subsections" pre-fix).
+    assert f"{list_all_bounds['sub_min']}-{list_all_bounds['sub_max']} subsections" in sys_la
+    # And FLAT outline language must be present for seed_max==0 archetypes.
+    assert "FLAT" in sys_la or "no H4" in sys_la.lower()
+    # The system prompt must NOT carry the pre-fix hardcoded "3-6
+    # subsections" string for flat archetypes (where bounds are 0-2).
+    assert "3-6 subsections per major section" not in sys_la
+
+    # explain-mechanism preset: 4-8 subsections, seed_max=4 (deep, H4 OK)
+    explain_bounds = _bounds_for_archetype("explain-mechanism")
+    sys_ex = writer_system("explain-mechanism", "default", "en", ["A", "B"], task_id=None, outline_shape=explain_bounds)
+    assert f"{explain_bounds['sub_min']}-{explain_bounds['sub_max']} subsections" in sys_ex
+    # Deep archetype must allow `#### N.N.N` headings — no FLAT language.
+    assert "#### N.N.N" in sys_ex or "H4 leaf" in sys_ex
+
+
+def test_writer_system_falls_back_to_default_when_outline_shape_none():
+    """Back-compat: `writer_system(..., outline_shape=None)` must
+    produce the historical 3-6 / 4-level prompt so any pre-Wave-2
+    caller that doesn't yet thread bounds through stays unbroken."""
+    from deep_research.writing_rules import writer_system
+
+    sys = writer_system("explain-mechanism", "default", "en", ["A", "B"], task_id=None)
+    # Default 3-6 subsections phrasing must appear.
+    assert "3-6 subsections per major section" in sys
+
+
+def test_writer_section_threads_archetype_bounds_into_system_prompt(monkeypatch):
+    """Wave 2 PR #30 self-review: `writer.write_section` must fetch the
+    per-archetype outline bounds + pass them to `writer_system` so the
+    system prompt and the user-prompt OUTLINE SHAPE block both
+    reference the same archetype-specific values."""
+    captured_sys: list[str] = []
+
+    def fake_llm_call(role, user, *, system, max_tokens, note):
+        captured_sys.append(system)
+        return "synthetic body content"
+
+    from deep_research.pipeline import writer as writer_module
+
+    monkeypatch.setattr(writer_module.llm, "call", fake_llm_call)
+    # Minimal plan + bank structure so write_section can run end-to-end.
+    plan = {"report_toc": [{"id": "S1", "title": "Intro"}], "queries": []}
+    unit = {"id": "S1", "title": "Intro", "depth": "broad", "subs": []}
+
+    class _FakeBank:
+        def for_section(self, sid):
+            return []
+
+    writer_module.write_section(
+        unit,
+        plan,
+        _FakeBank(),
+        prompt="test",
+        language="en",
+        archetype="list-all",
+        domain="default",
+        prior_titles=["Intro"],
+    )
+    assert captured_sys, "write_section did not call llm.call with a system prompt"
+    sys_prompt = captured_sys[0]
+    # The system prompt must carry the list-all per-archetype bounds
+    # (FLAT phrasing for seed_max=0 archetype).
+    assert "FLAT" in sys_prompt or "no H4" in sys_prompt.lower(), (
+        "write_section did not thread list-all's seed_max=0 outline_shape "
+        "to writer_system (system prompt missing FLAT/no-H4 wording)"
+    )
+
+
 def test_build_injects_per_archetype_outline_block_into_user_prompt(monkeypatch):
     """Wave 2 §1.2: the architect's user prompt must carry the per-
     archetype OUTLINE SHAPE override block so the LLM sees the right

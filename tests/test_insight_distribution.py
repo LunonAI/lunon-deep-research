@@ -62,29 +62,37 @@ def test_insight_distribution_default_keys_complete():
 
 def test_insight_distribution_for_predict_biases_forward_looking_up():
     """predict / trend / recommend are forward-looking-by-mission. The
-    (a) target must be UP to ≥50%, biasing OUT of (b) and (d)."""
+    (a) target must be UP to ≥40% (Wave 2 PR #30 calibration against
+    the reference trend id=38 weighted mean of 58% forward-looking)."""
     for archetype in ("predict", "trend", "recommend"):
         d = insight_distribution(archetype)
-        assert d["forward_looking_min"] >= 50, f"{archetype}: forward_looking_min should be ≥50%"
-        # (c) quant stays at ≥20 for quantified anchors.
-        assert d["quant_min"] >= 20, f"{archetype}: quant_min should stay at ≥20%"
+        assert d["forward_looking_min"] >= 40, f"{archetype}: forward_looking_min should be ≥40%"
 
 
 def test_insight_distribution_for_list_all_biases_alternative_up():
     """list-all / compare are entity-enumerated archetypes — most
-    leaves are inherently comparisons across the matrix. Bias (d) UP
-    to ≥30% while keeping (a) at ≥30% so the forward-looking gap
-    doesn't reopen."""
+    leaves are inherently comparisons across the matrix. Wave 2 PR
+    #30 calibration against the reference list-all weighted mean
+    (alt 59%) bumps target to ≥45%. Forward-looking also bumped to
+    ≥50% per the reference's 69% observed rate."""
     for archetype in ("list-all", "compare"):
         d = insight_distribution(archetype)
-        assert d["alternative_min"] >= 30, f"{archetype}: alternative_min should be ≥30%"
-        assert d["forward_looking_min"] >= 30, f"{archetype}: forward_looking_min should be ≥30%"
+        assert d["alternative_min"] >= 45, f"{archetype}: alternative_min should be ≥45% (corpus-calibrated)"
+        assert d["forward_looking_min"] >= 50, f"{archetype}: forward_looking_min should be ≥50% (corpus-calibrated)"
 
 
-def test_insight_distribution_for_explain_mechanism_is_balanced():
-    """explain-mechanism uses the balanced 30/20/20/20 default."""
+def test_insight_distribution_for_explain_mechanism_corpus_calibrated():
+    """explain-mechanism uses reference-calibrated targets (Wave 2 PR
+    #30): fwd 28 / contr 8 / quant 1 / alt 42 — derived from the reference
+    corpus weighted mean (35 / 10 / 2 / 53). Notably LOW on quant
+    and contrarian — the reference explains with alternatives + forward-
+    looking projection, not contrarian framing."""
     d = insight_distribution("explain-mechanism")
-    assert d == _INSIGHT_DISTRIBUTION_DEFAULT
+    # Alternative is the dominant element for explain-mech per the reference.
+    assert d["alternative_min"] >= 40
+    # Contrarian/quant are minimal in the reference — keep targets low.
+    assert d["contrarian_min"] <= 15
+    assert d["quant_min"] <= 10
 
 
 def test_insight_distribution_unknown_archetype_falls_back_to_default():
@@ -101,14 +109,16 @@ def test_insight_distribution_writer_prompt_mirrors_targets():
     upfront (where its attention lands, not just in the system prompt)."""
     from deep_research.pipeline.writer import _insight_distribution_block
 
-    # predict archetype: forward-looking aim ≥50%
+    # predict archetype: forward-looking aim ≥45% (Wave 2 PR #30
+    # corpus-calibrated against the reference trend's 58% observed rate).
     block = _insight_distribution_block("predict")
     assert "INSIGHT DISTRIBUTION" in block
-    assert "≥50%" in block
-    # list-all archetype: alternative aim ≥30%
+    assert "≥45%" in block
+    # list-all archetype: alternative aim ≥47% (Wave 2 PR #30
+    # corpus-calibrated against the reference list-all's 59% observed rate).
     block_la = _insight_distribution_block("list-all")
     assert "INSIGHT DISTRIBUTION" in block_la
-    assert "≥30%" in block_la
+    assert "≥47%" in block_la or "≥45%" in block_la
     # The compliance scorer reference must be there so the writer
     # knows the targets are MEASURED downstream.
     assert "p2_writer_compliance.py" in block

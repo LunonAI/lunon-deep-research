@@ -148,3 +148,78 @@ def test_synthesis_counts_unique_markers_not_total_occurrences():
     assert n == 1  # one unique marker → one def
     # Only one def line appended.
     assert out.count("[^S1-1]:") == 1
+
+
+# ---- Wave 2 PR #30 self-review: name-based mapping fallback (Tier 1) ----
+
+
+def test_synthesis_name_based_mapping_when_writer_used_wrong_number():
+    """The writer ignored the pre-assigned numbering and cited atom #3
+    (Lebrun) as `[^S1-1]`. The body has "as Lebrun (1999) showed[^S1-1]"
+    explicitly naming the source. Name-based Tier 1 lookup must override
+    the index-based fallback so the def line correctly attributes
+    Lebrun to S1-1 (not McKinsey, which is atom #1 by index)."""
+    text = "## 1 Intro\n\nPer Lebrun (1999), the auction theory holds[^S1-1]. Other prior work disagrees.\n"
+    out, n = _synthesize_missing_defs(text, "S1", _EVIDENCE)
+    assert n == 1
+    # Lebrun is _EVIDENCE[2] (index 2, marker S1-3 by Wave 2 contract).
+    # But the body's name context attributes S1-1 to Lebrun explicitly,
+    # so the synthesized def must use Lebrun's metadata.
+    assert "[^S1-1]: Lebrun (1999) — https://example.com/lebrun" in out
+    # And the WRONG mapping (McKinsey via index) must NOT appear.
+    assert "[^S1-1]: McKinsey" not in out
+
+
+def test_synthesis_falls_back_to_index_when_no_name_match():
+    """When the marker's citation context doesn't name any atom's
+    source (the writer wrote 'as the analysis shows[^S1-2]' with no
+    attribution), Tier 2 index-based mapping fires (marker N → atom
+    N-1). Verifies the fallback ladder works correctly."""
+    text = "## 1 Intro\n\nThe analysis shows three findings[^S1-2]. Details follow.\n"
+    out, n = _synthesize_missing_defs(text, "S1", _EVIDENCE)
+    assert n == 1
+    # S1-2 → atom index 1 → Gartner (no url, see _EVIDENCE fixture).
+    assert "[^S1-2]: Gartner (2024)" in out
+
+
+def test_synthesis_name_window_bounded_by_paragraph():
+    """Greptile-style edge case: a writer-emitted def line for `[^S1-1]`
+    naming "McKinsey (2025)" must NOT bleed into the name-window of
+    `[^S1-2]` in an adjacent paragraph. Paragraph boundaries (≥2
+    consecutive newlines) cap the window so def-line metadata doesn't
+    misattribute neighbors. Pin so a future window-widening can't
+    re-introduce the bleed."""
+    text = (
+        "## 1 Intro\n\n"
+        "Per Source A[^S1-1].\n\n"  # paragraph 1: marker S1-1, no source name
+        '[^S1-1]: McKinsey (2025), "Report A," McKinsey Quarterly.\n\n'
+        "Per the second source[^S1-2].\n"  # paragraph 3: marker S1-2, no source name
+    )
+    out, n = _synthesize_missing_defs(text, "S1", _EVIDENCE)
+    # S1-1 already defined (writer-emitted) → skip.
+    # S1-2 → name-based lookup finds NO source name in its paragraph
+    # (paragraph 3 has no atom names), so Tier 2 index fires:
+    # S1-2 → atom index 1 → Gartner.
+    assert n == 1
+    assert "[^S1-2]: Gartner (2024)" in out
+    # And McKinsey must NOT have been attributed to S1-2 via window bleed.
+    assert "[^S1-2]: McKinsey" not in out
+
+
+def test_writer_prompt_carries_wrong_marker_number_forbidden_example():
+    """Wave 2 PR #30 self-review: the CITATION CONTRACT must include a
+    FORBIDDEN section calling out wrong-marker-number renumbering (the
+    failure mode the name-based fallback was added to recover from).
+    Pin so the prompt safeguard isn't silently dropped."""
+    import inspect
+
+    from deep_research.pipeline import writer as writer_module
+
+    src = inspect.getsource(writer_module.write_section)
+    # The FORBIDDEN section must explicitly call out the renumbering
+    # anti-pattern (writer picking own marker numbers instead of using
+    # atom's pre-assigned marker).
+    assert "picking your own marker numbers" in src or "do NOT renumber" in src.lower(), (
+        "CITATION CONTRACT must include an explicit FORBIDDEN clause "
+        "for wrong-marker-number renumbering (Wave 2 PR #30 self-review)."
+    )

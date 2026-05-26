@@ -22,6 +22,14 @@ from .. import llm
 from .. import writing_rules as wr
 from ._capel_strip import strip_capel_markers
 
+# Wave 2 §1.2 follow-up (2026-05-26 PR #30 self-review): writer.py reads
+# the per-archetype outline bounds from architect and threads them into
+# `writer_system()` so the system-prompt STRUCTURAL CAPS block matches
+# the user-prompt OUTLINE SHAPE block (no system/user contradiction).
+# Lazy import inside the call to avoid module-load circular-import
+# concerns (architect doesn't currently import writer, but defending
+# against future changes).
+
 
 def _capel_g_on() -> bool:
     # P2-Wave-2 hardcoded post-sanity-4 (2026-05-23: paired ΔO +0.0034 vs B0
@@ -83,12 +91,18 @@ def write_opening(plan, prompt, language, archetype, domain, digest, *, task_id=
     with `write_section` but the opening's `_DEDUP_RULE` decision matches
     section behavior (G suppresses there too for consistency).
     """
+    # Wave 2 §1.2 follow-up: pass per-archetype outline bounds for
+    # system-prompt-vs-user-prompt consistency (see write_section).
+    from .architect import _bounds_for_archetype
+
+    outline_shape = _bounds_for_archetype(archetype)
     sys = wr.writer_system(
         archetype,
         domain,
         language,
         [s.get("title") for s in plan.get("report_toc", [])],
         task_id=task_id,
+        outline_shape=outline_shape,
     )
     user = (
         f"PROMPT ({language}):\n{prompt}\n\nREPORT TITLE: "
@@ -141,12 +155,22 @@ def write_section(
         }
         for i, e in enumerate(evidence)
     ]
+    # Wave 2 §1.2 follow-up (PR #30 self-review): thread per-archetype
+    # outline bounds into writer_system so the system-prompt STRUCTURAL
+    # CAPS block matches the user-prompt OUTLINE SHAPE block (no
+    # system/user contradiction). Without this, list-all sections would
+    # get system="3-6 subsections + 4 levels" while user="0-2 subs +
+    # no H4" — the LLM would have to pick one to follow.
+    from .architect import _bounds_for_archetype
+
+    outline_shape = _bounds_for_archetype(archetype)
     sys = wr.writer_system(
         archetype,
         domain,
         language,
         [s.get("title") for s in plan.get("report_toc", [])],
         task_id=task_id,
+        outline_shape=outline_shape,
     )
 
     capel_block = ""
@@ -287,6 +311,14 @@ def write_section(
         f"counter does NOT count def lines as 'content tokens' — emit "
         f"def lines AFTER your section's body content, AFTER reaching "
         f"the CAPEL `<0>` marker if applicable.\n"
+        f"• FORBIDDEN: picking your own marker numbers instead of using "
+        f"the atom's pre-assigned `marker` field. If atom #5 in the "
+        f"evidence list is pre-assigned `[^{sid}-5]`, cite it as "
+        f"`[^{sid}-5]` — NOT as `[^{sid}-1]` or `[^{sid}-3]` or any "
+        f"other number. The post-process safety net maps marker `N` to "
+        f"atom `N-1` (1-indexed); if you renumber, your synthesized def "
+        f"line will point to the WRONG source. The renaming feels like "
+        f"polish but breaks the citation surface — DO NOT do it.\n"
         f"• Section-scope `{sid}-N` is REQUIRED so markers from different "
         f"sections don't collide; the post-process step renumbers "
         f"globally. A bare `[^N]` without the section-scope WILL be "
@@ -388,10 +420,31 @@ def _synthesize_missing_defs(text: str, sid: str, evidence: list) -> tuple[str, 
     number in `write_section` above (atom N gets `[^{sid}-N]`). This
     safety net parses the writer's output, finds inline markers in the
     `{sid}-N` namespace that lack matching def lines, looks up the
-    corresponding atom by index, and appends synthesized def lines at
-    section end. The append preserves the contract's section-scope
-    semantics so `footnote_normalize` then renumbers globally as if the
-    writer had emitted the defs itself.
+    corresponding atom, and appends synthesized def lines at section
+    end. The append preserves the contract's section-scope semantics
+    so `footnote_normalize` then renumbers globally as if the writer
+    had emitted the defs itself.
+
+    Wave 2 PR #30 self-review robustness fix: the lookup uses a TWO-TIER
+    fallback to handle writers that ignore the pre-assigned numbering:
+
+      Tier 1 (name-based): scan the body ±200 chars around each missing
+        marker's citation context for any atom's `source_name`. If a
+        match is found, use THAT atom's metadata for the synthesized
+        def — guarantees correct source attribution even when the
+        writer used arbitrary marker numbers (e.g. cited atom #5 as
+        `[^S1-2]` because it consulted them out of order).
+
+      Tier 2 (index-based fallback): use atom at index N-1 (1-indexed
+        contract). Original Wave 2 behaviour, kept as fallback for
+        markers whose citation context doesn't mention any atom's
+        source name (the writer cited "as the analysis shows[^S1-3]"
+        without naming the analysis).
+
+      Tier 3 (out-of-bounds placeholder): if neither tier produces a
+        mapping (marker number > evidence count AND no name match),
+        emit a placeholder def so the marker isn't stripped as orphan.
+        Operator can inspect via drift log.
 
     Synthesis is GATED ON THIS SECTION'S `{sid}-N` namespace — markers
     from other sections (which a writer wouldn't legitimately emit but
@@ -402,9 +455,10 @@ def _synthesize_missing_defs(text: str, sid: str, evidence: list) -> tuple[str, 
     """
     if not evidence:
         return text, 0
-    # Collect cited marker numbers in this section's namespace.
-    cited_numbers: set[int] = set()
+    # Collect cited marker numbers in this section's namespace, with
+    # their citation-context byte spans (for name-based lookup below).
     namespace_prefix = f"{sid}-"
+    cited_spans: dict[int, tuple[int, int]] = {}  # {marker_n: (span_start, span_end)}
     for m in _INLINE_MARKER_RE.finditer(text):
         token = m.group(1)
         if not token.startswith(namespace_prefix):
@@ -413,8 +467,11 @@ def _synthesize_missing_defs(text: str, sid: str, evidence: list) -> tuple[str, 
             n = int(token[len(namespace_prefix) :])
         except ValueError:
             continue
-        cited_numbers.add(n)
-    if not cited_numbers:
+        # First-occurrence span only — reused markers all share the
+        # same atom mapping, so one window is enough.
+        if n not in cited_spans:
+            cited_spans[n] = (m.start(), m.end())
+    if not cited_spans:
         return text, 0
     # Collect existing def-line numbers in this section's namespace.
     defined_numbers: set[int] = set()
@@ -428,33 +485,76 @@ def _synthesize_missing_defs(text: str, sid: str, evidence: list) -> tuple[str, 
             continue
         defined_numbers.add(n)
     # Synthesize defs for cited-but-undefined markers, in numeric order.
-    missing = sorted(n for n in cited_numbers if n not in defined_numbers)
+    missing = sorted(n for n in cited_spans if n not in defined_numbers)
     if not missing:
         return text, 0
     synth_lines: list[str] = []
     for n in missing:
-        # Marker N maps to evidence atom index N-1 (1-indexed contract).
-        # Out-of-range markers (writer picked a number with no
-        # corresponding atom) get a generic "synthesized; source mapping
-        # lost" def so the marker isn't stripped as orphan — preserves
-        # the citation surface even when the writer-side numbering was
-        # off. Operator can inspect via drift log if needed.
-        idx = n - 1
-        if 0 <= idx < len(evidence):
-            atom = evidence[idx]
+        atom = _resolve_atom_for_marker(text, sid, n, cited_spans[n], evidence)
+        if atom is None:
+            line = f"[^{sid}-{n}]: Evidence atom (writer-emitted marker out of bounds for this section's pack)"
+        else:
             source = (atom.get("source_name") or "").strip() or "Evidence atom"
             url = (atom.get("url") or "").strip()
-            if url:
-                line = f"[^{sid}-{n}]: {source} — {url}"
-            else:
-                line = f"[^{sid}-{n}]: {source}"
-        else:
-            line = f"[^{sid}-{n}]: Evidence atom (writer-emitted marker out of bounds for this section's pack)"
+            line = f"[^{sid}-{n}]: {source} — {url}" if url else f"[^{sid}-{n}]: {source}"
         synth_lines.append(line)
     # Append def block at section end (with a blank-line separator so it
     # doesn't run into the writer's final paragraph).
     text = text.rstrip() + "\n\n" + "\n".join(synth_lines) + "\n"
     return text, len(missing)
+
+
+# Wave 2 PR #30 self-review: name-based mapping window.
+#
+# The window is BOUNDED BY PARAGRAPH BOUNDARIES so adjacent markers'
+# def lines (which live on their own lines, typically separated by `\n`)
+# don't bleed into each other's citation contexts. Without the
+# paragraph bound, the writer-emitted def line `[^S1-1]: McKinsey (2025)`
+# would name-match for S1-2's window (when the two markers are close
+# in the body) and wrongly attribute S1-2 to McKinsey.
+#
+# Within the paragraph, we cap at ±_NAME_MATCH_WINDOW chars so very
+# long paragraphs (rare in practice) don't pull source names from
+# unrelated sentences.
+_NAME_MATCH_WINDOW = 200
+
+
+def _resolve_atom_for_marker(text: str, sid: str, n: int, span: tuple[int, int], evidence: list) -> dict | None:
+    """Three-tier atom lookup for `_synthesize_missing_defs`.
+
+    Returns the resolved atom dict, or None for the out-of-bounds case
+    (caller emits placeholder def). See `_synthesize_missing_defs`
+    docstring for tier semantics.
+    """
+    # Tier 1: name-based. Window bounded by paragraph (≥2 consecutive
+    # newlines on each side) AND ±_NAME_MATCH_WINDOW chars within the
+    # paragraph. First match wins in atom-list order.
+    span_start, span_end = span
+    # Find paragraph start (previous \n\n or start of text).
+    para_start_match = list(re.finditer(r"\n\n", text[:span_start]))
+    para_start = para_start_match[-1].end() if para_start_match else 0
+    # Find paragraph end (next \n\n or end of text).
+    after_match = re.search(r"\n\n", text[span_end:])
+    para_end = span_end + after_match.start() if after_match else len(text)
+    # Cap to ±_NAME_MATCH_WINDOW within the paragraph.
+    window_start = max(para_start, span_start - _NAME_MATCH_WINDOW)
+    window_end = min(para_end, span_end + _NAME_MATCH_WINDOW)
+    window = text[window_start:window_end]
+    for atom in evidence:
+        source_name = (atom.get("source_name") or "").strip()
+        if not source_name:
+            continue
+        # Substring match. Source names are typically short distinctive
+        # strings like "McKinsey 2025" or "Lebrun (1999)" — case-sensitive
+        # match avoids false hits on common words.
+        if source_name in window:
+            return atom
+    # Tier 2: index-based fallback. Marker N → atom index N-1.
+    idx = n - 1
+    if 0 <= idx < len(evidence):
+        return evidence[idx]
+    # Tier 3: out-of-bounds. Caller emits placeholder.
+    return None
 
 
 def assemble(opening: str, sections: list) -> str:
