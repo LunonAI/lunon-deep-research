@@ -28,13 +28,29 @@ from deep_research.writing_rules import (
 
 def test_insight_min_rule_describes_distributional_coverage():
     """The system-prompt rule must explicitly say DISTRIBUTIONAL COVERAGE
-    + spell out the percentage targets per element. Pre-Wave-2 it said
-    'pick ONE of (a)-(d)' which let the writer choose the easy element
-    on every leaf."""
+    so the writer knows the rule shape (not 'pick ONE of (a)-(d)').
+
+    Greptile PR #30 round-2 follow-up: previously this test asserted
+    hardcoded `≥30%` / `≥20%` percentages, but those values lived in
+    BOTH the system prompt (this constant) AND the user prompt (via
+    `_insight_distribution_block`), creating a stale source of truth
+    that contradicted per-archetype calibration. The numbers now live
+    EXCLUSIVELY in the user prompt; the system prompt explains the
+    coverage CONCEPT + per-archetype bias LOGIC and defers to the
+    user prompt for exact percentages."""
     assert "DISTRIBUTIONAL COVERAGE" in _INSIGHT_MIN, _INSIGHT_MIN[:500]
-    # All four target percentages must appear in the rule.
-    assert "≥30%" in _INSIGHT_MIN  # forward-looking default
-    assert "≥20%" in _INSIGHT_MIN  # contrarian / quant / alternative default
+    # The TARGET DISTRIBUTION block must explicitly defer to the
+    # user-prompt block for exact percentages (no more hardcoded floors).
+    assert "INSIGHT DISTRIBUTION FOR THIS SECTION" in _INSIGHT_MIN
+    # The four elements must still be enumerated (their definitions
+    # haven't moved — only the percentage targets did).
+    for element in (
+        "FORWARD-LOOKING IMPLICATION",
+        "NAMED CONTRARIAN FRAMING",
+        "QUANTIFIED PROJECTION OR CONFIDENCE RANGE",
+        "NAMED-ALTERNATIVE COMPARISON",
+    ):
+        assert element in _INSIGHT_MIN, f"missing element: {element}"
 
 
 def test_insight_min_rule_documents_per_archetype_bias():
@@ -134,6 +150,47 @@ def test_insight_distribution_returns_fresh_copy_for_unknown_archetype():
     d["forward_looking_min"] = 999
     # The module-level default must be UNTOUCHED.
     assert _INSIGHT_DISTRIBUTION_DEFAULT == original
+
+
+def test_insight_min_system_prompt_carries_no_hardcoded_percentages():
+    """Greptile PR #30 round-2 follow-up: `_INSIGHT_MIN` (system prompt)
+    must NOT carry hardcoded distribution percentages that contradict
+    the per-archetype calibrated values in `_INSIGHT_DISTRIBUTION_BY_
+    ARCHETYPE`. Pre-fix the system prompt said 'AIM ≥30% / ≥20% / ≥20%
+    / ≥20%' as a uniform floor, while the user prompt (via
+    `_insight_distribution_block`) interpolated per-archetype values
+    that for list-all gave ≥10% contrarian and for explain-mechanism
+    gave ≥1% quant. A writer would anchor on the higher system-prompt
+    floor and over-fire the elements §3.2 was meant to suppress.
+
+    Fix: the system prompt now defers explicitly to the user-prompt
+    block for exact percentages, and only the LOGIC (which archetype
+    biases which element up/down) is documented in the system prompt.
+    Pin the no-hardcoded-percentages invariant so a future refactor
+    can't accidentally re-introduce the duplicated source of truth."""
+    from deep_research.writing_rules import _INSIGHT_MIN
+
+    # The system prompt must NOT carry the old uniform-floor numbers
+    # that contradicted the per-archetype calibration.
+    assert "AIM ≥30%" not in _INSIGHT_MIN, "stale '≥30%' hardcoded floor — should defer to user prompt"
+    assert "AIM ≥20%" not in _INSIGHT_MIN, "stale '≥20%' hardcoded floor — should defer to user prompt"
+    # The system prompt must NOT carry the old per-archetype-specific
+    # numbers either (they're in the user-prompt block now).
+    assert "bias the (a) share UP to ≥50%" not in _INSIGHT_MIN
+    assert "bias (d) UP to ≥30%" not in _INSIGHT_MIN
+    assert "balanced 30/20/20/20" not in _INSIGHT_MIN
+    # And the system prompt MUST point the writer to the user-prompt
+    # block as the source of truth for exact targets.
+    assert "INSIGHT DISTRIBUTION FOR THIS SECTION" in _INSIGHT_MIN
+    assert "DEFER TO THAT BLOCK" in _INSIGHT_MIN or "single source of truth" in _INSIGHT_MIN
+    # The LOGIC (WHY targets differ per archetype) MUST still be present
+    # so the writer understands the rationale, just without specific
+    # numbers.
+    assert "PER-ARCHETYPE BIAS LOGIC" in _INSIGHT_MIN
+    # All three bias narratives present so the writer understands the
+    # archetype-shape mapping conceptually.
+    assert "forward-looking-by-mission" in _INSIGHT_MIN
+    assert "entity-enumerated" in _INSIGHT_MIN
 
 
 def test_insight_distribution_writer_prompt_mirrors_targets():
