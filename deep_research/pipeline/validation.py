@@ -831,16 +831,18 @@ def _validate_limitations_chapter(article: str, limitations_chapter) -> dict | N
         # Locate the heading. Prefer title match (rich heading text), fall
         # back to type-name keyword search (e.g., "data granularity" /
         # "数据" + "粒度" — but the type-name fallback is too noisy for ZH
-        # so we only fall back when title is empty). Greptile pre-scan:
-        # the heading regex follows the stakeholder-validator convention
-        # (#{2,4}, optional numbering prefix, case-insensitive label end-
-        # anchored to whitespace / colon / dash).
+        # so we only fall back when title is empty). The heading regex
+        # anchors to a word boundary (`\b`) after the label rather than
+        # requiring end-of-line / punctuation immediately after, so
+        # elaborated LLM headings like `### 5.3 Time Validity Horizon`
+        # still match for `anchor_text="Time Validity"`. `\b` still
+        # blocks mid-word false-positives (`Validityx`).
         anchor_text = sub_title if sub_title else sub_type.replace("_", " ")
         if not anchor_text:
             missing_subsections.append(sub_type)
             continue
         m = re.search(
-            r"(?m)^#{2,4}\s+(?:\d+(?:\.\d+)*\s+)?" + re.escape(anchor_text) + r"(?=\s*(?:$|[:\-—–]))",
+            r"(?m)^#{2,4}\s+(?:\d+(?:\.\d+)*\s+)?" + re.escape(anchor_text) + r"\b",
             article,
             re.IGNORECASE,
         )
