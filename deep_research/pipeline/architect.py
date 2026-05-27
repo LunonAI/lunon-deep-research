@@ -1205,14 +1205,17 @@ def _normalize(plan: dict, *, archetype: str | None = None) -> None:
         # Normalize to a clean list.
         sc["stakeholders"] = [s for s in stakeholders if isinstance(s, dict) and s.get("id")]
         audit["stakeholder_chapter_count"] = len(sc["stakeholders"])
-        if sc["stakeholders"]:
-            if len(sc["stakeholders"]) < _STAKEHOLDER_COUNT_MIN:
-                audit["shortfalls"].append(
-                    f"stakeholder_chapter.count={len(sc['stakeholders'])}<{_STAKEHOLDER_COUNT_MIN}"
-                )
-            if len(sc["stakeholders"]) > _STAKEHOLDER_COUNT_MAX:
-                audit["shortfalls"].append(
-                    f"stakeholder_chapter.count={len(sc['stakeholders'])}>{_STAKEHOLDER_COUNT_MAX}"
-                )
+        # Greptile PR #42 round-5 fix: pre-fix the `if sc["stakeholders"]:`
+        # guard skipped both count checks when normalization produced an
+        # empty list (e.g., the LLM emitted stakeholders without `id`
+        # fields, all of which were stripped above). The audit then
+        # recorded `stakeholder_chapter_count=0` with NO shortfall —
+        # contradicting the `< _STAKEHOLDER_COUNT_MIN` check that fires
+        # for count=1 or count=2. Dropping the guard makes the existing
+        # bounds checks cover 0 correctly (0 < 3 fires the same shortfall).
+        if len(sc["stakeholders"]) < _STAKEHOLDER_COUNT_MIN:
+            audit["shortfalls"].append(f"stakeholder_chapter.count={len(sc['stakeholders'])}<{_STAKEHOLDER_COUNT_MIN}")
+        if len(sc["stakeholders"]) > _STAKEHOLDER_COUNT_MAX:
+            audit["shortfalls"].append(f"stakeholder_chapter.count={len(sc['stakeholders'])}>{_STAKEHOLDER_COUNT_MAX}")
 
     plan["_outline_audit"] = audit

@@ -167,12 +167,8 @@ def test_build_injects_plural_audience_true_into_user_prompt(monkeypatch):
     )
     assert captured, "architect.build did not invoke llm.call_json"
     user_prompt = captured[0]["user"]
-    assert "PLURAL_AUDIENCE_DETECTED: true" in user_prompt, (
-        f"plural-audience hint missing: {user_prompt[-1500:]}"
-    )
-    assert "populate `stakeholder_chapter`" in user_prompt, (
-        f"populate directive missing: {user_prompt[-1500:]}"
-    )
+    assert "PLURAL_AUDIENCE_DETECTED: true" in user_prompt, f"plural-audience hint missing: {user_prompt[-1500:]}"
+    assert "populate `stakeholder_chapter`" in user_prompt, f"populate directive missing: {user_prompt[-1500:]}"
     # Sanity: the hint precedes the strict-JSON marker (so the LLM reads it
     # before deciding the chapter field).
     assert user_prompt.index("PLURAL_AUDIENCE_DETECTED") < user_prompt.index("Produce the STRICT JSON plan now"), (
@@ -198,9 +194,7 @@ def test_build_injects_plural_audience_false_into_user_prompt(monkeypatch):
     assert "PLURAL_AUDIENCE_DETECTED: false" in user_prompt, (
         f"plural-audience=false hint missing: {user_prompt[-1500:]}"
     )
-    assert "set `stakeholder_chapter` to null" in user_prompt, (
-        f"null directive missing: {user_prompt[-1500:]}"
-    )
+    assert "set `stakeholder_chapter` to null" in user_prompt, f"null directive missing: {user_prompt[-1500:]}"
 
 
 def test_build_plural_audience_hint_works_for_zh_prompts(monkeypatch):
@@ -209,6 +203,26 @@ def test_build_plural_audience_hint_works_for_zh_prompts(monkeypatch):
     captured = _capture_call_json(monkeypatch)
     architect.build("为投资者和决策者提供清洁能源建议", "zh", "predict", [], {}, [])
     user_prompt = captured[0]["user"]
-    assert "PLURAL_AUDIENCE_DETECTED: true" in user_prompt, (
-        f"ZH plural-audience hint missing: {user_prompt[-1500:]}"
-    )
+    assert "PLURAL_AUDIENCE_DETECTED: true" in user_prompt, f"ZH plural-audience hint missing: {user_prompt[-1500:]}"
+
+
+def test_normalize_zero_valid_stakeholders_emits_shortfall():
+    """Greptile PR #42 round-5 issue #1: when the LLM emits stakeholders
+    without `id` fields (e.g., `[{"label": "X"}, {"label": "Y"}, {"label":
+    "Z"}]`), the normalization step strips them all and the list becomes
+    `[]`. Pre-fix the `if sc["stakeholders"]:` guard skipped both count
+    checks for the empty case, so the audit recorded
+    `stakeholder_chapter_count=0` with NO shortfall — contradicting the
+    `< _STAKEHOLDER_COUNT_MIN` check that fires for count=1 or count=2.
+    Post-fix the count check covers 0 uniformly."""
+    sh = [
+        {"label": "Investors"},  # no id
+        {"label": "Policymakers"},  # no id
+        {"label": "Researchers"},  # no id
+    ]
+    plan = _bare_plan_with_sc(stakeholders=sh)
+    architect._normalize(plan, archetype="predict")
+    audit = plan["_outline_audit"]
+    assert audit["stakeholder_chapter_count"] == 0
+    sc_sf = [s for s in audit["shortfalls"] if "stakeholder_chapter.count=0<3" in s]
+    assert sc_sf, f"zero-valid-stakeholders case must emit count<MIN shortfall; got {audit['shortfalls']}"

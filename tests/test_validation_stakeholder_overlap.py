@@ -468,6 +468,50 @@ def test_n_stakeholders_declared_vs_audited_distinct_when_partial_missing():
     assert set(out["missing_labels"]) == {"industry", "researchers", "consumers"}
 
 
+def test_body_extraction_stops_at_level1_heading():
+    """Greptile PR #42 round-5 issue #2: pre-fix the `next_heading` regex
+    matched only `#{2,4}` so a stakeholder block immediately followed by
+    a level-1 chapter break (`# Appendix`, `# References`) would not see
+    that boundary — the body would extend to the 5000-char cap, pulling
+    in unrelated appendix/references content and inflating/deflating the
+    Jaccard score for the trailing stakeholder. Post-fix `#{1,4}` catches
+    level-1 breaks while still excluding `#####` deep headers.
+
+    Setup: two stakeholders, the second followed by a level-1 `# Appendix`
+    heading with prose that EXACTLY MATCHES the first stakeholder's body.
+    Pre-fix, the policymaker body would absorb the appendix prose and
+    Jaccard with investors would jump to ~1.0 (false positive). Post-fix
+    the appendix prose is excluded and Jaccard stays low."""
+    shared_prose = (
+        "Capital allocation hedge ratio diversification governance compliance "
+        "patent infrastructure cryogenic supply chain operations strategic "
+        "planning advisory leadership."
+    )
+    article = (
+        "## Strategic Recommendations\n\n"
+        f"### For Investors\n\n{shared_prose}\n\n"
+        "### For Policymakers\n\n"
+        "Distinct policymaker-only advice: coordinate Wassenaar updates, "
+        "fund QIS-CRAFT pilot programs, develop talent visas matched to a "
+        "5-year horizon, build international cooperation frameworks.\n\n"
+        f"# Appendix\n\n{shared_prose}\n\n"
+        "More appendix material covering miscellaneous reference data.\n"
+    )
+    sc = {
+        "stakeholders": [
+            {"id": "investors", "label": "For Investors"},
+            {"id": "policymakers", "label": "For Policymakers"},
+        ]
+    }
+    out = _validate_stakeholder_overlap(article, sc)
+    # Post-fix: policymaker body stops at `# Appendix`, doesn't absorb
+    # the shared_prose paragraph below it. Pairwise Jaccard stays low.
+    assert out["max_pair_overlap"] < 0.20, (
+        f"level-1 heading must terminate body extraction; got max overlap {out['max_pair_overlap']}: {out}"
+    )
+    assert out["overlap_pairs"] == [], f"distinct sections wrongly flagged (level-1 boundary missed): {out}"
+
+
 def test_long_bodies_use_4grams_no_short_pair_entry():
     """When 4-grams are available for BOTH sides, no short_pairs entry —
     short_pairs is strictly a fallback indicator."""
