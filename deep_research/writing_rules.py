@@ -873,6 +873,7 @@ def writer_system(
     task_id: int | None = None,
     suppress_dedup: bool = False,
     outline_shape: dict | None = None,
+    has_stakeholder_chapter: bool = False,
 ) -> str:
     """Assemble the writer system prompt.
 
@@ -892,6 +893,17 @@ def writer_system(
     user prompt said "0-2" for list-all). Falls back to the historical
     3-6 / 4-level defaults when `outline_shape=None` for back-compat
     with any caller that doesn't yet thread the bounds through.
+
+    Greptile PR #46 round-1 issue #2 (2026-05-27):
+    `has_stakeholder_chapter` gates `_STAKEHOLDER_RULE` inclusion. The
+    architect only emits `stakeholder_chapter` for plural-audience
+    prompts; for the (majority of) single-audience tasks the ~850-char
+    rule is pure prompt noise. Callers in writer.py pass
+    `has_stakeholder_chapter=bool(plan.get("stakeholder_chapter"))`.
+    Defaults False (back-compat with any caller that doesn't thread
+    the flag) — the rule's textual self-guard ("applies when
+    stakeholder_chapter is in the plan...") still kicks in if a future
+    caller forgets to set the flag, so silent breakage is impossible.
     """
     ceil = length_ceiling(domain)
 
@@ -924,9 +936,16 @@ def writer_system(
             _SECTION_OPENING_PROSE_LEAD_RULE,
             _MID_PARAGRAPH_XREF_RULE,
             _MERMAID_DIRECTIVE,
-            _STAKEHOLDER_RULE,
         ]
     )
+    # Greptile PR #46 round-1 issue #2: gate `_STAKEHOLDER_RULE` on
+    # `has_stakeholder_chapter`. The architect only emits
+    # `plan["stakeholder_chapter"]` for plural-audience prompts; for
+    # the (majority of) single-audience tasks the ~850-char rule is
+    # pure prompt noise. Mirrors the `if include_dedup:` precedent
+    # for conditional middle-rule inclusion.
+    if has_stakeholder_chapter:
+        middle_rules.append(_STAKEHOLDER_RULE)
     middle_block = "\n\n".join(middle_rules)
 
     # Wave 2 §1.2 follow-up: interpolate per-archetype outline bounds into

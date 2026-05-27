@@ -96,6 +96,12 @@ def write_opening(plan, prompt, language, archetype, domain, digest, *, task_id=
     from .architect import _bounds_for_archetype
 
     outline_shape = _bounds_for_archetype(archetype)
+    # Greptile PR #46 round-1 issue #2 (2026-05-27): thread the
+    # `has_stakeholder_chapter` flag so the system prompt only carries
+    # the ~850-char stakeholder rule when the plan actually has the
+    # chapter. The architect emits stakeholder_chapter as None for
+    # single-audience prompts; bool() correctly yields False on None
+    # and on empty dicts.
     sys = wr.writer_system(
         archetype,
         domain,
@@ -103,6 +109,7 @@ def write_opening(plan, prompt, language, archetype, domain, digest, *, task_id=
         [s.get("title") for s in plan.get("report_toc", [])],
         task_id=task_id,
         outline_shape=outline_shape,
+        has_stakeholder_chapter=bool(plan.get("stakeholder_chapter")),
     )
     user = (
         f"PROMPT ({language}):\n{prompt}\n\nREPORT TITLE: "
@@ -175,6 +182,10 @@ def write_section(
     from .architect import _bounds_for_archetype
 
     outline_shape = _bounds_for_archetype(archetype)
+    # Greptile PR #46 round-1 issue #2 (2026-05-27): mirror the
+    # `has_stakeholder_chapter` flag from `write_opening`. The per-
+    # section call assembles the same system prompt; the architect's
+    # decision lives on the plan, not the unit.
     sys = wr.writer_system(
         archetype,
         domain,
@@ -182,6 +193,7 @@ def write_section(
         [s.get("title") for s in plan.get("report_toc", [])],
         task_id=task_id,
         outline_shape=outline_shape,
+        has_stakeholder_chapter=bool(plan.get("stakeholder_chapter")),
     )
 
     capel_block = ""
