@@ -695,12 +695,16 @@ def _normalize(plan: dict, *, archetype: str | None = None) -> None:
         audit["limitations_chapter_missing_sub_section_types"] = missing_types
         if not lc_was_missing and missing_types:
             audit["shortfalls"].append(f"limitations_chapter.missing_sub_section_types={','.join(missing_types)}")
-        # Stress-test sub-node check (predict archetype only).
-        if archetype in _LIMITATIONS_STRESS_TEST_ARCHETYPES:
+        # Stress-test sub-node check (predict archetype only). Only record
+        # the audit boolean when the chapter was actually present — otherwise
+        # `False` here would be ambiguous with "chapter entirely absent"
+        # (already captured by the `limitations_chapter=missing` shortfall)
+        # and could trigger spurious targeted retries on the stress-test node.
+        if archetype in _LIMITATIONS_STRESS_TEST_ARCHETYPES and not lc_was_missing:
             sst = lc.get("scenario_stress_test")
             has_sst = isinstance(sst, dict) and bool(sst.get("scenarios"))
             audit["limitations_chapter_has_stress_test"] = has_sst
-            if not lc_was_missing and not has_sst:
+            if not has_sst:
                 audit["shortfalls"].append("limitations_chapter.scenario_stress_test=missing(required-for-predict)")
 
     plan["_outline_audit"] = audit

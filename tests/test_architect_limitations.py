@@ -72,6 +72,31 @@ def test_normalize_missing_limitations_for_required_archetype_emits_shortfall():
     assert lc["sub_sections"] == []
 
 
+def test_normalize_missing_limitations_for_predict_suppresses_stress_test_shortfall():
+    """predict + entirely absent limitations_chapter: only the `missing`
+    shortfall fires — the stress-test shortfall must be suppressed by the
+    `lc_was_missing` guard (otherwise consumers would see two shortfalls
+    for one root cause and might trigger a spurious stress-test retry).
+    Also pins the `has_stress_test` audit boolean is NOT written when the
+    chapter was absent (ambiguous-key avoidance).
+    """
+    plan = _bare_plan_with_limitations()
+    plan.pop("limitations_chapter")
+    architect._normalize(plan, archetype="predict")
+    audit = plan["_outline_audit"]
+    lc_shortfalls = [s for s in audit["shortfalls"] if "limitations" in s]
+    assert lc_shortfalls == ["limitations_chapter=missing(required-for-archetype)"], (
+        f"expected only the missing-chapter shortfall, got {lc_shortfalls}"
+    )
+    # Stress-test boolean must not be in audit when chapter was absent.
+    assert "limitations_chapter_has_stress_test" not in audit
+    # Backfill: empty-dict shape, ready for the writer to fail-soft on.
+    lc = plan["limitations_chapter"]
+    assert isinstance(lc, dict)
+    assert lc["sub_sections"] == []
+    assert lc.get("scenario_stress_test") is None
+
+
 def test_normalize_trend_no_limitations_no_shortfall():
     """trend archetype is NOT in required set; missing limitations is fine."""
     plan = _bare_plan_with_limitations()
