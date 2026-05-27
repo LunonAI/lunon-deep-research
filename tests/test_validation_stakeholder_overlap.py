@@ -533,3 +533,69 @@ def test_long_bodies_use_4grams_no_short_pair_entry():
     out = _validate_stakeholder_overlap(article, sc)
     # Long bodies → 4-grams plentiful → no fallback needed.
     assert out["short_pairs"] == [], f"unexpected short_pairs for long bodies: {out}"
+
+
+def test_label_does_not_match_longer_heading_with_same_prefix():
+    """Greptile PR #42 round-7 issue #2: pre-fix the heading regex had
+    no end-of-label anchor, so a plan label `"For Industry"` silently
+    matched `### For Industry Practitioners`. The extracted body would
+    belong to the LONGER section, but `missing_labels` would NOT contain
+    the stakeholder id and `n_stakeholders_audited` would count it as
+    found — the audit looked complete while comparing the wrong content.
+    Naive `(?!\\w)` does NOT fix this (the char after "Industry" is a
+    space, which is non-word, so the lookahead passes). Post-fix the
+    regex requires the label to be followed by end-of-line or a
+    terminator punctuation (`:`, `-`, `—`, `–`).
+
+    Setup: declare stakeholders ["For Industry", "For Investors"]; the
+    article has ONLY `### For Industry Practitioners` and
+    `### For Investors`. Pre-fix "For Industry" wrongly absorbed the
+    Practitioners section. Post-fix it falls through to missing_labels."""
+    article = (
+        "## Strategic Recommendations\n\n"
+        "### For Industry Practitioners\n\n"
+        "Practitioners-only advice: build hybrid teams, prioritize "
+        "compiler/software tooling, partner with national labs for "
+        "prototype validation, invest in compiler infrastructure.\n\n"
+        "### For Investors\n\n"
+        "Investor-only advice: allocate to early-stage hardware, hedge "
+        "approaches across superconducting and ion-trap, prefer late "
+        "seed to early Series A, track DARPA awards as signals.\n"
+    )
+    sc = {
+        "stakeholders": [
+            {"id": "industry", "label": "For Industry"},
+            {"id": "investors", "label": "For Investors"},
+        ]
+    }
+    out = _validate_stakeholder_overlap(article, sc)
+    # "For Industry" must not match "For Industry Practitioners".
+    assert "industry" in out["missing_labels"], (
+        f"label `For Industry` should not match longer heading `For Industry Practitioners`; got {out}"
+    )
+    assert out["n_stakeholders_audited"] == 1, f"only `For Investors` actually exists as a heading; got {out}"
+
+
+def test_label_matches_heading_with_trailing_colon():
+    """Headings often carry a trailing colon (`### For Investors: Capital
+    Allocation`). The post-round-7 anchor must accept this form so a
+    real-world heading style isn't rejected by the new end-anchor."""
+    article = (
+        "## Strategic Recommendations\n\n"
+        "### For Investors: Capital Allocation\n\n"
+        "Investor advice with deep substantive content covering allocation, "
+        "hedging, and DARPA award monitoring strategies.\n\n"
+        "### For Policymakers — Regulatory Coordination\n\n"
+        "Policymaker advice with Wassenaar updates, QIS-CRAFT funding, and "
+        "talent visa development across a 5-year horizon for the workforce.\n"
+    )
+    sc = {
+        "stakeholders": [
+            {"id": "investors", "label": "For Investors"},
+            {"id": "policymakers", "label": "For Policymakers"},
+        ]
+    }
+    out = _validate_stakeholder_overlap(article, sc)
+    # Both stakeholders found despite trailing `:` and ` —` terminators.
+    assert out["missing_labels"] == [], f"trailing punctuation (`:`, `—`) terminators should be accepted; got {out}"
+    assert out["n_stakeholders_audited"] == 2

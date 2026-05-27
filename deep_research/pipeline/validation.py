@@ -373,8 +373,25 @@ def _validate_stakeholder_overlap(article: str, stakeholder_chapter) -> dict | N
         # (`body.lower().count(term.lower())`). Without this, a single
         # casing drift dropped the stakeholder into `missing_labels` and
         # silently excluded it from the pairwise audit.
+        #
+        # Greptile PR #42 round-7: anchor the label end. Pre-fix the
+        # pattern had no terminator, so a plan label `"For Industry"`
+        # silently matched a heading `### For Industry Practitioners` —
+        # the extracted body belonged to the wrong section, but the
+        # stakeholder was NOT added to `missing_labels` and
+        # `n_stakeholders_audited` counted it as found (audit looks
+        # complete while comparing the wrong content). Naive `(?!\w)`
+        # would NOT fix this because after "Industry" comes a SPACE
+        # (non-word) — the lookahead would pass and still match the
+        # longer heading. The correct anchor requires the label to be
+        # followed by optional whitespace then either end-of-line OR a
+        # terminator punctuation (`:`, `-`, `—`, `–`) that ends the
+        # heading label cleanly. This rejects `### For Industry
+        # Practitioners` while still accepting `### For Investors`,
+        # `### For Investors: Capital Allocation`, `### For Investors
+        # — Capital Allocation`, etc.
         m = re.search(
-            r"(?m)^#{2,4}\s+(?:\d+(?:\.\d+)*\s+)?" + re.escape(label),
+            r"(?m)^#{2,4}\s+(?:\d+(?:\.\d+)*\s+)?" + re.escape(label) + r"(?=\s*(?:$|[:\-—–]))",
             article,
             re.IGNORECASE,
         )
