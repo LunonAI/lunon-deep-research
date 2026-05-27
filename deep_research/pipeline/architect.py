@@ -89,7 +89,42 @@ criteria into a STRICT JSON research plan. Output ONLY this JSON object:
     "target_sections": ["S1", ...]} ... 24-32 ],
  "queries": [ {"id": "Q1", "text": str,
     "type": "factual"|"causal"|"comparative"|"critical"|"trend",
-    "target_sections": ["S1", ...], "rationale": str } ... 48-64 ]
+    "target_sections": ["S1", ...], "rationale": str } ... 48-64 ],
+ "framing_chapter": {              /* P3-W2 (2026-05-27): §1 contract.
+                                      Populated for ALL archetypes EXCEPT
+                                      single-axis trend tasks (where the
+                                      prompt has one clear axis and a
+                                      methodology chapter would just
+                                      delay substantive content). */
+   "title": str,                    /* e.g. "Research Framework, Scope &
+                                       Methodology" — should be the §1
+                                       title in report_toc */
+   "sub_sections": [
+     {"id": "S1.1", "type": "scope",
+      "title": str, "content_directive": str},
+     {"id": "S1.2", "type": "rubric",
+      "title": str, "content_directive": str},
+     {"id": "S1.3", "type": "roadmap",
+      "title": str, "content_directive": str},
+     {"id": "S1.4", "type": "vocabulary",
+      "title": str, "content_directive": str}
+   ],
+   "published_vocabulary": [str, ...]  /* 5-10 NAMED terms/axioms that
+                                          downstream chapters reuse
+                                          UNMODIFIED. Examples: the reference
+                                          q3 uses "五篇大文章", "新质生产力";
+                                          q14 uses "Rubric P-1..P-6";
+                                          q56 uses "Level of solution
+                                          (4-level taxonomy)". */,
+   "published_rubric_items": [        /* 4-6 items WHEN applicable
+                                          (compare/predict/recommend
+                                          archetypes; omit or empty for
+                                          others). Each item is referenced
+                                          by id from downstream entity
+                                          evaluations.                  */
+     {"id": "R-1", "label": str, "weight": float}, ...
+   ]
+ } | null
 }
 
 HARD RULES:
@@ -117,6 +152,16 @@ HARD RULES:
   AND choose 4-8 dimensions a reader would compare them across (the
   "columns" of the table the writer will render). Omit entity_matrix (or
   set to null) for other archetypes.
+- framing_chapter REQUIRED for all archetypes EXCEPT single-axis trend
+  tasks. The framing chapter §1 publishes (a) scope/boundary, (b) an
+  evaluation rubric (4-6 items with weights, applicable for compare/
+  predict/recommend), (c) a roadmap that names what each downstream
+  chapter (§2-§N) addresses, and (d) 5-10 named vocabulary terms that
+  downstream chapters reuse UNMODIFIED. The framing chapter §1 title
+  MUST match the report_toc[0] title. The framing chapter is the article's
+  contract with the reader — the reference's verified corpus-wide pattern
+  (10/11 articles) and the single most distinguishing structural move
+  separating their record-class scores from a survey-style report.
 - Match the prompt's language."""
 
 
@@ -490,6 +535,27 @@ _ENTITY_MATRIX_ENTITIES_MAX = 20
 _ENTITY_MATRIX_DIMENSIONS_MIN = 4
 _ENTITY_MATRIX_DIMENSIONS_MAX = 8
 
+# P3-W2 (2026-05-27): framing_chapter bounds. The §1 chapter publishes the
+# scope, rubric, roadmap, and vocabulary contract that downstream chapters
+# reuse. 4 required sub-sections (scope / rubric / roadmap / vocabulary);
+# 5-10 vocabulary terms; 4-6 rubric items (compare/predict/recommend only).
+# Calibrated against the reference's 10/11-article corpus pattern.
+_FRAMING_VOCABULARY_MIN = 5
+_FRAMING_VOCABULARY_MAX = 10
+_FRAMING_RUBRIC_MIN = 4
+_FRAMING_RUBRIC_MAX = 6
+_FRAMING_SUBSECTION_TYPES: tuple[str, ...] = ("scope", "rubric", "roadmap", "vocabulary")
+
+# Archetypes for which framing_chapter is REQUIRED. Trend tasks with a
+# single axis (e.g. "track the evolution of X over time") often don't
+# benefit from a methodology preamble; we OFFER but don't require it.
+_FRAMING_CHAPTER_REQUIRED_ARCHETYPES = frozenset({"list-all", "compare", "explain-mechanism", "predict", "recommend"})
+
+# Archetypes that should produce a non-empty `published_rubric_items` list
+# (the rubric is referenced downstream when entities are scored). Trend and
+# list-all may have rubrics but they're less load-bearing.
+_FRAMING_RUBRIC_REQUIRED_ARCHETYPES = frozenset({"compare", "predict", "recommend"})
+
 
 def _normalize(plan: dict, *, archetype: str | None = None) -> None:
     """Attach specialist_role to every query; backfill depth_seeds default;
@@ -632,5 +698,59 @@ def _normalize(plan: dict, *, archetype: str | None = None) -> None:
                 audit["shortfalls"].append(f"entity_matrix.dimensions={len(dims)}<{_ENTITY_MATRIX_DIMENSIONS_MIN}")
             if len(dims) > _ENTITY_MATRIX_DIMENSIONS_MAX:
                 audit["shortfalls"].append(f"entity_matrix.dimensions={len(dims)}>{_ENTITY_MATRIX_DIMENSIONS_MAX}")
+
+    # P3-W2 (2026-05-27): framing_chapter audit. For required archetypes,
+    # check that the §1 contract artifact exists with the 4 required
+    # sub-sections, 5-10 vocabulary terms, and (when applicable) 4-6
+    # rubric items. Same advisory-only pattern as entity_matrix —
+    # shortfalls visible in drift telemetry; only the missing/required
+    # case is a global retry-trigger.
+    fc = plan.get("framing_chapter")
+    fc_is_required = archetype in _FRAMING_CHAPTER_REQUIRED_ARCHETYPES
+    if fc_is_required:
+        fc_was_missing = not isinstance(fc, dict)
+        if fc_was_missing:
+            # Backfill so writer never crashes on `fc["sub_sections"]`.
+            fc = {
+                "title": "",
+                "sub_sections": [],
+                "published_vocabulary": [],
+                "published_rubric_items": [],
+            }
+            plan["framing_chapter"] = fc
+            audit["shortfalls"].append("framing_chapter=missing(required-for-archetype)")
+        # Normalize fields so downstream consumers see canonical shape.
+        if not isinstance(fc.get("sub_sections"), list):
+            fc["sub_sections"] = []
+        if not isinstance(fc.get("published_vocabulary"), list):
+            fc["published_vocabulary"] = []
+        if not isinstance(fc.get("published_rubric_items"), list):
+            fc["published_rubric_items"] = []
+        sub_types = [str(s.get("type", "")).strip().lower() for s in fc["sub_sections"] if isinstance(s, dict)]
+        missing_types = [t for t in _FRAMING_SUBSECTION_TYPES if t not in sub_types]
+        audit["framing_chapter_sub_section_types"] = sub_types
+        audit["framing_chapter_missing_sub_section_types"] = missing_types
+        audit["framing_chapter_vocabulary_count"] = len(fc["published_vocabulary"])
+        audit["framing_chapter_rubric_count"] = len(fc["published_rubric_items"])
+        if not fc_was_missing:
+            if missing_types:
+                audit["shortfalls"].append(f"framing_chapter.missing_sub_section_types={','.join(missing_types)}")
+            if len(fc["published_vocabulary"]) < _FRAMING_VOCABULARY_MIN:
+                audit["shortfalls"].append(
+                    f"framing_chapter.vocabulary={len(fc['published_vocabulary'])}<{_FRAMING_VOCABULARY_MIN}"
+                )
+            if len(fc["published_vocabulary"]) > _FRAMING_VOCABULARY_MAX:
+                audit["shortfalls"].append(
+                    f"framing_chapter.vocabulary={len(fc['published_vocabulary'])}>{_FRAMING_VOCABULARY_MAX}"
+                )
+            if archetype in _FRAMING_RUBRIC_REQUIRED_ARCHETYPES:
+                if len(fc["published_rubric_items"]) < _FRAMING_RUBRIC_MIN:
+                    audit["shortfalls"].append(
+                        f"framing_chapter.rubric={len(fc['published_rubric_items'])}<{_FRAMING_RUBRIC_MIN}"
+                    )
+                if len(fc["published_rubric_items"]) > _FRAMING_RUBRIC_MAX:
+                    audit["shortfalls"].append(
+                        f"framing_chapter.rubric={len(fc['published_rubric_items'])}>{_FRAMING_RUBRIC_MAX}"
+                    )
 
     plan["_outline_audit"] = audit

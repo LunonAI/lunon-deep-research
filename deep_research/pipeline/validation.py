@@ -205,6 +205,57 @@ def run(inp: ValidationInput) -> ValidationOutput:
     return ValidationOutput(ok=ok, failures=failures, feedback_text=fb, counts=counts)
 
 
+def _validate_framing_chapter(article: str, framing_chapter) -> dict | None:
+    """P3-W2 (2026-05-27): compute framing-chapter downstream-reuse compliance.
+
+    Returns None when no framing_chapter is active (skip the check).
+    Otherwise returns:
+      {
+        "vocabulary_terms_reused": {term: count_in_body},
+        "vocabulary_reuse_rate": float (fraction of terms with >=1 body reuse),
+        "rubric_items_referenced": {id: count_in_body},
+        "rubric_reference_rate": float (fraction of items referenced),
+      }
+
+    "Body" = article excluding the first ~8000 chars (an upper-bound on
+    §1 length per the reference 5-9% pattern). Reuse measures whether
+    DOWNSTREAM chapters re-engage with §1 vocabulary + rubric items —
+    the reference-verified corpus-wide pattern of analytical continuity.
+    """
+    if not isinstance(framing_chapter, dict):
+        return None
+    vocab = [str(t) for t in (framing_chapter.get("published_vocabulary") or []) if t]
+    rubric = [r for r in (framing_chapter.get("published_rubric_items") or []) if isinstance(r, dict) and r.get("id")]
+    if not vocab and not rubric:
+        return None
+    # Skip §1 region — heuristic upper bound on the framing chapter's
+    # extent. the reference §1 is 5-9% of article length (~5-25k chars on a
+    # full article); 8k is a conservative skip that protects against
+    # mis-attributing in-§1 mentions as "downstream reuse".
+    skip_chars = min(8000, len(article) // 7)
+    body = article[skip_chars:] if len(article) > skip_chars else ""
+    vocab_counts: dict[str, int] = {}
+    for term in vocab:
+        if any("一" <= c <= "鿿" for c in term):
+            # CJK: case is meaningless; count verbatim.
+            vocab_counts[term] = body.count(term)
+        else:
+            # EN: case-insensitive (writers may de-capitalize mid-sentence).
+            vocab_counts[term] = body.lower().count(term.lower())
+    rubric_counts: dict[str, int] = {}
+    for item in rubric:
+        rid = str(item["id"])
+        rubric_counts[rid] = body.count(rid)
+    vocab_reused = sum(1 for v in vocab_counts.values() if v >= 1)
+    rubric_referenced = sum(1 for v in rubric_counts.values() if v >= 1)
+    return {
+        "vocabulary_terms_reused": vocab_counts,
+        "vocabulary_reuse_rate": round(vocab_reused / len(vocab), 3) if vocab else 0.0,
+        "rubric_items_referenced": rubric_counts,
+        "rubric_reference_rate": round(rubric_referenced / len(rubric), 3) if rubric else 0.0,
+    }
+
+
 def log_failures(task_id: str, vout: ValidationOutput) -> None:
     """Persist a final-cap failure to validation_failures.jsonl."""
     try:
