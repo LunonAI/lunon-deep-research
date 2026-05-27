@@ -44,6 +44,7 @@ class _FakeState:
     g_dedup_suppressed: bool = False
     footnote_normalize_stats: dict = field(default_factory=dict)
     n_specialist_timeouts: int = 0
+    mermaid_validate_stats: dict = field(default_factory=dict)
 
 
 def _read_last_drift(drift_path: Path) -> dict:
@@ -144,6 +145,83 @@ def test_persist_drift_inline_def_ratio_one_when_no_reuse(tmp_path, monkeypatch)
 
     rec = _read_last_drift(drift_file)
     assert rec["footnote_normalize"]["inline_def_ratio"] == 1.0
+
+
+def test_persist_drift_includes_mermaid_validate_stats(tmp_path, monkeypatch):
+    """P3-W4 (2026-05-27): mermaid post-pass stats must surface in the
+    drift log so analysers can track (a) writer's per-archetype mermaid
+    emission rate under the `_MERMAID_DIRECTIVE` and (b) which of the
+    4 failure modes the writer most often hits. Pre-fix the stats lived
+    only on `PipelineState` and never reached the dev-run telemetry."""
+    drift_file = tmp_path / "drift.jsonl"
+    monkeypatch.setattr(orchestrate, "_DRIFT_PATH", drift_file)
+
+    state = _FakeState(
+        mermaid_validate_stats={
+            "n_blocks_found": 5,
+            "n_blocks_valid": 4,
+            "n_blocks_markdown_stripped": 2,
+            "n_blocks_fence_repaired": 1,
+            "n_blocks_stripped_invalid_type": 1,
+        }
+    )
+    orchestrate._persist_drift(state, language="en", query="test")
+
+    rec = _read_last_drift(drift_file)
+    assert "mermaid_validate" in rec
+    assert rec["mermaid_validate"]["n_blocks_found"] == 5
+    assert rec["mermaid_validate"]["n_blocks_stripped_invalid_type"] == 1
+
+
+def test_persist_drift_mermaid_validate_defaults_to_empty(tmp_path, monkeypatch):
+    """When the post-pass found no mermaid blocks (or the field was
+    never populated — e.g. pre-P3-W4 state object reconstructed from an
+    older snapshot), the drift log carries an empty dict rather than
+    KeyError or absent key."""
+    drift_file = tmp_path / "drift.jsonl"
+    monkeypatch.setattr(orchestrate, "_DRIFT_PATH", drift_file)
+
+    state = _FakeState()  # mermaid_validate_stats defaults to {}
+    orchestrate._persist_drift(state, language="en", query="test")
+
+    rec = _read_last_drift(drift_file)
+    assert "mermaid_validate" in rec
+    assert rec["mermaid_validate"] == {}
+
+
+def test_orchestrate_pipeline_wires_mermaid_validate_call(monkeypatch):
+    """Greptile PR #40 round-1 follow-up (Issue 1): the post-pass module
+    `mermaid_validate.repair()` MUST be called from the orchestrator's
+    post-pass chain. Pre-fix the module existed and was tested in
+    isolation but had no import or call site anywhere in the pipeline —
+    the `_MERMAID_DIRECTIVE` would produce mermaid blocks that reached
+    articles unrepaired.
+
+    This test pins the wire-up by inspecting the orchestrate.py source
+    directly (rather than monkeypatching the full pipeline, which would
+    require constructing every upstream phase's state) — checking that
+    `mermaid_validate.repair` appears as a phase invocation between
+    `zh_writer_pass` and `footnote_normalize`."""
+    import inspect
+
+    src = inspect.getsource(orchestrate)
+    assert "mermaid_validate" in src, (
+        "mermaid_validate is not imported / referenced in orchestrate.py — "
+        "the post-pass repair will never run on writer output"
+    )
+    assert "mermaid_validate.repair" in src, (
+        "mermaid_validate is imported but `repair()` is never called — "
+        "malformed mermaid blocks will pass through to articles unrepaired"
+    )
+    # Ordering: repair must run BEFORE footnote_normalize so any [^N]
+    # markers inside mermaid node labels are stripped before global
+    # renumber (otherwise footnote_normalize would mis-count them).
+    repair_pos = src.index("mermaid_validate.repair")
+    footnote_pos = src.index("footnote_normalize.normalize")
+    assert repair_pos < footnote_pos, (
+        "mermaid_validate.repair must run BEFORE footnote_normalize.normalize "
+        "so [^N] markers inside mermaid blocks are stripped before global renumber"
+    )
 
 
 def test_persist_drift_swallows_all_exceptions(tmp_path, monkeypatch):

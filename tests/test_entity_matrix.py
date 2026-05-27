@@ -33,7 +33,14 @@ def _plan_with_em(entities, dimensions):
 
 def test_normalize_backfills_missing_entity_matrix_for_listall():
     """list-all archetype with NO entity_matrix field gets an empty backfilled
-    matrix + a shortfall record. Writer never crashes on `em["entities"]`."""
+    matrix + a shortfall record. Writer never crashes on `em["entities"]`.
+
+    P3-W1 (2026-05-27): the backfilled matrix now also includes the new
+    `instantiation_mode` and `min_axes_per_entity` defaults so the writer
+    sees a fully-shaped matrix regardless of whether the architect emitted
+    one. We assert the load-bearing fields rather than the full dict to
+    keep this test forward-compatible with future schema additions.
+    """
     plan = {
         "report_title": "T",
         "report_toc": [],
@@ -41,7 +48,11 @@ def test_normalize_backfills_missing_entity_matrix_for_listall():
         "acceptance_criteria": [],
     }
     architect._normalize(plan, archetype="list-all")
-    assert plan["entity_matrix"] == {"entities": [], "dimensions": []}
+    em = plan["entity_matrix"]
+    assert em["entities"] == []
+    assert em["dimensions"] == []
+    assert em["instantiation_mode"] == "prose_subheaders"
+    assert em["min_axes_per_entity"] == 3
     audit = plan["_outline_audit"]
     assert any("entity_matrix=missing" in s for s in audit["shortfalls"])
 
@@ -108,6 +119,32 @@ def test_normalize_records_no_shortfalls_when_matrix_meets_bounds():
     plan["queries"] = [
         {"id": f"Q{i + 1}", "text": f"q{i + 1}", "type": "factual"} for i in range(architect._QUERIES_MIN)
     ]
+    # P3-W2 + P3-W5 merge follow-up (2026-05-27): list-all archetype
+    # requires BOTH a framing_chapter (§1 contract) and a limitations_chapter
+    # (penultimate falsification chapter) — without both, the audit carries
+    # missing-required shortfalls and the test's `== []` invariant breaks.
+    plan["framing_chapter"] = {
+        "title": "Framework",
+        "sub_sections": [
+            {"id": "S1.1", "type": "scope", "title": "Scope", "content_directive": "..."},
+            {"id": "S1.2", "type": "rubric", "title": "Rubric", "content_directive": "..."},
+            {"id": "S1.3", "type": "roadmap", "title": "Roadmap", "content_directive": "..."},
+            {"id": "S1.4", "type": "vocabulary", "title": "Vocab", "content_directive": "..."},
+        ],
+        "published_vocabulary": ["v1", "v2", "v3", "v4", "v5"],
+        "published_rubric_items": [],  # list-all not in RUBRIC_REQUIRED set
+    }
+    plan["limitations_chapter"] = {
+        "title": "Limitations",
+        "sub_sections": [
+            {"id": "SN.1", "type": "data_granularity", "title": "DG", "content_directive": "..."},
+            {"id": "SN.2", "type": "scope_cap", "title": "Scope", "content_directive": "..."},
+            {"id": "SN.3", "type": "time_validity", "title": "Time", "content_directive": "..."},
+            {"id": "SN.4", "type": "sampling", "title": "Sample", "content_directive": "..."},
+            {"id": "SN.5", "type": "falsifiers", "title": "Falsifiers", "content_directive": "..."},
+        ],
+        "scenario_stress_test": None,  # list-all not in stress-test required set
+    }
     architect._normalize(plan, archetype="list-all")
     audit = plan["_outline_audit"]
     assert audit["shortfalls"] == [], f"unexpected shortfalls: {audit['shortfalls']}"

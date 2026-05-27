@@ -145,16 +145,27 @@ def write_section(
     # the post-Wave-1 id=91 smoke (writer emitted 183 clean inline markers
     # but zero `[^X]: source` def lines → all 183 stripped as orphans →
     # no References block → distance score regressed to 1.966).
-    ev_view = [
-        {
+    ev_view = []
+    for i, e in enumerate(evidence):
+        atom = {
             "marker": f"[^{sid}-{i + 1}]",
             "eid": e["eid"],
             "source_name": e["source_name"],
             "url": e["url"],
             "text": e["text"],
         }
-        for i, e in enumerate(evidence)
-    ]
+        # P3-W0b (2026-05-27): surface specialist-extracted causal chain
+        # to the writer when the finding is multi-step (2+ links).
+        # Single-link "chains" are degenerate (= statement again) and
+        # add no information, so they're suppressed at render time. The
+        # writer is instructed (CITATION CONTRACT block below) to emit
+        # the chain prose as "X → Y → Z" when present rather than
+        # synthesizing chains from the flat `text` field — preserves
+        # source-grounded reasoning vs hallucinated chain construction.
+        chain = e.get("chain") or []
+        if len(chain) >= 2:
+            atom["causal_chain"] = list(chain)
+        ev_view.append(atom)
     # Wave 2 §1.2 follow-up (PR #30 self-review): thread per-archetype
     # outline bounds into writer_system so the system-prompt STRUCTURAL
     # CAPS block matches the user-prompt OUTLINE SHAPE block (no
@@ -230,32 +241,196 @@ def write_section(
     # not reject) would otherwise still fire the S1 "render this as a
     # markdown table" directive with no column headers, forcing the LLM to
     # hallucinate dimensions or emit a degenerate single-column table.
+    # P3-W1 (2026-05-27): writer directive dispatches on entity_matrix
+    # `instantiation_mode` field. Two modes:
+    #   - "prose_subheaders" (default, P3-W1): writer instantiates each
+    #     entity as a sub-section whose body begins with the canonical
+    #     bolded sub-headers (one per dimension, in `render_order` with
+    #     EXACT lexical match) followed by 1-3 sentences of content
+    #     matching that dimension's `content_template`. This is the
+    #     the reference corpus-wide pattern verified across 11 of 11 articles.
+    #   - "table_columns_only" (legacy): pre-W1 behaviour — S1 renders
+    #     the matrix as a markdown table; other sections get equal-depth
+    #     reminder only.
+    #
+    # Optional-archetype matrices (predict/explain-mechanism/trend/recommend)
+    # are surfaced in the SAME way as required ones when the architect chose
+    # to populate them (auto-promote happens in architect._normalize).
     entity_matrix_block = ""
     em = plan.get("entity_matrix")
-    if archetype in {"list-all", "compare"} and isinstance(em, dict) and em.get("entities") and em.get("dimensions"):
-        if sid == "S1":
-            entity_matrix_block = (
-                f"\nENTITY MATRIX (article spine for this archetype) — "
-                f"render this as a markdown table at the top of THIS section "
-                f"(immediately under the §1 heading; the executive opening "
-                f"frame is written separately and must not duplicate the "
-                f"table) AND give EACH entity equal-depth treatment in the "
-                f"downstream sections (no entity dropped, no entity "
-                f"over-weighted vs siblings):\n"
-                f"{json.dumps(em, ensure_ascii=False)}\n"
+    em_present = isinstance(em, dict) and em.get("entities") and em.get("dimensions")
+    # Required archetypes (list-all/compare) always emit the matrix
+    # directive, regardless of instantiation_mode. Optional archetypes
+    # (predict/explain-mechanism/trend/recommend) only emit it when
+    # instantiation_mode is `prose_subheaders` — the per-entity
+    # micro-template path.
+    #
+    # INTENTIONAL silent-skip (Greptile PR #37 round-5): an optional
+    # archetype with `instantiation_mode = "table_columns_only"` falls
+    # through this gate and produces no matrix block. There is no
+    # legacy table-only writer directive for optional archetypes — the
+    # legacy directive was list-all/compare-specific. The audit field
+    # `entity_matrix_instantiation_mode = "table_columns_only"` records
+    # the state for telemetry, so the skip is observable post-hoc; the
+    # writer output alone shows no sign the matrix existed. If an
+    # optional-archetype caller wants matrix output, they should set
+    # `prose_subheaders` (the normalize default for any falsy value).
+    em_active = em_present and (
+        archetype in {"list-all", "compare"} or em.get("instantiation_mode") == "prose_subheaders"
+    )
+    if em_active:
+        mode = em.get("instantiation_mode") or "prose_subheaders"
+        zh = bool(language) and str(language).lower().startswith("zh")
+        colon = "：" if zh else ":"
+        # Dimensions are normalized to object form by
+        # architect._normalize_dimensions. Sort by render_order so every
+        # section instantiates axes in the same order — byte-stable header
+        # emission across entities is the contract.
+        raw_dims = em.get("dimensions") or []
+        dims_sorted = sorted(
+            (d for d in raw_dims if isinstance(d, dict) and d.get("axis_name")),
+            key=lambda d: d.get("render_order", 999),
+        )
+        axis_lines = "\n".join(
+            f"    **{d['axis_name']}{colon}** ({d.get('content_template', '')})" for d in dims_sorted
+        )
+        # Defensive `or 3`: covers the case where the plan reaches the
+        # writer without passing through architect._normalize (e.g. unit
+        # tests, future caller). `dict.get(key, default)` returns the
+        # stored None when the key is present-with-null, and int(None)
+        # raises TypeError. Greptile PR #37 round-3 finding.
+        min_axes = int(em.get("min_axes_per_entity") or 3)
+        if mode == "prose_subheaders" and dims_sorted:
+            template_block = (
+                f"PER-ENTITY MICRO-TEMPLATE — for every entity in the matrix that "
+                f"this section addresses, produce a sub-section whose body BEGINS "
+                f"with these bolded sub-headers (in render_order, EXACT lexical "
+                f"match including the terminal `{colon}`):\n"
+                f"{axis_lines}\n"
+                f"RULES:\n"
+                f"  • Every entity instantiates the SAME axes in the SAME order.\n"
+                f"  • At least {min_axes} of the {len(dims_sorted)} axes must be "
+                f"populated per entity; an axis with no content may be omitted "
+                f"ONLY if you write the sub-header anyway and a one-sentence "
+                f"note explaining the visibility gap with a `[^{sid}-N]` citation.\n"
+                f"  • Do NOT reorder axes per entity. Do NOT introduce ad-hoc "
+                f"sub-headers between axes. Do NOT collapse two axes into one bullet.\n"
+                f"  • Each axis: 1-3 sentences, max 80 words.\n"
             )
         else:
-            # Non-S1 sections: no render directive (S1 owns the canonical
-            # table). Just the equal-depth reminder so this section knows
-            # the entity roster it must treat fairly.
-            entity_matrix_block = (
-                f"\nENTITY MATRIX REMINDER — section §1 renders the "
-                f"canonical table for this list-all/compare article; THIS "
-                f"section must give EACH entity equal-depth treatment "
-                f"(no entity dropped, no entity over-weighted vs siblings) "
-                f"and MUST NOT re-render the matrix table:\n"
+            template_block = ""
+        # Mention "PER-ENTITY MICRO-TEMPLATE" by name in the wrapper only
+        # when the directive itself is fired. Legacy mode (template_block
+        # is empty) keeps the wrapper text generic so the substring doesn't
+        # leak into prompts where the directive doesn't actually appear.
+        if template_block:
+            s1_wrapper = (
+                "\nENTITY MATRIX (article spine for this archetype) — "
+                "render this as a markdown table at the top of THIS section "
+                "(immediately under the §1 heading; the executive opening "
+                "frame is written separately and must not duplicate the "
+                "table). Then apply the PER-ENTITY MICRO-TEMPLATE below to "
+                "every entity this section addresses:\n"
+                f"{json.dumps(em, ensure_ascii=False)}\n"
+                f"{template_block}"
+            )
+            non_s1_wrapper = (
+                "\nENTITY MATRIX REMINDER — section §1 renders the canonical "
+                "table; THIS section must give EACH entity equal-depth "
+                "treatment using the PER-ENTITY MICRO-TEMPLATE below, and "
+                "MUST NOT re-render the matrix table:\n"
+                f"{json.dumps(em, ensure_ascii=False)}\n"
+                f"{template_block}"
+            )
+        else:
+            # Legacy table_columns_only mode: wrapper text references the
+            # table only — no mention of the micro-template directive.
+            s1_wrapper = (
+                "\nENTITY MATRIX (article spine for this archetype) — "
+                "render this as a markdown table at the top of THIS section "
+                "(immediately under the §1 heading; the executive opening "
+                "frame is written separately and must not duplicate the "
+                "table) AND give EACH entity equal-depth treatment in the "
+                "downstream sections (no entity dropped, no entity "
+                "over-weighted vs siblings):\n"
                 f"{json.dumps(em, ensure_ascii=False)}\n"
             )
+            non_s1_wrapper = (
+                "\nENTITY MATRIX REMINDER — section §1 renders the canonical "
+                "table for this list-all/compare article; THIS section must "
+                "give EACH entity equal-depth treatment (no entity dropped, "
+                "no entity over-weighted vs siblings) and MUST NOT re-render "
+                "the matrix table:\n"
+                f"{json.dumps(em, ensure_ascii=False)}\n"
+            )
+        entity_matrix_block = s1_wrapper if sid == "S1" else non_s1_wrapper
+
+    # P3-W2 (2026-05-27): framing-chapter dispatch.
+    #   §1 (sid=="S1"): receives the FRAMING CONTRACT directive instructing
+    #     the writer to emit the 4 sub-sections (scope / rubric / roadmap
+    #     / vocabulary) — the §1 chapter is the article's contract with
+    #     the reader.
+    #   Other sections: receive the NAMED TERM BANK (published_vocabulary
+    #     + published_rubric_items) and are instructed to reuse them
+    #     unmodified — the reference's verified corpus-wide pattern (10/11).
+    framing_block = ""
+    fc = plan.get("framing_chapter")
+    if isinstance(fc, dict):
+        if sid == "S1":
+            sub_sections = fc.get("sub_sections") or []
+            vocab = [str(t) for t in (fc.get("published_vocabulary") or []) if t]
+            rubric = [r for r in (fc.get("published_rubric_items") or []) if isinstance(r, dict) and r.get("id")]
+            if sub_sections or vocab or rubric:
+                parts = [
+                    "\nFRAMING CHAPTER CONTRACT (§1 — this section IS the framing chapter; "
+                    "write it as the article's contract with the reader):"
+                ]
+                if sub_sections:
+                    parts.append(f"  4 REQUIRED sub-sections: {json.dumps(sub_sections, ensure_ascii=False)}")
+                    parts.append(
+                        "  Each sub-section: 200-400 words. Use the type field to drive content "
+                        '("scope" defines what is in / out of the report; "rubric" lists the '
+                        'weighted evaluation dimensions used downstream; "roadmap" names what '
+                        'each downstream chapter §2-§N will address; "vocabulary" introduces '
+                        "the 5-10 named terms below as the article's analytical lexicon)."
+                    )
+                if vocab:
+                    parts.append(f"  Vocabulary to introduce: {json.dumps(vocab, ensure_ascii=False)}")
+                    parts.append(
+                        "  Each vocabulary term: define it once in §1.4 vocabulary sub-section; "
+                        "downstream chapters will reuse the term UNMODIFIED."
+                    )
+                if rubric:
+                    rubric_summary = "; ".join(f"{r['id']}: {r.get('label', '')}" for r in rubric)
+                    parts.append(f"  Rubric to publish: {rubric_summary}")
+                    parts.append(
+                        "  Render the rubric as a markdown table in §1.2 (columns: id, label, weight). "
+                        "Downstream chapters reference rubric items by `id`."
+                    )
+                framing_block = "\n".join(parts) + "\n"
+        else:
+            vocab = [str(t) for t in (fc.get("published_vocabulary") or []) if t]
+            rubric = [r for r in (fc.get("published_rubric_items") or []) if isinstance(r, dict) and r.get("id")]
+            if vocab or rubric:
+                parts = ["\nNAMED TERM BANK (from §1 framing chapter — use these terms UNMODIFIED when relevant):"]
+                if vocab:
+                    parts.append(f"  Vocabulary: {json.dumps(vocab, ensure_ascii=False)}")
+                    parts.append(
+                        "  Reuse each term in its declared form (preserve case, language, "
+                        "punctuation); do NOT synonymize or translate. Each vocabulary "
+                        "term should appear ≥1 time when contextually relevant — "
+                        "the reference's verified pattern is ~2-5 reuses per term across the article."
+                    )
+                if rubric:
+                    rubric_summary = "; ".join(f"{r['id']}: {r.get('label', '')}" for r in rubric)
+                    parts.append(f"  Rubric items: {rubric_summary}")
+                    parts.append(
+                        "  When evaluating an entity against a rubric item, cite the item "
+                        'by `id` form (e.g. "Per R-2 (market-size criterion), this sector '
+                        'scores high…"). At least one rubric reference per chapter that '
+                        "applies a rubric item is the minimum compliance bar."
+                    )
+                framing_block = "\n".join(parts) + "\n"
 
     user = (
         f"PROMPT ({language}):\n{prompt}\n\n"
@@ -267,6 +442,7 @@ def write_section(
         f"DEPTH TARGET: {unit['depth']}\n"
         f"{depth_block}"
         f"{entity_matrix_block}"
+        f"{framing_block}"
         f"REPORT OUTLINE (titles only, for coherence): "
         f"{json.dumps(prior_titles, ensure_ascii=False)}\n\n"
         f"ACCEPTANCE CRITERIA THIS SECTION MUST SATISFY:\n"
@@ -327,7 +503,22 @@ def write_section(
         f"read complete if all `[^X]` markers are deleted. Footnotes "
         f"are SUPPLEMENTARY identifiers, not the substantive claim.\n"
         f"• Numeric `[n]` markers (without the `^`) are NOT used in this "
-        f"pipeline — only `[^{sid}-N]` form.\n\n"
+        f"pipeline — only `[^{sid}-N]` form.\n"
+        # P3-W0b (2026-05-27): when an evidence atom carries a
+        # `causal_chain` field (populated by the mechanism_explorer
+        # specialist for multi-step findings), prefer rendering the
+        # chain explicitly rather than synthesizing one from the flat
+        # statement. RACE Insight criterion 2 (causal reasoning) scores
+        # higher when chains are source-grounded vs writer-invented.
+        f"• CAUSAL CHAIN RENDER (when evidence atom has `causal_chain` field): "
+        f"some atoms carry a `causal_chain` array of 2-6 ordered clauses "
+        f"naming the intervening causal links (populated by the "
+        f"mechanism_explorer specialist). When you cite such an atom, "
+        f"prefer rendering the chain EXPLICITLY in prose — '<link1>, "
+        f"which leads to <link2>, in turn enabling <link3>[^{sid}-N]' — "
+        f"rather than collapsing to the flat `text` summary. This makes "
+        f"the causal mechanism visible and source-grounded; do NOT "
+        f"invent additional links beyond what the chain provides.\n\n"
         # Wave 2 §3.2 (2026-05-26): mirror the system-prompt `_INSIGHT_MIN`
         # distribution targets here in the user prompt with per-archetype
         # interpolation so the writer sees the explicit percentages for

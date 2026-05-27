@@ -292,6 +292,52 @@ _MID_PARAGRAPH_XREF_RULE = (
 )
 
 
+# P3-W4 (2026-05-27): mermaid semantic-diagram directive. reference-verified
+# corpus pattern (10/11 articles, 1-19 mermaid blocks each, used semantically
+# for timelines / dependencies / decision trees / process flows). Lunon's
+# id=91 W2 baseline has 0 mermaid blocks. The directive opts the writer
+# IN to emit diagrams when the section content fits one of the four shapes,
+# with strict constraints to avoid LLM-malformation modes (parser-breaking
+# bold/code-spans inside nodes; missing terminating fence; decorative
+# duplication of adjacent prose).
+_MERMAID_DIRECTIVE = (
+    "SEMANTIC DIAGRAM DIRECTIVE (P3-W4, 2026-05-27):\n"
+    "When a section introduces ONE of:\n"
+    "  (a) a timeline with ≥3 dated milestones,\n"
+    "  (b) a dependency relationship where entity A produces input for "
+    "entity B with ≥3 such links,\n"
+    "  (c) a decision tree with ≥3 branching conditions,\n"
+    "  (d) a multi-stage process flow with ≥3 stages,\n"
+    "emit a mermaid block to visualise it. Syntax:\n"
+    "  ```mermaid\n"
+    "  timeline\n"
+    "    title <topic>\n"
+    "    <year> : <event>\n"
+    "    <year> : <event>\n"
+    "  ```\n"
+    "  OR:\n"
+    "  ```mermaid\n"
+    "  graph LR\n"
+    "    A[<entity>] --> B[<entity>]\n"
+    "  ```\n"
+    "Per chapter: max 2-3 mermaid blocks; one per distinct purpose.\n"
+    "FORBIDDEN forms (these break the renderer or add no signal):\n"
+    "  - Markdown formatting INSIDE node labels: NO **bold**, *italic*, "
+    "`code`, [^N] footnote refs, or `[link](url)` — the parser breaks.\n"
+    "  - Mermaid blocks WITHOUT a terminating triple-backtick fence.\n"
+    "  - First line not a valid diagram type "
+    "(timeline | graph | flowchart | sequenceDiagram | stateDiagram | "
+    "stateDiagram-v2 | classDiagram | erDiagram | journey | gantt | pie | "
+    "requirementDiagram | gitGraph | C4Context | mindmap). "
+    "Anything else gets stripped by the post-pass.\n"
+    "  - Decorative diagrams that restate the immediately-preceding "
+    "paragraph (the diagram must ADD a structural view the prose doesn't).\n"
+    "Tasks where mermaid is most likely to help: predict (timeline of "
+    "milestones), explain-mechanism (causal dependency graph), "
+    "list-all (process flow for entity-introduction timeline)."
+)
+
+
 # P2-Option-A-#3 (2026-05-23): _INSIGHT_MIN rewritten to be Insight-positive
 # across ALL archetypes. The previous version (post-W9 over-correction) told
 # the writer to NOT add forward-looking content for list-all/compare/
@@ -824,7 +870,13 @@ def writer_system(
     if include_dedup:
         middle_rules.append(_DEDUP_RULE)
     middle_rules.extend(
-        [_INSIGHT_MIN, CLEANING_RESISTANT_RULE, _SECTION_OPENING_PROSE_LEAD_RULE, _MID_PARAGRAPH_XREF_RULE]
+        [
+            _INSIGHT_MIN,
+            CLEANING_RESISTANT_RULE,
+            _SECTION_OPENING_PROSE_LEAD_RULE,
+            _MID_PARAGRAPH_XREF_RULE,
+            _MERMAID_DIRECTIVE,
+        ]
     )
     middle_block = "\n\n".join(middle_rules)
 
@@ -1215,11 +1267,25 @@ def check_xref_quality(text: str) -> dict:
         # tied to this xref — readers parse sentences within paragraphs,
         # not across them. Without this clamp, an isolated "below" 50
         # chars away in the prior chapter would falsely fire.
+        #
+        # Greptile PR #39 round-2: `pre` is sliced from `text[wstart:xstart]`
+        # exactly once, so every `rfind` returns an index relative to the
+        # ORIGINAL wstart. Capture `pre_start = wstart` before the loop
+        # and use it as the base for absolute-position arithmetic — the
+        # prior `wstart + idx + len(sep)` used the in-place-mutated
+        # `wstart` as the base, inflating the offset by the previous
+        # iteration's clamp. Concrete failure: original wstart=100,
+        # `"\n\n"` at pre-idx 5 → wstart=107; then `"\n## "` at pre-idx 8
+        # produced 107+8+4=119, but the correct absolute position is
+        # 100+8+4=112 — a 7-char over-narrowing of the window that
+        # silently dropped forward-defer phrases past the inflated
+        # boundary.
         pre = text[wstart:xstart]
+        pre_start = wstart
         for sep in ("\n\n", "\n## ", "\n### ", "\n#### "):
             idx = pre.rfind(sep)
             if idx >= 0:
-                wstart = max(wstart, wstart + idx + len(sep))
+                wstart = max(wstart, pre_start + idx + len(sep))
         post = text[xend:wend]
         for sep in ("\n\n", "\n## ", "\n### ", "\n#### "):
             idx = post.find(sep)
