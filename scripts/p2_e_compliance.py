@@ -24,24 +24,47 @@ import re
 from collections.abc import Callable
 from pathlib import Path
 
-# ---- E1.v2: section-opening framework-recap (table-aware) -----------------
+# ---- E1.v3: section-opening prose-lead (reference-parity, antipattern gate) -
 #
-# v1 (committed earlier today, see git log) tested at 9.2% compliance because
-# the writer chose table-first openings on taxonomy archetypes (id=91 had
-# 0/50 sections with prose-recap because every section opened with a markdown
-# table directly under the heading). v2 splits compliance into a STRUCTURAL
-# gate (first content block must be prose, NOT a table/list) and a SEMANTIC
-# gate (recap-or-new-value vocabulary in the prose). Tracks both so we can
-# diagnose future failure modes precisely.
+# v1 (committed 2026-05-23) tested at 9.2% compliance because the writer
+# chose table-first openings on taxonomy archetypes (id=91 had 0/50 sections
+# with prose-recap because every section opened with a markdown table
+# directly under the heading). v2 split compliance into a STRUCTURAL gate
+# (first content block must be prose, NOT a table/list) and a SEMANTIC gate
+# that REWARDED "Building on §N..." / "this section examines..." vocab.
+#
+# v3 (2026-05-26, gap-map §12.A) flipped the semantic gate's meaning: the
+# fresh-corpus A/B retro showed the #1 reference fires those exact phrases at ~0%
+# and Lunon at ~77%, and the RACE judge flagged them as "repeated setup
+# language" and "forward references to missing sections". The writer-prompt
+# rule (`_SECTION_OPENING_PROSE_LEAD_RULE` in deep_research/writing_rules.py)
+# now BANS the v2-rewarded phrases as antipatterns. This script was the
+# matching compliance probe; under v3 the same regex now identifies the
+# FORBIDDEN tokens and the semantic gate PASSES when the OPENING SENTENCE(S)
+# contain NONE of them. Without this inversion the script would have
+# reported v3-correct openers (definition / quantified-claim / factual-
+# anchor / substantive-contextualisation) as non-compliant and v3-forbidden
+# "Building on §1..." openers as compliant — backwards.
+#
+# The structural gate (prose-before-data) survived v3 unchanged; it remains
+# the part of v2 that worked.
 
 
 # First-line-of-section-body test: does the section open with a markdown
 # table row (`|...|`), a bulleted list (`- ` / `* ` / `+ `), or a bare
 # heading (`#`)? If yes, the structural gate FAILS — there's no prose
-# recap paragraph before the data block.
+# lead paragraph before the data block.
 _TABLE_OR_LIST_LEAD_RE = re.compile(r"^\s*(?:\|[^\n]*\||[-*+]\s+\S|#{1,4}\s+\S)")
 
-_RECAP_TOKENS = re.compile(
+# v3 FORBIDDEN opening tokens — phrases the writer-prompt rule explicitly
+# bans in the opening sentence(s) of each section (P2-Wave-3-§12.A.v3).
+# Verified against the #1 reference corpus: ~0% landing in the reference, ~77%
+# pre-v3 in Lunon. These were the exact templates the v2 semantic gate
+# REWARDED; v3 inverts the gate so the same regex marks them as failures.
+# Note: §N / `第N节` refs are forbidden ONLY in opening sentences — they
+# are still allowed in body text per the rule's body-text narrowing, which
+# is why the semantic check below is windowed to the OPENING ONLY.
+_V3_FORBIDDEN_OPENING_TOKENS = re.compile(
     r"(?:building on|extends? the (?:framework|rubric|taxonomy|matrix)|"
     r"using the (?:dimension|rubric|matrix|taxonomy|framework|classification)|"
     r"applied to the (?:framework|rubric|dimensions|matrix|taxonomy)|"
@@ -50,41 +73,60 @@ _RECAP_TOKENS = re.compile(
     r"with this (?:framework|rubric|taxonomy) in (?:place|hand)|"
     r"within the framework (?:set out|established|introduced)|"
     r"(?:returns? to|revisits?) the (?:framework|rubric|dimensions)|"
-    # New-value-statement tokens (the reference's "this section adds/operationalizes")
-    r"this (?:chapter|section) (?:adds|extends|populates|builds|"
+    # Meta-subject openers ("This section adds...", "The present chapter...")
+    # — v3 explicitly forbids 'This section' / 'This chapter' / 'This report'
+    # as the SUBJECT of an opening sentence.
+    r"this (?:chapter|section|report) (?:adds|extends|populates|builds|"
     r"operationalises|operationalizes|catalogues|catalogs|examines|"
-    r"records|maps|measures|operationalise|operationalize)|"
-    r"the present (?:section|chapter)|"
-    # Named-artefact section references (the E1 narrowing post-bonus-audit):
-    r"§\s*\d+(?:\.\d+)?(?:'s|s')?\s+(?:framework|rubric|taxonomy|matrix|"
-    r"dimensions|four-pillar|three-tier|spine|axis)|"
+    r"records|maps|measures|operationalise|operationalize|"
+    r"discusses|introduces|presents|covers|describes|analyses|analyzes)|"
+    r"the present (?:section|chapter|report)|"
+    # ANY §N / section-N reference in the opener (v3 forbids these in
+    # openings even when paired with a named artefact).
+    r"§\s*\d+(?:\.\d+)?|"
     r"section\s+\d+(?:\.\d+)?(?:'s|s')?\s+(?:framework|rubric|taxonomy|"
     r"matrix|dimensions)|"
-    # ZH equivalents
+    # ZH equivalents — recap-template and meta-subject phrasings.
     r"沿用|延续上述|应用上一节|遵循前述|依据前述|按前文|"
     r"在(?:上述|前述)(?:框架|维度|分类)下?|在前述基础上|"
     r"基于(?:上文|前述|第\d+章)|根据第\d+章|"
-    r"本(?:节|章)(?:补充|拓展|添加|建立|应用|延伸|具体化|"
-    r"考察|分析|讨论|研究|记录|测量)|"
-    r"第\s*\d+\s*(?:节|章)(?:的|所述)?(?:框架|维度|分类|分析|结论))",
+    r"本(?:节|章|报告)(?:补充|拓展|添加|建立|应用|延伸|具体化|"
+    r"考察|分析|讨论|研究|记录|测量|介绍|阐述|论述)|"
+    r"第\s*\d+\s*(?:节|章))",
     re.IGNORECASE,
 )
 
 
+# Window used for the opening-sentence semantic check. The v3 rule applies
+# specifically to the OPENING SENTENCE(S), not the full section body — body
+# text may legitimately contain §N refs paired with named artefacts. We
+# scope to (first paragraph) ∩ (first 280 chars). The paragraph bound is
+# the load-bearing one: it prevents the window from reaching into body
+# paragraphs where the rule no longer applies. The char cap is a backstop
+# for the pathological case of a single-paragraph section whose only break
+# is a sub-heading hundreds of chars in.
+_OPENING_WINDOW_CHARS = 280
+
+
 def e1_section_opening_recap(article: str) -> dict:
-    """E1.v2 compliance: structural + semantic two-gate check.
+    """E1.v3 compliance: structural + antipattern two-gate check.
 
     A section is COMPLIANT iff:
       (structural) first non-heading content line is PROSE — not a markdown
                    table row, not a bulleted list, not another heading.
-      (semantic)   the first 700 chars of section body contain a recap or
-                   new-value-statement token (broadened token set from v1).
+      (semantic)   the OPENING SENTENCE(S) (first ~280 chars) contain NONE
+                   of the v3-forbidden opener tokens
+                   (`_V3_FORBIDDEN_OPENING_TOKENS`).
 
-    Both gates tracked separately so we can diagnose failure modes:
-      - structural_ok + semantic_ok = compliant (target)
-      - structural_ok only = prose lead but no recap vocab (vocab mismatch)
-      - semantic_ok only = recap vocab buried after a table-first lead
-      - neither = section ignored the directive entirely
+    Note on diagnostic bucket naming: v3 flipped the semantic gate's pass
+    condition (v2 rewarded the tokens; v3 penalises them) but the BUCKET
+    semantics still describe orthogonal failure modes:
+      - structural_ok + semantic_ok = compliant (prose lead, clean opener)
+      - structural_ok only          = prose lead BUT opener uses a
+                                      v3-forbidden recap/meta-subject phrase
+      - semantic_ok only            = opener vocab clean BUT section opens
+                                      with a table/list/sub-heading
+      - neither                     = data-block lead AND forbidden phrase
     """
     sections = re.split(r"(?=^#{1,3}\s+\S)", article, flags=re.MULTILINE)
     sections = [s for s in sections if s.strip()]
@@ -92,8 +134,8 @@ def e1_section_opening_recap(article: str) -> dict:
         return {"n_sections": len(sections), "n_compliant": 0, "rate": 0.0, "applicable": False}
     candidates = sections[1:]
     n_compliant = 0
-    n_only_structural = 0  # prose-lead but no recap vocab
-    n_only_semantic = 0  # recap vocab but table-first
+    n_only_structural = 0  # prose lead but uses v3-forbidden opener vocab
+    n_only_semantic = 0  # opener vocab clean but data-block-first
     n_neither = 0
     per_section = []
     for s in candidates:
@@ -104,10 +146,14 @@ def e1_section_opening_recap(article: str) -> dict:
         first_line = body_stripped.split("\n", 1)[0] if body_stripped else ""
         is_data_block_lead = bool(_TABLE_OR_LIST_LEAD_RE.match(first_line))
         structural_ok = not is_data_block_lead and bool(first_line)
-        # LEVEL 2 semantic: recap-or-purpose vocabulary in first 700 chars
-        # of body.
-        head = body[:700]
-        semantic_ok = bool(_RECAP_TOKENS.search(head))
+        # LEVEL 2 semantic (v3): opening sentence(s) must NOT contain any
+        # v3-forbidden opener token. Windowed to the FIRST PARAGRAPH (with
+        # a char-cap backstop) because the v3 rule explicitly carves body-
+        # text §N refs out of the forbid — they're allowed in body when
+        # paired with a named artefact.
+        first_paragraph = body_stripped.split("\n\n", 1)[0]
+        opener = first_paragraph[:_OPENING_WINDOW_CHARS]
+        semantic_ok = not bool(_V3_FORBIDDEN_OPENING_TOKENS.search(opener))
         compliant = structural_ok and semantic_ok
         if compliant:
             n_compliant += 1
@@ -190,8 +236,8 @@ def main() -> None:
     for r in rows:
         if not r.get("applicable"):
             continue
-        # v2 surfaces structural + semantic separately so we can diagnose
-        # failure mode (table-first vs vocab-mismatch).
+        # v3 surfaces structural + semantic separately so we can diagnose
+        # failure mode (table-first vs forbidden-opener-vocab).
         if "structural_rate" in r:
             print(
                 f"  id={r['task_id']:>3}  compliant={r['rate']:>5.2f}  "
