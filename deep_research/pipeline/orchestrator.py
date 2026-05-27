@@ -165,6 +165,11 @@ def run(plan, prompt, language, archetype, domain):
                 section_ids=sorted(set(secs)),
                 specialist=res.get("role"),
                 language=language,
+                # P3-W0b (2026-05-27): preserve specialist-extracted causal
+                # chain through to the writer's evidence pack. Already
+                # sanitized to list[str] by specialists._sanitize_chain;
+                # absent or empty for non-mechanism findings.
+                chain=f.get("chain") or [],
             )
             digest_parts.append(f"[{res.get('role')}] {f.get('statement', '')} ({f.get('source_name', '')})")
 
@@ -261,6 +266,9 @@ def run(plan, prompt, language, archetype, domain):
                 section_ids=top,
                 specialist=role,
                 language=language,
+                # P3-W0b (2026-05-27): same chain pass-through as the
+                # main-loop ingest path above.
+                chain=f.get("chain") or [],
             )
 
     if tool_calls > BUDGET:

@@ -189,7 +189,18 @@ def run(inp: ValidationInput) -> ValidationOutput:
                 }
             )
 
-    # 8. STAKEHOLDER CHAPTER OVERLAP (P3-W6; Greptile PR #42 round-2 wiring).
+    # 8. P3-W2 (2026-05-27): framing-chapter downstream-reuse — telemetry
+    # only. Measures whether §2+ chapters re-engage with §1's published
+    # vocabulary + rubric items (the reference corpus-wide pattern of
+    # analytical continuity). No fail/pass — surfaced in counts for drift
+    # logging; the corrective-feedback loop is via the post-write
+    # compliance scorer, not the validation gate. Returns None (skipped)
+    # when the plan has no framing_chapter or it is empty.
+    fc_reuse = _validate_framing_chapter(inp.article, inp.plan.get("framing_chapter"))
+    if fc_reuse is not None:
+        counts["framing_chapter_reuse"] = fc_reuse
+
+    # 9. STAKEHOLDER CHAPTER OVERLAP (P3-W6; Greptile PR #42 round-2 wiring).
     # When the architect populated `plan["stakeholder_chapter"]` because the
     # prompt signaled plural audience, each stakeholder sub-section must
     # carry NON-OVERLAPPING content. Pairwise Jaccard on n-grams; pairs
@@ -227,15 +238,77 @@ def run(inp: ValidationInput) -> ValidationOutput:
     return ValidationOutput(ok=ok, failures=failures, feedback_text=fb, counts=counts)
 
 
+def _validate_framing_chapter(article: str, framing_chapter) -> dict | None:
+    """P3-W2 (2026-05-27): compute framing-chapter downstream-reuse compliance.
+
+    Returns None when no framing_chapter is active (skip the check).
+    Otherwise returns:
+      {
+        "vocabulary_terms_reused": {term: count_in_body},
+        "vocabulary_reuse_rate": float (fraction of terms with >=1 body reuse),
+        "rubric_items_referenced": {id: count_in_body},
+        "rubric_reference_rate": float (fraction of items referenced),
+      }
+
+    "Body" = article after the first `max(8000, 0.09 * len)` chars
+    (the reference-verified 5-9% upper bound on §1 length, floored at 8k
+    to maintain margin on short/mid-length articles). Reuse measures
+    whether DOWNSTREAM chapters re-engage with §1 vocabulary + rubric
+    items — the reference-verified corpus-wide pattern of analytical
+    continuity.
+    """
+    if not isinstance(framing_chapter, dict):
+        return None
+    vocab = [str(t) for t in (framing_chapter.get("published_vocabulary") or []) if t]
+    rubric = [r for r in (framing_chapter.get("published_rubric_items") or []) if isinstance(r, dict) and r.get("id")]
+    if not vocab and not rubric:
+        return None
+    # Skip §1 region — heuristic upper bound on the framing chapter's
+    # extent. the reference §1 is 5-9% of article length, so the proportional
+    # skip is `0.09 * len(article)`. Floor at 8000 chars to maintain
+    # margin on short/mid-length articles where 9% would otherwise leave
+    # too little buffer past §1's actual close (e.g. on a 50k article,
+    # 9% is 4.5k while §1 routinely runs 3-4.5k). Clamp to len(article)
+    # so a stub article slices to an empty body rather than past-the-end.
+    # Greptile PR #38 round-1: the prior `min(8000, len//7)` capped long
+    # articles at 8k (under-skipping when §1 grows to 45k on a 500k-char
+    # article) AND under-skipped short articles by falling to the //7
+    # branch — both directions of the bound were inverted.
+    skip_chars = min(len(article), max(8000, int(0.09 * len(article))))
+    body = article[skip_chars:]
+    vocab_counts: dict[str, int] = {}
+    for term in vocab:
+        if any("一" <= c <= "鿿" for c in term):
+            # CJK: case is meaningless; count verbatim.
+            vocab_counts[term] = body.count(term)
+        else:
+            # EN: case-insensitive (writers may de-capitalize mid-sentence).
+            vocab_counts[term] = body.lower().count(term.lower())
+    rubric_counts: dict[str, int] = {}
+    for item in rubric:
+        rid = str(item["id"])
+        rubric_counts[rid] = body.count(rid)
+    vocab_reused = sum(1 for v in vocab_counts.values() if v >= 1)
+    rubric_referenced = sum(1 for v in rubric_counts.values() if v >= 1)
+    return {
+        "vocabulary_terms_reused": vocab_counts,
+        "vocabulary_reuse_rate": round(vocab_reused / len(vocab), 3) if vocab else 0.0,
+        "rubric_items_referenced": rubric_counts,
+        "rubric_reference_rate": round(rubric_referenced / len(rubric), 3) if rubric else 0.0,
+    }
+
+
 def _validate_stakeholder_overlap(article: str, stakeholder_chapter) -> dict | None:
     """P3-W6 (2026-05-27): pairwise content-overlap audit on stakeholder chapter.
 
     Returns None when no stakeholder_chapter is active. Otherwise:
       {
-        "n_stakeholders": int,
+        "n_stakeholders_declared": int,
+        "n_stakeholders_audited": int,
         "max_pair_overlap": float,
         "overlap_pairs": [(stakeholder_id_a, stakeholder_id_b, jaccard)],
         "short_pairs": [(stakeholder_id_a, stakeholder_id_b, n_used)],
+        "missing_labels": [stakeholder_id, ...],
       }
 
     For each pair of stakeholder sub-sections, compute Jaccard similarity
@@ -249,6 +322,26 @@ def _validate_stakeholder_overlap(article: str, stakeholder_chapter) -> dict | N
     then 2-grams when 4-grams are empty for either side of the pair —
     the `n_used` value in `short_pairs` records when fallback fired so
     short stakeholder bodies remain observable in the audit output.
+
+    Greptile PR #42 round-3 — body extraction now anchors to a markdown
+    heading line containing the label (`r"#{2,4}\\s+...label..."`) instead
+    of `str.find(label)`. The old approach matched the first occurrence
+    of the label string ANYWHERE in the article, so a cross-reference
+    like "...see the For Investors section below..." would land before
+    the actual heading and the extracted body would span the wrong
+    section — silent false-negatives on the overlap audit. The heading-
+    anchored regex matches only at line-start `#{2,4} ... label`, which
+    is the canonical section heading form.
+
+    Greptile PR #42 round-3 — `n_stakeholders` previously counted every
+    DECLARED stakeholder (including those whose label was not found in
+    the article and so contributed an empty body). A reader of the audit
+    output seeing `n_stakeholders=5` would assume all five were compared,
+    but if 2 labels weren't present only 3 non-empty bodies entered the
+    pairwise comparison. Now the audit reports both
+    `n_stakeholders_declared` (total entries in the plan) and
+    `n_stakeholders_audited` (non-empty bodies that actually entered
+    the comparison) and lists `missing_labels` for visibility.
     """
     if not isinstance(stakeholder_chapter, dict):
         return None
@@ -256,6 +349,8 @@ def _validate_stakeholder_overlap(article: str, stakeholder_chapter) -> dict | N
     if len(stakeholders) < 2:
         return None
     bodies: dict[str, str] = {}
+    missing_labels: list[str] = []
+    n_declared = 0
     for s in stakeholders:
         if not isinstance(s, dict):
             continue
@@ -263,12 +358,25 @@ def _validate_stakeholder_overlap(article: str, stakeholder_chapter) -> dict | N
         label = str(s.get("label", "")).strip()
         if not sid or not label:
             continue
-        idx = article.find(label)
-        if idx < 0:
+        n_declared += 1
+        # Greptile PR #42 round-3: anchor to a markdown heading line
+        # (`## label`, `### label`, `#### label`) instead of any
+        # occurrence of the label string. Headings may carry leading
+        # numbering (`### 8.3 For Investors`) so we allow optional
+        # `\d+(?:\.\d+)*\s+` between the hashes and the label.
+        m = re.search(
+            r"(?m)^#{2,4}\s+(?:\d+(?:\.\d+)*\s+)?" + re.escape(label),
+            article,
+        )
+        if m is None:
             bodies[sid] = ""
+            missing_labels.append(sid)
             continue
-        nl = article.find("\n", idx)
-        start = nl + 1 if nl >= 0 else idx + len(label)
+        # `m.end()` is just past the label; advance to the next line
+        # start so the body begins with section content, not the
+        # remainder of the heading line.
+        nl = article.find("\n", m.end())
+        start = nl + 1 if nl >= 0 else m.end()
         next_heading = re.search(r"\n#{2,4}\s+", article[start:])
         end = start + (next_heading.start() if next_heading else 5000)
         bodies[sid] = article[start : min(end, len(article))]
@@ -289,9 +397,13 @@ def _validate_stakeholder_overlap(article: str, stakeholder_chapter) -> dict | N
     overlap_pairs: list[tuple] = []
     short_pairs: list[tuple] = []
     max_overlap = 0.0
-    ids = list(bodies.keys())
-    for i, a in enumerate(ids):
-        for b in ids[i + 1 :]:
+    # Greptile PR #42 round-3: only audit bodies that were actually
+    # found in the article. Empty bodies (missing labels) are EXCLUDED
+    # from the pairwise comparison set so n_stakeholders_audited
+    # honestly reports the number that entered the comparison.
+    auditable_ids = [sid for sid, body in bodies.items() if body]
+    for i, a in enumerate(auditable_ids):
+        for b in auditable_ids[i + 1 :]:
             # Progressive n-gram fallback: try 4-grams first (the canonical
             # threshold-calibrated bound), then 3-grams, then 2-grams. The
             # first n where BOTH bodies produce a non-empty set wins; if
@@ -319,10 +431,12 @@ def _validate_stakeholder_overlap(article: str, stakeholder_chapter) -> dict | N
                 short_pairs.append((a, b, n_used))
 
     return {
-        "n_stakeholders": len(bodies),
+        "n_stakeholders_declared": n_declared,
+        "n_stakeholders_audited": len(auditable_ids),
         "max_pair_overlap": round(max_overlap, 3),
         "overlap_pairs": overlap_pairs,
         "short_pairs": short_pairs,
+        "missing_labels": missing_labels,
     }
 
 
