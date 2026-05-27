@@ -28,10 +28,28 @@ def test_tier_ranking_rule_names_2_decimal_precision():
 
 def test_tier_ranking_rule_names_sensitivity_check():
     """The sensitivity sub-section is the chapter's distinctive Qianfan
-    pattern — pin the ±10pp signal."""
+    pattern — pin the heading-anchor + ±Npp protocol-neutral form.
+
+    Greptile PR #47 round-6: the rule previously hardcoded `±10pp`,
+    contradicting the user-prompt block whenever the plan specified a
+    non-default perturbation (e.g. `perturbation_pp=5`). The system
+    rule now uses `±Npp` (matching the heading-anchor hint on the same
+    line); the exact N is interpolated by the user-prompt directive.
+    Pin both `sensitivity` lowercase substring AND the `±Npp`
+    placeholder, plus a NEGATIVE assertion that the hardcoded `±10pp`
+    is NOT in the system rule (the user-prompt block has the real
+    value).
+    """
     rule = wr._TIER_RANKING_RULE
     assert "sensitivity" in rule.lower()
-    assert "±10pp" in rule or "±10 pp" in rule or "10pp" in rule
+    assert "±Npp" in rule, f"rule must use protocol-neutral ±Npp; got: {rule[:1500]}"
+    # The literal ±10pp must not leak back as a hardcoded contradiction
+    # against a non-default `perturbation_pp` interpolation.
+    assert "±10pp" not in rule, (
+        f"rule must not hardcode ±10pp — the user-prompt block interpolates "
+        f"the actual perturbation value, so a literal here creates two "
+        f"conflicting instructions in the same LLM call. Got: {rule[:1500]}"
+    )
 
 
 def test_tier_ranking_rule_names_computational_not_narrative():
