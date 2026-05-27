@@ -188,17 +188,32 @@ def test_classify_problem_tradeoff_avoids_bare_to_resolve_and_reconcile():
         "We need to reconcile accounts before quarter-end.",
         "Engineers were tasked to reconcile data discrepancies in the warehouse.",
         "The audit will reconcile expense reports against the ledger.",
+        # Greptile PR #34 round-2 follow-up: `the resolution of` was
+        # over-broad in the same way bare `to resolve` and `reconcile`
+        # were. It fires on legislative / governance / image-quality
+        # prose without any problem framing. Removed in round-2; this
+        # block pins the regression so it doesn't slip back in.
+        "The resolution of parliament passed unanimously last Tuesday.",
+        "The resolution of the UN Security Council declared a cease-fire.",
+        "The board voted on the resolution of corporate restructuring.",
+        "The resolution of the image degraded noticeably under compression.",
+        "The resolution of the screen was downgraded to 720p in the budget tier.",
     ]
     for s in false_positives:
         assert not _classify_leaf_elements(s)["problem_tradeoff"], f"false positive: {s!r}"
     # Genuine problem-tradeoff framing still fires via the surviving
-    # explicit markers.
+    # explicit markers (note: the example using "the resolution of"
+    # was rewritten to use the surviving `the resolution lies` variant,
+    # which IS problem-framing because it requires an anaphoric
+    # antecedent — "the resolution lies in X" demands a prior tension).
     real_problem_framings = [
         "The apparent paradox in the Bronze-vs-Gold ranking resolves through the Cosmo-depth doctrine.",
         "The tension between manga continuity and anime canon is the central issue.",
         "The challenge of reconciling Episode G with the original timeline drives debate.",
         "To address this, contributors restructured the chronology in 2019.",
-        "The resolution of the Sanctuary-arc paradox lies in the Seventh-Sense awakening.",
+        # `the resolution lies` is the directed/anaphoric form — keeps
+        # firing post-round-2 because it requires a prior tension.
+        "The resolution lies in re-reading Saori's bloodline reveal as latent Cosmo.",
         "Saori's bloodline reveal resolves this in the Hades arc.",
     ]
     for s in real_problem_framings:

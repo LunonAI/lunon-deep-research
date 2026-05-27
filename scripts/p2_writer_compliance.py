@@ -269,9 +269,19 @@ _CAUSAL_CHAIN_RE = re.compile(
 # "resolves this" with anaphoric `this`) all encode the problem framing
 # explicitly in their own match.
 _PROBLEM_TRADEOFF_RE = re.compile(
+    # Greptile PR #34 round-2 follow-up (2026-05-26): `the resolution
+    # of` was REMOVED — same class of over-broad match as bare
+    # `to resolve` and `reconcile` removed in round-1. It fires on
+    # "the resolution of parliament", "the resolution of the UN
+    # Security Council", "the resolution of the board", and "the
+    # resolution of the image" (screen/print specs) — none of which
+    # frame a tension/paradox/challenge. Only `the resolution lies`
+    # (the anaphoric / directed form, "the resolution lies in X")
+    # survives — it requires a problem antecedent to make grammatical
+    # sense.
     r"(\bthe (?:apparent )?paradox\b|\bthe tension\b|\bthe challenge of\b|"
     r"\bthe problem of\b|\bthe central issue\b|\bthe key obstacle\b|"
-    r"\bto address this\b|\bthe resolution (?:of|lies)\b|"
+    r"\bto address this\b|\bthe resolution lies\b|"
     r"\bresolves this\b|"
     r"悖论|矛盾|挑战在于|关键问题|核心难题|应对.{0,8}方法|解决.{0,8}途径)",
     re.IGNORECASE,
