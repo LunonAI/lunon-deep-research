@@ -184,15 +184,16 @@ def test_v4_zh_chapter_n_ref_with_substantive_recap_is_compliant():
     """ZH parallel: '第1章已论证：...。本章承接...，系统梳理...' is the reference ZH idiom verified at task id=8. v4 must NOT flag this as
     forbidden.
 
-    Note: this case is a structural test — it asserts the §N portion
-    alone doesn't fail. The '本章承接...系统梳理' substring contains the
-    本章+verb meta-subject pattern, which IS still antipattern. So we
-    test with a recap-then-pivot that names a substantive topic rather
-    than using 本章 as the subject."""
+    Note: 承接 and 系统梳理 are intentionally absent from the
+    `本(?:节|章|报告)` verb list in `_V4_FORBIDDEN_OPENING_TOKENS`, so
+    the full the reference idiom passes the gate verbatim. The fixture
+    therefore uses the literal the reference phrasing rather than a
+    rephrased variant."""
     out = e1_section_opening_recap(
         _article(
             "第1章已论证：机器学习方法的能力上限受制于数据采集环节。"
-            "数据基础设施在规模与可访问性上已基本满足学术级研究的需求。\n"
+            "本章承接上述结论，系统梳理数据基础设施在规模与可访问性上"
+            "的演化路径。\n"
         )
     )
     assert out["n_compliant"] == 2, out
@@ -273,17 +274,18 @@ def test_v4_grades_section_zero_chapter_n_opener_as_compliant():
     — under v3 the §N reference itself failed the semantic gate. v4
     removed that ban; if the §1 opener references "§N" or "Chapter N"
     self-referentially (unusual since §1 has nothing earlier to point
-    at) it no longer fails the gate, but the writer-prompt rule body
-    notes that §1 has nothing earlier to refer to anyway."""
+    at) it no longer fails the gate. The fixture exercises that
+    inversion directly: a §1 opener that names Chapter 1 must now pass."""
     article = (
         "## 1 Article opener\n\n"
-        "The four-pillar framework introduced below anchors the rest of "
-        "the analysis across all subsequent chapters.\n\n"
+        "Chapter 1 establishes the four-pillar framework that anchors the "
+        "rest of the analysis across all subsequent chapters.\n\n"
         "## 2 Second section\n\n"
         "The Bronze rank originated in the Sanctuary arc.\n"
     )
     out = e1_section_opening_recap(article)
-    # Both sections should pass: clean prose lead, no v4-forbidden vocab.
+    # Both sections should pass: Chapter-N ref in §1 is allowed under v4,
+    # §2 has clean prose with no v4-forbidden vocab.
     assert out["n_compliant"] == 2, out
 
 
