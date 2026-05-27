@@ -51,7 +51,7 @@ _EXTRACT_SYSTEM = (
     "institution, e.g. 'IEA 2025' — never a bare number), \"url\": str, "
     '"quote": str (verbatim support <=125 chars), "query_ids": [str], '
     '"chain": [str, ...] (OPTIONAL — use ONLY when this finding describes a '
-    'multi-step causal mechanism: 2-4 ordered short clauses like "X results '
+    'multi-step causal mechanism: 2-6 ordered short clauses like "X results '
     'in Y", "Y enables Z" naming the intervening links. OMIT this field '
     "entirely if the finding is not multi-step causal. mechanism_explorer "
     "specialist should populate this whenever possible; other specialists "
