@@ -257,6 +257,73 @@ def write_section(
                 f"{json.dumps(em, ensure_ascii=False)}\n"
             )
 
+    # P3-W2 (2026-05-27): framing-chapter dispatch.
+    #   §1 (sid=="S1"): receives the FRAMING CONTRACT directive instructing
+    #     the writer to emit the 4 sub-sections (scope / rubric / roadmap
+    #     / vocabulary) — the §1 chapter is the article's contract with
+    #     the reader.
+    #   Other sections: receive the NAMED TERM BANK (published_vocabulary
+    #     + published_rubric_items) and are instructed to reuse them
+    #     unmodified — Qianfan's verified corpus-wide pattern (10/11).
+    framing_block = ""
+    fc = plan.get("framing_chapter")
+    if isinstance(fc, dict):
+        if sid == "S1":
+            sub_sections = fc.get("sub_sections") or []
+            vocab = [str(t) for t in (fc.get("published_vocabulary") or []) if t]
+            rubric = [r for r in (fc.get("published_rubric_items") or []) if isinstance(r, dict) and r.get("id")]
+            if sub_sections or vocab or rubric:
+                parts = [
+                    "\nFRAMING CHAPTER CONTRACT (§1 — this section IS the framing chapter; "
+                    "write it as the article's contract with the reader):"
+                ]
+                if sub_sections:
+                    parts.append(f"  4 REQUIRED sub-sections: {json.dumps(sub_sections, ensure_ascii=False)}")
+                    parts.append(
+                        "  Each sub-section: 200-400 words. Use the type field to drive content "
+                        '("scope" defines what is in / out of the report; "rubric" lists the '
+                        'weighted evaluation dimensions used downstream; "roadmap" names what '
+                        'each downstream chapter §2-§N will address; "vocabulary" introduces '
+                        "the 5-10 named terms below as the article's analytical lexicon)."
+                    )
+                if vocab:
+                    parts.append(f"  Vocabulary to introduce: {json.dumps(vocab, ensure_ascii=False)}")
+                    parts.append(
+                        "  Each vocabulary term: define it once in §1.4 vocabulary sub-section; "
+                        "downstream chapters will reuse the term UNMODIFIED."
+                    )
+                if rubric:
+                    rubric_summary = "; ".join(f"{r['id']}: {r.get('label', '')}" for r in rubric)
+                    parts.append(f"  Rubric to publish: {rubric_summary}")
+                    parts.append(
+                        "  Render the rubric as a markdown table in §1.2 (columns: id, label, weight). "
+                        "Downstream chapters reference rubric items by `id`."
+                    )
+                framing_block = "\n".join(parts) + "\n"
+        else:
+            vocab = [str(t) for t in (fc.get("published_vocabulary") or []) if t]
+            rubric = [r for r in (fc.get("published_rubric_items") or []) if isinstance(r, dict) and r.get("id")]
+            if vocab or rubric:
+                parts = ["\nNAMED TERM BANK (from §1 framing chapter — use these terms UNMODIFIED when relevant):"]
+                if vocab:
+                    parts.append(f"  Vocabulary: {json.dumps(vocab, ensure_ascii=False)}")
+                    parts.append(
+                        "  Reuse each term in its declared form (preserve case, language, "
+                        "punctuation); do NOT synonymize or translate. Each vocabulary "
+                        "term should appear ≥1 time when contextually relevant — "
+                        "Qianfan's verified pattern is ~2-5 reuses per term across the article."
+                    )
+                if rubric:
+                    rubric_summary = "; ".join(f"{r['id']}: {r.get('label', '')}" for r in rubric)
+                    parts.append(f"  Rubric items: {rubric_summary}")
+                    parts.append(
+                        "  When evaluating an entity against a rubric item, cite the item "
+                        'by `id` form (e.g. "Per R-2 (market-size criterion), this sector '
+                        'scores high…"). At least one rubric reference per chapter that '
+                        "applies a rubric item is the minimum compliance bar."
+                    )
+                framing_block = "\n".join(parts) + "\n"
+
     user = (
         f"PROMPT ({language}):\n{prompt}\n\n"
         f"You are writing ONLY this section of the report (other sections are "
@@ -267,6 +334,7 @@ def write_section(
         f"DEPTH TARGET: {unit['depth']}\n"
         f"{depth_block}"
         f"{entity_matrix_block}"
+        f"{framing_block}"
         f"REPORT OUTLINE (titles only, for coherence): "
         f"{json.dumps(prior_titles, ensure_ascii=False)}\n\n"
         f"ACCEPTANCE CRITERIA THIS SECTION MUST SATISFY:\n"
