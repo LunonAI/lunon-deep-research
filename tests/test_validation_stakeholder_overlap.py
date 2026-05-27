@@ -49,9 +49,14 @@ def test_non_overlapping_stakeholders_pass():
     }
     out = _validate_stakeholder_overlap(article, sc)
     assert out is not None
-    assert out["n_stakeholders"] == 3
+    # Greptile PR #42 round-3: `n_stakeholders` renamed to
+    # `n_stakeholders_audited` (the non-empty bodies that entered
+    # comparison) so the audit can distinguish declared vs audited.
+    assert out["n_stakeholders_declared"] == 3
+    assert out["n_stakeholders_audited"] == 3
     assert out["max_pair_overlap"] < 0.20, f"got max overlap {out['max_pair_overlap']}: {out}"
     assert out["overlap_pairs"] == []
+    assert out["missing_labels"] == []
 
 
 def test_overlapping_stakeholders_flagged():
@@ -94,8 +99,10 @@ def test_zh_uses_char_4grams():
 
 
 def test_missing_stakeholder_label_in_article_handled():
-    """Stakeholder whose label isn't in the article: counts as empty body
-    (n-gram set empty, contributes nothing to pairwise overlap)."""
+    """Stakeholder whose label isn't in the article: declared but not
+    audited (excluded from pairwise overlap). Greptile PR #42 round-3
+    surfaces this explicitly in `missing_labels` and `n_stakeholders_
+    audited` so a reader of the audit output isn't misled."""
     article = "## Recommendations\n\n### For Investors\n\nInvestor advice here.\n"
     sc = {
         "stakeholders": [
@@ -106,6 +113,9 @@ def test_missing_stakeholder_label_in_article_handled():
     out = _validate_stakeholder_overlap(article, sc)
     # The absent stakeholder contributes empty body → no overlap pair fired.
     assert out["overlap_pairs"] == []
+    assert out["n_stakeholders_declared"] == 2
+    assert out["n_stakeholders_audited"] == 1, f"only the 1 found stakeholder should be audited; got {out}"
+    assert out["missing_labels"] == ["absent"]
 
 
 def test_returns_required_keys():
@@ -113,7 +123,18 @@ def test_returns_required_keys():
     out = _validate_stakeholder_overlap("## A\n\ntext\n\n## B\n\ntext\n", sc)
     # Greptile PR #42 round-2 added `short_pairs` so the audit surfaces when
     # an n-gram fallback was needed (4 → 3 → 2 grams) for short bodies.
-    expected = {"n_stakeholders", "max_pair_overlap", "overlap_pairs", "short_pairs"}
+    # Greptile PR #42 round-3 split `n_stakeholders` into
+    # `n_stakeholders_declared` (plan total) and `n_stakeholders_audited`
+    # (non-empty bodies actually compared) + added `missing_labels` to
+    # surface plan entries whose label was not found in the article.
+    expected = {
+        "n_stakeholders_declared",
+        "n_stakeholders_audited",
+        "max_pair_overlap",
+        "overlap_pairs",
+        "short_pairs",
+        "missing_labels",
+    }
     assert set(out.keys()) == expected
 
 
@@ -149,11 +170,7 @@ def test_short_bodies_disjoint_at_bigram_level_not_flagged():
     """Symmetric coverage: short non-overlapping bodies should NOT be
     flagged even though they triggered fallback. short_pairs still
     records the fallback (diagnostic), but overlap_pairs stays empty."""
-    article = (
-        "## Recommendations\n\n"
-        "### For Investors\n\nReduce risk\n\n"
-        "### For Policymakers\n\nIncrease funding\n"
-    )
+    article = "## Recommendations\n\n### For Investors\n\nReduce risk\n\n### For Policymakers\n\nIncrease funding\n"
     sc = {
         "stakeholders": [
             {"id": "investors", "label": "For Investors"},
@@ -262,6 +279,137 @@ def test_run_records_stakeholder_overlap_metadata_when_clean():
     assert out.counts["stakeholder_chapter"]["overlap_pairs"] == []
     overlap_failures = [f for f in out.failures if f["check"] == "stakeholder_overlap"]
     assert overlap_failures == [], f"clean chapter wrongly flagged: {overlap_failures}"
+
+
+# --------------------------------------------------------------------------
+# Greptile PR #42 round-3 — heading-anchored body extraction must not be
+# fooled by label appearing as cross-reference; audited count must
+# distinguish from declared count.
+# --------------------------------------------------------------------------
+
+
+def test_label_as_cross_reference_does_not_pick_up_wrong_body():
+    """Greptile PR #42 round-3 issue #1: pre-fix `str.find(label)` matched
+    the FIRST occurrence of the label string anywhere in the article. If
+    the label appears earlier as a cross-reference (e.g., '...see the
+    For Investors section below...'), the extracted body spans from that
+    line to the next heading — entirely the wrong section. The overlap
+    audit then silently compares the wrong content and may falsely pass.
+
+    Post-fix the regex anchors to a markdown heading line `#{2,4} ... label`
+    only, so the cross-reference is ignored and the actual heading is used."""
+    article = (
+        "## Strategic Recommendations\n\n"
+        "This chapter is split by audience. See the For Investors section below "
+        "for capital-allocation guidance and the For Policymakers section for "
+        "regulatory coordination guidance. Both sections must be read together "
+        "because they share the same underlying analysis of patent disputes "
+        "and export-control friction in the cryogenic supply chain.\n\n"
+        "### For Investors\n\n"
+        "Distinct investor-only advice: monitor DARPA QBI awards as third-party "
+        "validation signals, hedge superconducting vs ion-trap exposure, prefer "
+        "Series B/C entries over seed rounds, and track talent-poaching from "
+        "the national-lab pipeline.\n\n"
+        "### For Policymakers\n\n"
+        "Distinct policymaker-only advice: coordinate the Wassenaar Arrangement "
+        "updates with allies, fund the QIS-CRAFT pilot programs, develop talent "
+        "visas matched to a 5-year horizon, and build international cooperation "
+        "frameworks through the Quantum Flagship governance bodies.\n"
+    )
+    sc = {
+        "stakeholders": [
+            {"id": "investors", "label": "For Investors"},
+            {"id": "policymakers", "label": "For Policymakers"},
+        ]
+    }
+    out = _validate_stakeholder_overlap(article, sc)
+    # Pre-fix the extracted body for "For Investors" would have spanned
+    # from the FIRST mention (in the cross-reference paragraph) to the
+    # next `## `/`### ` heading — capturing the shared-analysis paragraph
+    # PLUS the actual investor section + the policymaker section, which
+    # would massively inflate overlap. Post-fix the body starts at the
+    # actual `### For Investors` heading.
+    assert out["max_pair_overlap"] < 0.20, (
+        f"heading-anchor must skip the cross-reference; got max overlap {out['max_pair_overlap']}: {out}"
+    )
+    assert out["overlap_pairs"] == [], f"distinct sections wrongly flagged (heading anchor failed): {out}"
+
+
+def test_label_in_other_section_body_does_not_pick_up_wrong_body():
+    """Symmetric guard: the label appearing in ANOTHER section's body
+    (not a heading) must not be mistaken for the section heading."""
+    article = (
+        "## Background\n\n"
+        "Earlier studies referenced the For Investors framework first proposed "
+        "by Smith (2024) as a reference design for capital-allocation cohorts. "
+        "We adopt their taxonomy verbatim and extend it to the policymaker tier "
+        "in the present analysis. Note the For Investors taxonomy uses five "
+        "axes whereas our extension uses six.\n\n"
+        "## Strategic Recommendations\n\n"
+        "### For Investors\n\n"
+        "Distinct investor advice: allocate to early-stage hardware companies, "
+        "hedge approaches across superconducting and ion-trap, prefer late seed "
+        "to early Series A, track DARPA awards as validation signals.\n\n"
+        "### For Policymakers\n\n"
+        "Distinct policymaker advice: coordinate Wassenaar updates, fund "
+        "university research at QIS-CRAFT, develop talent visas, build "
+        "international cooperation frameworks through Quantum Flagship.\n"
+    )
+    sc = {
+        "stakeholders": [
+            {"id": "investors", "label": "For Investors"},
+            {"id": "policymakers", "label": "For Policymakers"},
+        ]
+    }
+    out = _validate_stakeholder_overlap(article, sc)
+    assert out["overlap_pairs"] == [], f"distinct sections wrongly flagged (label-in-body mistaken for heading): {out}"
+
+
+def test_label_in_heading_with_numbering_prefix_is_matched():
+    """Headings frequently carry leading numbering (`### 8.3 For Investors`).
+    The anchor must allow optional `\\d+(?:\\.\\d+)*\\s+` between hashes and
+    label — otherwise numbered chapters silently miss the audit and the
+    body falls back to empty (missing_labels)."""
+    article = (
+        "## 8 Strategic Recommendations\n\n"
+        "### 8.1 For Investors\n\n"
+        "Investor-only advice: allocate to hardware, hedge approaches, track DARPA awards.\n\n"
+        "### 8.2 For Policymakers\n\n"
+        "Policymaker-only advice: coordinate Wassenaar, fund QIS-CRAFT, develop talent visas.\n"
+    )
+    sc = {
+        "stakeholders": [
+            {"id": "investors", "label": "For Investors"},
+            {"id": "policymakers", "label": "For Policymakers"},
+        ]
+    }
+    out = _validate_stakeholder_overlap(article, sc)
+    assert out["n_stakeholders_audited"] == 2, f"numbered headings should still be matched; got {out}"
+    assert out["missing_labels"] == []
+
+
+def test_n_stakeholders_declared_vs_audited_distinct_when_partial_missing():
+    """The semantic gap Greptile flagged: 5 declared, 2 found → audited=2,
+    not 5. Pre-fix `n_stakeholders=5` would mislead a reader to think all
+    five entered the comparison."""
+    article = (
+        "## Recommendations\n\n"
+        "### For Investors\n\nInvestor advice that is sufficiently long.\n\n"
+        "### For Policymakers\n\nPolicymaker advice that is sufficiently long.\n"
+    )
+    sc = {
+        "stakeholders": [
+            {"id": "investors", "label": "For Investors"},
+            {"id": "policymakers", "label": "For Policymakers"},
+            {"id": "industry", "label": "For Industry"},
+            {"id": "researchers", "label": "For Researchers"},
+            {"id": "consumers", "label": "For Consumers"},
+        ]
+    }
+    out = _validate_stakeholder_overlap(article, sc)
+    assert out["n_stakeholders_declared"] == 5
+    assert out["n_stakeholders_audited"] == 2
+    assert set(out["missing_labels"]) == {"industry", "researchers", "consumers"}
 
 
 def test_long_bodies_use_4grams_no_short_pair_entry():

@@ -91,6 +91,41 @@ criteria into a STRICT JSON research plan. Output ONLY this JSON object:
  "queries": [ {"id": "Q1", "text": str,
     "type": "factual"|"causal"|"comparative"|"critical"|"trend",
     "target_sections": ["S1", ...], "rationale": str } ... 48-64 ],
+ "framing_chapter": {              /* P3-W2 (2026-05-27): §1 contract.
+                                      Populated for ALL archetypes EXCEPT
+                                      single-axis trend tasks (where the
+                                      prompt has one clear axis and a
+                                      methodology chapter would just
+                                      delay substantive content). */
+   "title": str,                    /* e.g. "Research Framework, Scope &
+                                       Methodology" — should be the §1
+                                       title in report_toc */
+   "sub_sections": [
+     {"id": "S1.1", "type": "scope",
+      "title": str, "content_directive": str},
+     {"id": "S1.2", "type": "rubric",
+      "title": str, "content_directive": str},
+     {"id": "S1.3", "type": "roadmap",
+      "title": str, "content_directive": str},
+     {"id": "S1.4", "type": "vocabulary",
+      "title": str, "content_directive": str}
+   ],
+   "published_vocabulary": [str, ...],  /* 5-10 NAMED terms/axioms that
+                                           downstream chapters reuse
+                                           UNMODIFIED. Examples: Qianfan
+                                           q3 uses "五篇大文章", "新质生产力";
+                                           q14 uses "Rubric P-1..P-6";
+                                           q56 uses "Level of solution
+                                           (4-level taxonomy)". */
+   "published_rubric_items": [        /* 4-6 items WHEN applicable
+                                          (compare/predict/recommend
+                                          archetypes; omit or empty for
+                                          others). Each item is referenced
+                                          by id from downstream entity
+                                          evaluations.                  */
+     {"id": "R-1", "label": str, "weight": float}, ...
+   ]
+ } | null,
  "stakeholder_chapter": {          /* P3-W6 (2026-05-27): closing chapter
                                       that splits recommendations into
                                       3-5 stakeholder addressee blocks
@@ -130,6 +165,16 @@ HARD RULES:
   AND choose 4-8 dimensions a reader would compare them across (the
   "columns" of the table the writer will render). Omit entity_matrix (or
   set to null) for other archetypes.
+- framing_chapter REQUIRED for all archetypes EXCEPT single-axis trend
+  tasks. The framing chapter §1 publishes (a) scope/boundary, (b) an
+  evaluation rubric (4-6 items with weights, applicable for compare/
+  predict/recommend), (c) a roadmap that names what each downstream
+  chapter (§2-§N) addresses, and (d) 5-10 named vocabulary terms that
+  downstream chapters reuse UNMODIFIED. The framing chapter §1 title
+  MUST match the report_toc[0] title. The framing chapter is the article's
+  contract with the reader — Qianfan's verified corpus-wide pattern
+  (10/11 articles) and the single most distinguishing structural move
+  separating their record-class scores from a survey-style report.
 - Match the prompt's language."""
 
 
@@ -170,6 +215,59 @@ _SEEDS_MAX = 4
 # pulls from here.
 _QUERIES_MIN = 48
 _QUERIES_MAX = 64
+
+# P3-W0a (2026-05-27): per-archetype `query.type` minimum proportions.
+# The HARD RULES bullet "Distribute query type to cover all needed analytical
+# functions" was structurally too vague — when the architect under-allocated
+# causal queries to the mechanism_explorer specialist (or critical queries to
+# the critic), the writer's evidence pack lost the substrate needed for RACE
+# Insight criteria 2 (Causal Reasoning) and 3 (Problem Insight). These per-
+# archetype minimums are sourced from the W3-Insight-Bundle spec, which
+# itself was derived from per-archetype query-type distributions in 14
+# Qianfan #1 reference articles (see transfer/p2_artifacts/phase3_engine_plan.md
+# §1 + transfer/p2_artifacts/wave3_insight_bundle_spec.md).
+#
+# Each row sums to ≤ 1.0 (pytest pins this; small residual lets the architect
+# choose where the marginal queries go). Values are FLOORS, not exact targets.
+# A plan that emits more `causal` queries than the minimum is accepted; a plan
+# below the minimum gets an audit shortfall (advisory, same pattern as outline
+# shape — fail-soft, surfaced in drift telemetry, not a retry trigger).
+_ARCHETYPE_QUERY_TYPE_MIN_PCT: dict[str, dict[str, float]] = {
+    "list-all": {"factual": 0.40, "comparative": 0.20, "causal": 0.10, "critical": 0.10, "trend": 0.10},
+    "compare": {"factual": 0.30, "comparative": 0.30, "causal": 0.10, "critical": 0.15, "trend": 0.10},
+    "explain-mechanism": {"factual": 0.25, "causal": 0.30, "comparative": 0.10, "critical": 0.20, "trend": 0.10},
+    "predict": {"factual": 0.20, "causal": 0.20, "trend": 0.25, "critical": 0.15, "comparative": 0.15},
+    "trend": {"factual": 0.20, "trend": 0.35, "causal": 0.15, "critical": 0.10, "comparative": 0.15},
+    "recommend": {"factual": 0.25, "comparative": 0.25, "critical": 0.20, "causal": 0.15, "trend": 0.10},
+}
+
+# Default for unknown archetype: a balanced floor that doesn't starve any
+# specialist. Sum = 0.95 — matches the ~5-10% headroom every named archetype
+# leaves so the integer query-count rounding (48-64 queries → 2-3 free) can
+# satisfy every floor simultaneously. Greptile PR #35 round-2 follow-up: the
+# previous sum=1.0 default fired advisory shortfalls on every unknown-archetype
+# run because integer rounding pushes ceilings above 100% (e.g., 48 queries:
+# 0.20 → ceil(9.6)=10, 4 types × 10 + 1 type × 12 = 52 > 48). Lowering
+# `critical` 0.15 → 0.10 (matches list-all / explain-mech / recommend floors)
+# preserves balance while creating a satisfiable distribution.
+_DEFAULT_QUERY_TYPE_MIN_PCT: dict[str, float] = {
+    "factual": 0.25,
+    "comparative": 0.20,
+    "causal": 0.20,
+    "critical": 0.10,
+    "trend": 0.20,
+}
+
+
+def _query_type_mins_for_archetype(archetype: str | None) -> dict[str, float]:
+    """Return the per-archetype query-type minimum-proportion dict.
+
+    Falls back to `_DEFAULT_QUERY_TYPE_MIN_PCT` when archetype is unknown
+    (parallel pattern to `_bounds_for_archetype`). Returns a fresh dict so
+    callers mutating the result don't corrupt the module-level constant
+    (mirrors PR #23 round-2 fix on `_bounds_for_archetype`).
+    """
+    return dict(_ARCHETYPE_QUERY_TYPE_MIN_PCT.get(archetype or "", _DEFAULT_QUERY_TYPE_MIN_PCT))
 
 
 # Wave 2 §1.2 (2026-05-26): per-archetype outline shape preset.
@@ -313,6 +411,12 @@ def _format_retry_feedback(audit: dict, archetype: str | None = None) -> str:
         if b["seed_max"] > 0
         else "ZERO depth_seeds per subsection (this archetype uses flat outline, no H4 leaves)"
     )
+    # P3-W0a: include the per-archetype query-type floor in the retry
+    # feedback so the regenerator sees the SAME contract that the audit
+    # was checking against. Without this the architect would refresh the
+    # outline but leave the query-type distribution untouched.
+    q_mins = _query_type_mins_for_archetype(archetype)
+    q_floor_clause = "; ".join(f"{qt}≥{int(round(pct * 100))}%" for qt, pct in q_mins.items())
     lines.extend(
         [
             "",
@@ -320,7 +424,8 @@ def _format_retry_feedback(audit: dict, archetype: str | None = None) -> str:
             f"structural contract for archetype `{archetype or 'default'}` "
             f"({b['top_min']}-{b['top_max']} top sections, "
             f"{b['sub_min']}-{b['sub_max']} subsections each, "
-            f"{seed_clause}) is the highest-priority constraint — it "
+            f"{seed_clause}; query-type floors: {q_floor_clause}) "
+            "is the highest-priority constraint — it "
             "directly drives output depth and Comprehensiveness/Insight "
             f"scores. If you cannot find enough material for {b['top_min']} "
             "top sections on this prompt, break broader sections into "
@@ -369,6 +474,34 @@ def build(
         f"loop. A plan outside these bounds for this archetype will be "
         f"rejected and you'll be asked to regenerate.\n"
     )
+
+    # P3-W0a (2026-05-27): per-archetype query.type distribution floor.
+    # The HARD RULES bullet "distribute query type to cover all needed
+    # analytical functions" was structurally vague. RACE Insight criteria
+    # 2 (causal reasoning) + 3 (problem insight) depend on the writer
+    # receiving enough causal + critical evidence from mechanism_explorer +
+    # critic respectively. The architect was the upstream bottleneck — if
+    # it allocated 5/50 causal queries on an explain-mechanism task, the
+    # whole pipeline starved. These minimum proportions are FLOORS sourced
+    # from the per-archetype distributions in 14 Qianfan #1 reference
+    # articles; the architect may exceed them.
+    q_mins = _query_type_mins_for_archetype(archetype)
+    q_dist_lines = "; ".join(f"{qt}≥{int(round(pct * 100))}%" for qt, pct in q_mins.items())
+    archetype_query_type_block = (
+        f"QUERY TYPE DISTRIBUTION FLOOR FOR THIS ARCHETYPE (`{archetype}`) — "
+        f"each `query.type` must reach at least the minimum proportion "
+        f"shown. These floors are sourced from the per-archetype "
+        f"distributions in 14 Qianfan #1 reference articles, which "
+        f"underwrite RACE Insight criteria 2 (causal reasoning) and 3 "
+        f"(problem insight):\n"
+        f"  {q_dist_lines}\n"
+        f"Across all 48-64 queries combined, the FRACTIONS (not the absolute "
+        f"counts) must satisfy each floor. The audit surfaces shortfalls "
+        f"as advisory drift entries — they do not currently trigger a retry, "
+        f"but they ARE measured against this contract by the post-write "
+        f"compliance scorer.\n"
+    )
+
     # P3-W6 Greptile PR #42 round-2: explicit Python-side audience detection
     # injected into the prompt as a binary hint. Previously the LLM was left
     # to self-determine plural audience from the prompt; now `_prompt_signals_
@@ -389,6 +522,7 @@ def build(
         f"PROMPT ({language}):\n{prompt}\n\n"
         f"ARCHETYPE: {archetype}\nARCHETYPE EMPHASIS: {emphasis}\n\n"
         f"{archetype_outline_block}\n"
+        f"{archetype_query_type_block}\n"
         f"EXTRACTED INTENTS (each must become an acceptance criterion):\n"
         f"{json.dumps(intents, ensure_ascii=False)}\n\n"
         f"REGENERATED EVALUATION SUB-CRITERIA (each must become an acceptance "
@@ -520,6 +654,27 @@ _ENTITY_MATRIX_ENTITIES_MAX = 20
 _ENTITY_MATRIX_DIMENSIONS_MIN = 4
 _ENTITY_MATRIX_DIMENSIONS_MAX = 8
 
+# P3-W2 (2026-05-27): framing_chapter bounds. The §1 chapter publishes the
+# scope, rubric, roadmap, and vocabulary contract that downstream chapters
+# reuse. 4 required sub-sections (scope / rubric / roadmap / vocabulary);
+# 5-10 vocabulary terms; 4-6 rubric items (compare/predict/recommend only).
+# Calibrated against Qianfan's 10/11-article corpus pattern.
+_FRAMING_VOCABULARY_MIN = 5
+_FRAMING_VOCABULARY_MAX = 10
+_FRAMING_RUBRIC_MIN = 4
+_FRAMING_RUBRIC_MAX = 6
+_FRAMING_SUBSECTION_TYPES: tuple[str, ...] = ("scope", "rubric", "roadmap", "vocabulary")
+
+# Archetypes for which framing_chapter is REQUIRED. Trend tasks with a
+# single axis (e.g. "track the evolution of X over time") often don't
+# benefit from a methodology preamble; we OFFER but don't require it.
+_FRAMING_CHAPTER_REQUIRED_ARCHETYPES = frozenset({"list-all", "compare", "explain-mechanism", "predict", "recommend"})
+
+# Archetypes that should produce a non-empty `published_rubric_items` list
+# (the rubric is referenced downstream when entities are scored). Trend and
+# list-all may have rubrics but they're less load-bearing.
+_FRAMING_RUBRIC_REQUIRED_ARCHETYPES = frozenset({"compare", "predict", "recommend"})
+
 # P3-W6 (2026-05-27): stakeholder chapter bounds. Qianfan corpus pattern
 # (6/11 articles): closing chapter splits recommendations into 3-5
 # addressee blocks (q23 §8.4-§8.10 has 7 sub-blocks; q3 §8.7 has 4;
@@ -626,6 +781,44 @@ def _normalize(plan: dict, *, archetype: str | None = None) -> None:
         audit["shortfalls"].append(f"queries={len(queries)}<{_QUERIES_MIN}")
     if len(queries) > _QUERIES_MAX:
         audit["shortfalls"].append(f"queries={len(queries)}>{_QUERIES_MAX}")
+
+    # P3-W0a (2026-05-27): per-archetype query.type distribution audit.
+    # Tallies actual fractions, compares against the archetype's minimum-
+    # proportion floor. Shortfalls are surfaced advisory-style (same pattern
+    # as outline shape: visible in drift telemetry, NOT a retry trigger).
+    # The retry-on-shortfall loop is gated on structural counts (top_min,
+    # sub_min, seed_min) — adding a query-type retry would be a separate
+    # decision and is out of scope here.
+    q_type_mins = _query_type_mins_for_archetype(archetype)
+    type_counts: dict[str, int] = {t: 0 for t in TYPE_TO_SPECIALIST}
+    for q in queries:
+        t = str(q.get("type", "factual")).strip().lower()
+        if t in type_counts:
+            type_counts[t] += 1
+    n_q = len(queries)
+    type_fractions: dict[str, float] = (
+        {t: round(type_counts[t] / n_q, 3) for t in TYPE_TO_SPECIALIST}
+        if n_q > 0
+        else dict.fromkeys(TYPE_TO_SPECIALIST, 0.0)
+    )
+    audit["query_type_counts"] = dict(type_counts)
+    audit["query_type_fractions"] = dict(type_fractions)
+    audit["query_type_min_pct"] = dict(q_type_mins)
+    audit["query_type_shortfalls"] = []
+    if n_q > 0:
+        for qtype, min_pct in q_type_mins.items():
+            actual = type_fractions.get(qtype, 0.0)
+            if actual < min_pct:
+                shortfall = f"query_type.{qtype}={actual:.2%}<{min_pct:.0%}"
+                audit["query_type_shortfalls"].append(shortfall)
+    # Query-type shortfalls are ADVISORY-ONLY: they're surfaced in
+    # `_outline_audit["query_type_shortfalls"]` and forwarded to drift
+    # telemetry, but NOT added to the global `shortfalls` list because
+    # that list is the retry-trigger and we don't want a 9-vs-10% query-
+    # type miss to cost a retry while the outline is structurally fine.
+    # The post-write compliance scorer + retry-feedback string (which
+    # interpolates the floors when a retry IS triggered for a separate
+    # reason) jointly enforce the contract.
     for sec in toc:
         subs = sec.get("subsections", []) or []
         audit["n_subsections_total"] += len(subs)
@@ -710,6 +903,60 @@ def _normalize(plan: dict, *, archetype: str | None = None) -> None:
                 audit["shortfalls"].append(f"entity_matrix.dimensions={len(dims)}<{_ENTITY_MATRIX_DIMENSIONS_MIN}")
             if len(dims) > _ENTITY_MATRIX_DIMENSIONS_MAX:
                 audit["shortfalls"].append(f"entity_matrix.dimensions={len(dims)}>{_ENTITY_MATRIX_DIMENSIONS_MAX}")
+
+    # P3-W2 (2026-05-27): framing_chapter audit. For required archetypes,
+    # check that the §1 contract artifact exists with the 4 required
+    # sub-sections, 5-10 vocabulary terms, and (when applicable) 4-6
+    # rubric items. Same advisory-only pattern as entity_matrix —
+    # shortfalls visible in drift telemetry; only the missing/required
+    # case is a global retry-trigger.
+    fc = plan.get("framing_chapter")
+    fc_is_required = archetype in _FRAMING_CHAPTER_REQUIRED_ARCHETYPES
+    if fc_is_required:
+        fc_was_missing = not isinstance(fc, dict)
+        if fc_was_missing:
+            # Backfill so writer never crashes on `fc["sub_sections"]`.
+            fc = {
+                "title": "",
+                "sub_sections": [],
+                "published_vocabulary": [],
+                "published_rubric_items": [],
+            }
+            plan["framing_chapter"] = fc
+            audit["shortfalls"].append("framing_chapter=missing(required-for-archetype)")
+        # Normalize fields so downstream consumers see canonical shape.
+        if not isinstance(fc.get("sub_sections"), list):
+            fc["sub_sections"] = []
+        if not isinstance(fc.get("published_vocabulary"), list):
+            fc["published_vocabulary"] = []
+        if not isinstance(fc.get("published_rubric_items"), list):
+            fc["published_rubric_items"] = []
+        sub_types = [str(s.get("type", "")).strip().lower() for s in fc["sub_sections"] if isinstance(s, dict)]
+        missing_types = [t for t in _FRAMING_SUBSECTION_TYPES if t not in sub_types]
+        audit["framing_chapter_sub_section_types"] = sub_types
+        audit["framing_chapter_missing_sub_section_types"] = missing_types
+        audit["framing_chapter_vocabulary_count"] = len(fc["published_vocabulary"])
+        audit["framing_chapter_rubric_count"] = len(fc["published_rubric_items"])
+        if not fc_was_missing:
+            if missing_types:
+                audit["shortfalls"].append(f"framing_chapter.missing_sub_section_types={','.join(missing_types)}")
+            if len(fc["published_vocabulary"]) < _FRAMING_VOCABULARY_MIN:
+                audit["shortfalls"].append(
+                    f"framing_chapter.vocabulary={len(fc['published_vocabulary'])}<{_FRAMING_VOCABULARY_MIN}"
+                )
+            if len(fc["published_vocabulary"]) > _FRAMING_VOCABULARY_MAX:
+                audit["shortfalls"].append(
+                    f"framing_chapter.vocabulary={len(fc['published_vocabulary'])}>{_FRAMING_VOCABULARY_MAX}"
+                )
+            if archetype in _FRAMING_RUBRIC_REQUIRED_ARCHETYPES:
+                if len(fc["published_rubric_items"]) < _FRAMING_RUBRIC_MIN:
+                    audit["shortfalls"].append(
+                        f"framing_chapter.rubric={len(fc['published_rubric_items'])}<{_FRAMING_RUBRIC_MIN}"
+                    )
+                if len(fc["published_rubric_items"]) > _FRAMING_RUBRIC_MAX:
+                    audit["shortfalls"].append(
+                        f"framing_chapter.rubric={len(fc['published_rubric_items'])}>{_FRAMING_RUBRIC_MAX}"
+                    )
 
     # P3-W6 (2026-05-27): stakeholder_chapter audit. Unlike other Phase 3
     # artifacts, this one is OPTIONAL — only populated when the prompt
