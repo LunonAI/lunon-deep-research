@@ -167,13 +167,50 @@ def test_normalize_flags_missing_limitations_sub_section_type():
 
 
 def test_normalize_predict_with_missing_stress_test_emits_shortfall():
-    """predict archetype requires scenario_stress_test."""
+    """predict archetype requires scenario_stress_test. The shortfall
+    string interpolates the actual archetype so targeted-retry
+    consumers can route on it (see also
+    `test_stress_test_shortfall_string_interpolates_archetype` for the
+    Greptile PR #41 round-3 future-proofing pin)."""
     plan = _bare_plan_with_limitations()
     plan["limitations_chapter"]["scenario_stress_test"] = None
     architect._normalize(plan, archetype="predict")
     audit = plan["_outline_audit"]
     assert audit["limitations_chapter_has_stress_test"] is False
-    assert any("scenario_stress_test=missing" in s for s in audit["shortfalls"])
+    assert "limitations_chapter.scenario_stress_test=missing(required-for-predict)" in audit["shortfalls"], (
+        f"expected parameterized shortfall, got {audit['shortfalls']}"
+    )
+
+
+def test_stress_test_shortfall_string_interpolates_archetype(monkeypatch):
+    """Greptile PR #41 round-3: the stress-test shortfall message must
+    interpolate the current `archetype`, not hardcode "predict". This
+    pin protects against a regression where a future addition to
+    `_LIMITATIONS_STRESS_TEST_ARCHETYPES` would still emit
+    "required-for-predict" for the new archetype — a misleading
+    message that would make targeted-retry consumers treat the two
+    archetypes identically.
+
+    We extend the stress-test set (AND the required set, since the
+    stress-test branch is gated on lc_is_required first) to also cover
+    "explain-mechanism", emulate a chapter missing the stress test,
+    and verify the shortfall names the actual archetype.
+    """
+    monkeypatch.setattr(
+        architect,
+        "_LIMITATIONS_STRESS_TEST_ARCHETYPES",
+        frozenset({"predict", "explain-mechanism"}),
+    )
+    plan = _bare_plan_with_limitations(archetype="predict")
+    plan["limitations_chapter"]["scenario_stress_test"] = None
+    architect._normalize(plan, archetype="explain-mechanism")
+    audit = plan["_outline_audit"]
+    assert audit["limitations_chapter_has_stress_test"] is False
+    assert "limitations_chapter.scenario_stress_test=missing(required-for-explain-mechanism)" in audit["shortfalls"], (
+        f"shortfall did not interpolate {{archetype}}; got {audit['shortfalls']}"
+    )
+    # Crucially, the legacy hardcoded form must NOT appear.
+    assert "limitations_chapter.scenario_stress_test=missing(required-for-predict)" not in audit["shortfalls"]
 
 
 def test_normalize_compare_does_not_require_stress_test():
