@@ -17,7 +17,20 @@ class MemoryBank:
         self._by_section = {}  # section_id -> [eid]
         self._n = 0
 
-    def add(self, *, source_name, url, title, text, query_id, section_ids, specialist, language) -> str:
+    def add(self, *, source_name, url, title, text, query_id, section_ids, specialist, language, chain=None) -> str:
+        """Store one evidence block.
+
+        `chain` is OPTIONAL — populated by the mechanism_explorer specialist
+        (P3-W0b, 2026-05-27) for multi-step causal findings. When present
+        it is a list of 2-4 short clauses naming the causal links; the
+        writer's evidence-pack renderer surfaces it so the writer can emit
+        explicit "X → Y → Z" prose rather than inventing chains from a
+        flat `statement`. A list with <2 links is stored unchanged but the
+        writer-side render path skips it (1-link "chain" is just the
+        statement again). Sanitation happens upstream in
+        `specialists._sanitize_chain` so anything reaching this point is
+        guaranteed list[str].
+        """
         self._n += 1
         eid = f"E{self._n}"
         block = {
@@ -30,6 +43,7 @@ class MemoryBank:
             "section_ids": list(section_ids or []),
             "specialist": specialist,
             "language": language,
+            "chain": list(chain) if chain else [],
         }
         self._items[eid] = block
         for sid in block["section_ids"]:
