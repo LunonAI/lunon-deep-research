@@ -797,7 +797,16 @@ _STAKEHOLDER_COUNT_MAX = 5
 _PLURAL_AUDIENCE_PATTERNS = (
     r"\binvestors?\s+and\s+(?:policymakers?|regulators?|researchers?|consumers?|users?)\b",
     r"\b(?:policymakers?|regulators?|researchers?|practitioners?|industry)\s+and\s+(?:investors?|practitioners?|industry|stakeholders?)\b",
-    r"\bfor\s+(?:both|each\s+of)\s+\w+\s+(?:and|&)\s+\w+",
+    # Greptile PR #42 round-6 fix: the prior `\bfor\s+(?:both|each\s+of)\s+\w+\s+(?:and|&)\s+\w+`
+    # pattern used bare `\w+` anchors that matched ANY "for both X and Y"
+    # construction — including "for both short and long time horizons",
+    # "for both old and new architectures", or "for both quantum and
+    # classical regimes." Those are NOT plural-audience signals, but the
+    # pre-fix regex would set PLURAL_AUDIENCE_DETECTED=true and force a
+    # spurious stakeholder_chapter — the exact false-positive class the
+    # "precision over recall" comment is designed to prevent. Constraining
+    # both slots to the known audience vocabulary closes the hole.
+    r"\bfor\s+(?:both|each\s+of)\s+(?:investors?|policymakers?|regulators?|researchers?|practitioners?|industry|stakeholders?|consumers?|users?)\s+(?:and|&)\s+(?:investors?|policymakers?|regulators?|researchers?|practitioners?|industry|stakeholders?|consumers?|users?)\b",
     r"\brecommendations?\s+(?:for|to|targeting|aimed\s+at)\s+(?:investors?|policymakers?|regulators?|researchers?|practitioners?|industry|stakeholders?)",
     r"\bguidance\s+(?:for|to)\s+(?:investors?|policymakers?|practitioners?|industry|stakeholders?)",
     # ZH patterns: "面向多元主体" / "为投资者和决策者" / "对不同利益相关方"
