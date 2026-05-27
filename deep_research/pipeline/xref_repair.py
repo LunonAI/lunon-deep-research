@@ -146,6 +146,24 @@ def repair(text: str) -> tuple[str, dict]:
             return "a later section"
         return m.group(0)
 
+    # Greptile PR #39 round-4: scope `ref_pattern.sub(_rewrite, …)` to
+    # body lines only. `ref_pattern`'s third alternation matches title
+    # words like "Chapter 47" / "Section 99" in headings (`## 5 Chapter
+    # 47 Overview`). A naive whole-sentence sub would rewrite those to
+    # "a later section", corrupting the navigational layer. Title text
+    # is naming the chapter, not navigating to it — the rewriter should
+    # leave it alone. The line-by-line filter applies `_rewrite` only
+    # to non-heading lines; heading-marker lines (`^#{2,4}\s+`) pass
+    # through verbatim. The hot-path check `re.search` avoids the
+    # split/join overhead for the common case of a token with no
+    # heading inside it.
+    def _rewrite_body_only(text: str) -> str:
+        if not re.search(r"(?m)^#{2,4}\s+", text):
+            return ref_pattern.sub(_rewrite, text)
+        return "\n".join(
+            line if re.match(r"^#{2,4}\s+", line) else ref_pattern.sub(_rewrite, line) for line in text.split("\n")
+        )
+
     tokens = re.split(r"((?<=[.!?])\s+)", text)
     out_tokens: list[str] = []
     # `tokens` alternates: even indices are sentences, odd indices are
@@ -190,7 +208,12 @@ def repair(text: str) -> tuple[str, dict]:
             # `(?m)^#{2,4}\s+` (multiline + 2-4 hashes) so any `##`/
             # `###`/`####` heading line inside the token survives.
             if re.search(r"(?m)^#{2,4}\s+", sentence):
-                out_tokens.append(ref_pattern.sub(_rewrite, sentence))
+                # Greptile PR #39 round-4: scope rewrite to body lines only.
+                # See `_rewrite_body_only` docstring above the loop —
+                # without this, heading titles containing "Chapter N" or
+                # "Section N" would be rewritten by `ref_pattern`'s third
+                # alternation, silently corrupting the navigational layer.
+                out_tokens.append(_rewrite_body_only(sentence))
                 out_tokens.append(sep)
                 continue
             # Sentence has no meaningful content after removing the
@@ -221,8 +244,12 @@ def repair(text: str) -> tuple[str, dict]:
 
         # Rewrite each dangling ref to "a later section" / "another section".
         # `_rewrite` is hoisted above the loop (round-3) so the heading-guard
-        # path can share the same closure.
-        out_tokens.append(ref_pattern.sub(_rewrite, sentence))
+        # path can share the same closure. `_rewrite_body_only` (round-4)
+        # scopes the sub to body lines so heading titles like "Chapter 47"
+        # aren't corrupted — important here too because a long-bodied
+        # sentence whose token includes a leading heading line still hits
+        # this default branch (residual ≥ 15).
+        out_tokens.append(_rewrite_body_only(sentence))
         out_tokens.append(sep)
     text = "".join(out_tokens)
 

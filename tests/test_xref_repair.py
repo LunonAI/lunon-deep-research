@@ -315,3 +315,67 @@ def test_repair_lowercase_template_strip_does_not_false_positive_in_prose():
     out, stats = repair(text)
     assert stats["templates_repaired"] == 0, f"mid-paragraph false positive: {stats}; out={out}"
     assert "building on prior work" in out
+
+
+def test_repair_heading_guard_does_not_rewrite_chapter_title_text():
+    r"""Greptile PR #39 round-4: the heading-guard path previously
+    applied `ref_pattern.sub(_rewrite, sentence)` to the WHOLE token —
+    heading line included. `ref_pattern`'s third alternation
+    `(?:Section|Chapter|Sec\.)\s+([\d\.]+)\b` matches title words like
+    "Chapter 47" in a heading `## 5 Chapter 47 Overview`. If 47 is
+    dangling, the heading would be silently corrupted to
+    `"## 5 a later section Overview"` — structural damage in the
+    navigational layer.
+
+    Fix: split the token line-by-line; heading-marker lines are emitted
+    verbatim, body lines have `_rewrite` applied. This test pins:
+      (a) the heading title "Chapter 47" survives verbatim even though
+          47 is not in the heading-id set;
+      (b) the BODY dangler `(Section 47)` IS still rewritten to
+          `(a later section)` — the round-3 short-name fix continues
+          to apply.
+
+    Concrete fixture: id `5` is in heading-ids (`## 5 Chapter 47
+    Overview`), so the auditor must NOT classify `5` itself as
+    dangling. The `47` referenced in the heading title is a legitimate
+    proper-noun chapter-number reference within the title text — it's
+    naming the chapter, not navigating to it.
+    """
+    text = (
+        "## 5 Chapter 47 Overview\n\n"
+        "See (Section 47).\n\n"  # dangling body ref → rewrite
+        "## 6 Next\n\nNext chapter prose is here.\n"
+    )
+    out, stats = repair(text)
+    # (a) Heading title must NOT have been corrupted.
+    assert "## 5 Chapter 47 Overview" in out, f"heading title rewritten by ref_pattern: {out!r}"
+    # The buggy output to guard against:
+    assert "a later section Overview" not in out, (
+        f"heading-title `Chapter N` rewritten as if it were a body xref: {out!r}"
+    )
+    # (b) Body dangler still rewritten.
+    assert "(a later section)" in out, f"body dangler not rewritten: {out!r}"
+    assert "(Section 47)" not in out
+    # Stats: heading-routed path uses _rewrite, so the rewrite counter
+    # increments; the delete counter stays zero (heading-guard preempts it).
+    assert stats["dangling_refs_rewritten"] >= 1
+    assert stats["sentences_deleted"] == 0
+    # Downstream chapter unaffected.
+    assert "## 6 Next" in out
+    assert "Next chapter prose is here." in out
+
+
+def test_repair_heading_guard_preserves_multiple_heading_lines_verbatim():
+    """When the token contains multiple consecutive heading lines (e.g.
+    a chapter heading followed immediately by a sub-section heading
+    before any prose), every heading line must survive verbatim — none
+    of them should have `_rewrite` applied even when their titles
+    contain `Section N` / `Chapter N` patterns."""
+    text = "## 5 Chapter 47 Overview\n\n### 5.1 Section 99 Subtopic\n\nSee (Section 47).\n\n## 6 Done\n\nLast prose.\n"
+    out, _ = repair(text)
+    # Both heading titles must survive — neither "Chapter 47" nor
+    # "Section 99" should be rewritten by the body-xref rewriter.
+    assert "## 5 Chapter 47 Overview" in out, f"H2 title corrupted: {out!r}"
+    assert "### 5.1 Section 99 Subtopic" in out, f"H3 title corrupted: {out!r}"
+    # Body dangler still rewritten.
+    assert "(a later section)" in out
