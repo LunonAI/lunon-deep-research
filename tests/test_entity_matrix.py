@@ -109,9 +109,21 @@ def test_normalize_records_no_shortfalls_when_matrix_meets_bounds():
     plan["queries"] = [
         {"id": f"Q{i + 1}", "text": f"q{i + 1}", "type": "factual"} for i in range(architect._QUERIES_MIN)
     ]
-    # P3-W5 merge follow-up (2026-05-27): list-all archetype requires
-    # limitations_chapter with 5 sub-sections. Minimal valid form to
-    # satisfy the new audit.
+    # P3-W2 + P3-W5 merge follow-up (2026-05-27): list-all archetype
+    # requires BOTH a framing_chapter (§1 contract) and a limitations_chapter
+    # (penultimate falsification chapter) — without both, the audit carries
+    # missing-required shortfalls and the test's `== []` invariant breaks.
+    plan["framing_chapter"] = {
+        "title": "Framework",
+        "sub_sections": [
+            {"id": "S1.1", "type": "scope", "title": "Scope", "content_directive": "..."},
+            {"id": "S1.2", "type": "rubric", "title": "Rubric", "content_directive": "..."},
+            {"id": "S1.3", "type": "roadmap", "title": "Roadmap", "content_directive": "..."},
+            {"id": "S1.4", "type": "vocabulary", "title": "Vocab", "content_directive": "..."},
+        ],
+        "published_vocabulary": ["v1", "v2", "v3", "v4", "v5"],
+        "published_rubric_items": [],  # list-all not in RUBRIC_REQUIRED set
+    }
     plan["limitations_chapter"] = {
         "title": "Limitations",
         "sub_sections": [

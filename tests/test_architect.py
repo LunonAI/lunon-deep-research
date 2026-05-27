@@ -365,10 +365,34 @@ def _build_good_plan_obj():
             "entities": [f"E{i + 1}" for i in range(architect._ENTITY_MATRIX_ENTITIES_MIN)],
             "dimensions": [f"D{i + 1}" for i in range(architect._ENTITY_MATRIX_DIMENSIONS_MIN)],
         },
-        # P3-W5 merge follow-up (2026-05-27): predict-archetype tests
-        # call this builder and predict requires limitations_chapter
-        # with all 5 sub-section types + scenario_stress_test populated.
-        # Minimal valid limitations chapter to satisfy the new audit.
+        # P3-W2 + P3-W5 merge follow-up (2026-05-27): predict / compare /
+        # etc. archetypes now require BOTH a populated framing_chapter (§1
+        # contract) and a populated limitations_chapter (penultimate
+        # falsification chapter). Without both, the "good plan" carries
+        # `framing_chapter=missing(...)` and/or `limitations_chapter=missing(...)`
+        # shortfalls and breaks the `shortfalls == []` invariant the retry
+        # tests assert.
+        #
+        # Minimal valid framing chapter: 4 sub-sections (scope/rubric/
+        # roadmap/vocabulary), 5 vocabulary terms, 4 rubric items.
+        "framing_chapter": {
+            "title": "Framework",
+            "sub_sections": [
+                {"id": "S1.1", "type": "scope", "title": "Scope", "content_directive": "..."},
+                {"id": "S1.2", "type": "rubric", "title": "Rubric", "content_directive": "..."},
+                {"id": "S1.3", "type": "roadmap", "title": "Roadmap", "content_directive": "..."},
+                {"id": "S1.4", "type": "vocabulary", "title": "Vocab", "content_directive": "..."},
+            ],
+            "published_vocabulary": ["v1", "v2", "v3", "v4", "v5"],
+            "published_rubric_items": [
+                {"id": "R-1", "label": "L1", "weight": 0.25},
+                {"id": "R-2", "label": "L2", "weight": 0.25},
+                {"id": "R-3", "label": "L3", "weight": 0.25},
+                {"id": "R-4", "label": "L4", "weight": 0.25},
+            ],
+        },
+        # Minimal valid limitations chapter: 5 sub-section types + a
+        # populated scenario_stress_test (required for predict archetype).
         "limitations_chapter": {
             "title": "Limitations",
             "sub_sections": [
