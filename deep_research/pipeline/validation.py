@@ -45,24 +45,6 @@ _TOK = 4  # ~chars-per-token heuristic; cheap, scoring uses the harness cleaner
 # were truncated (parallel to the `short_pairs` fallback signal).
 _STAKEHOLDER_BODY_MAX_CHARS = 5000
 
-# P3-W5.b (2026-05-27): canonical 5 sub-section types for the
-# limitations chapter. Source of truth for `_validate_limitations_
-# chapter` — the architect emits these types verbatim per the schema at
-# architect.py:180-210, and the writer's `limitations_block` directive
-# references them in the rendering contract. Keeping the list here lets
-# a future addition (e.g., "model_assumptions" as a 6th type) require
-# one edit instead of grepping for the names across architect + writer
-# + validation. The order matches the rendering order the reference articles
-# favour (data → scope → time → sampling → falsifiers, broadest to
-# most specific).
-_LIMITATIONS_SUBSECTION_TYPES = (
-    "data_granularity",
-    "scope_cap",
-    "time_validity",
-    "sampling",
-    "falsifiers",
-)
-
 # P3-W5.b (2026-05-27): max chars scanned in a limitations sub-section
 # body when looking for a "specific anchor" (year / proper noun / R-N
 # rubric id). Mirrors `_STAKEHOLDER_BODY_MAX_CHARS` for the case where
@@ -79,9 +61,12 @@ _LIMITATIONS_BODY_MAX_CHARS = 3000
 #   - 4-digit year in the 1900-2099 range.
 #   - Acronym (2+ all-caps letters): "IBM", "EU", "NIST", "PQC".
 #   - Mid-sentence proper noun (capitalized 3+ letters preceded by a
-#     lowercase letter + whitespace — excludes sentence-initial words
-#     like "The", "Per", "Beyond" which are common leaders, not entity
-#     names).
+#     lowercase letter + a literal space or tab — excludes sentence-
+#     initial words like "The", "Per", "Beyond" which are common leaders,
+#     not entity names. The lookbehind deliberately uses `[ \t]` rather
+#     than `\s` so a newline (e.g., "limited data\nBeyond 2028") does NOT
+#     count as the intra-sentence boundary; a newline is treated as a
+#     line break that may begin a new sentence.
 #   - Rubric identifier `R-\d+` (links to §1 framing-chapter items —
 #     verbatim by the reference corpus pattern).
 # The body is pre-stripped of citation markers (`[^...]`) and `§N.M` refs
@@ -91,7 +76,7 @@ _LIMITATIONS_BODY_MAX_CHARS = 3000
 _LIMITATIONS_SPECIFIC_ANCHOR_RE = re.compile(
     r"\b(?:19|20)\d{2}\b"  # 4-digit year
     r"|\b[A-Z]{2,}\b"  # acronym
-    r"|(?<=[a-z]\s)[A-Z][a-zA-Z]{2,}"  # mid-sentence proper noun
+    r"|(?<=[a-z][ \t])[A-Z][a-zA-Z]{2,}"  # mid-sentence proper noun
     r"|\bR-\d+\b"  # rubric id
 )
 

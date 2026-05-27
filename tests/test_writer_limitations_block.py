@@ -197,14 +197,14 @@ def test_scenario_stress_test_block_absent_when_sst_null(monkeypatch):
     assert "SCENARIO STRESS TEST" not in user, f"sst block fired with null scenario_stress_test; got: {user[:3000]}"
 
 
-def test_scenario_stress_test_block_absent_when_sst_empty_dict(monkeypatch):
+def test_scenario_stress_test_block_present_with_defaults_when_sst_empty_dict(monkeypatch):
     """Greptile-style edge case: empty dict `{}` is truthy-distinct from
-    None but must still NOT fire the sst block (the architect may emit
-    `{}` when scenarios couldn't be enumerated). Per writer.py guard
-    `isinstance(sst, dict)` admits empty dicts — but the directive
-    inside falls back to safe defaults if scenarios/recompute_target
-    are absent. Tightest contract: empty dict produces a directive with
-    DEFAULT scenarios + default recompute_target."""
+    None. The architect may emit `{}` when scenarios couldn't be
+    enumerated; per writer.py guard `isinstance(sst, dict)` admits empty
+    dicts, and the directive inside falls back to safe defaults if
+    scenarios/recompute_target are absent. Tightest contract: empty dict
+    produces a directive with DEFAULT scenarios + default
+    recompute_target — the block IS present, with defaults."""
     plan = _bare_plan_with_limitations(_full_lc(scenario_stress_test={}))
     captured = _call_writer(monkeypatch, plan, sid="S3")
     user = captured[0]["user"]
