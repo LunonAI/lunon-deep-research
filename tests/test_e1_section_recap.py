@@ -9,16 +9,27 @@ History:
 - v3 (2026-05-26, gap-map §12.A): post-PR-31 fresh-corpus A/B retro
   showed v2's "Calibrated against Qianfan #1" claim was BACKWARDS. Live
   leaderboard #1 vintage uses the "Building on §N..." template at 0%
-  (vs Lunon's 77%); judge flagged the result as "repeated setup language"
-  and "forward references to missing sections". v3 keeps the prose-before-
-  table requirement but drops the recap templates, §N opening refs, and
-  meta-subject openings ("this section"). Opening templates are now
-  modeled on verified Qianfan chapter openers.
+  (vs Lunon's 77%); judge flagged the result as "repeated setup language".
+  v3 dropped the recap templates, §N opening refs, and meta-subject
+  openings ("this section"). Acceptable templates were modeled on Qianfan
+  chapter openers.
+- v4 (2026-05-26, post-PR-32-merge full-archetype retro): v3 over-corrected
+  on §N refs. Fresh-corpus measurement on 14 Qianfan tasks across all 6
+  archetypes showed 75-89% of chapters reference an earlier chapter
+  ("Chapter N" / "第N章") in the opening sentence — paired with a
+  substantive recap of what that prior chapter established. v4 re-allows
+  this QUALIFIED chapter-reference idiom while keeping all other v3 bans
+  intact (Building-on, meta-subject, prose-before-table, disconnected-
+  exposition). Bare-pointer references without named artefact remain
+  antipattern in the rule body but the compliance gate enforces only the
+  coarser bans; nuanced bare-vs-paired detection is the writer-prompt
+  directive's job, validated post-merge by smoke.
 
-The tests below pin BOTH the structural requirement that survived v3 AND
-the v3-specific antipattern bans, so any future regression to "Building
-on §X..." or "this section" openings fails loud locally before the
-writer ships it again.
+The tests below pin BOTH the structural requirement that survived v3+v4
+AND the v4-specific antipattern bans, so any future regression to
+"Building on §X..." or "this section" openings fails loud locally
+before the writer ships it again. The v4-allowed chapter-reference
+idioms are also pinned so a future revert that re-bans them fails loud.
 """
 
 from deep_research import writing_rules as wr
@@ -94,17 +105,17 @@ def test_forbids_table_first_openings(monkeypatch):
 # --- v3-specific: Qianfan-parity antipattern bans -----------------------
 
 
-def test_v3_marker_present(monkeypatch):
+def test_v4_marker_present(monkeypatch):
     """Version marker pins the rule's iteration. A future revision that
     forgets to bump the marker fails this test, surfacing the missing
     audit trail."""
     sys = _sys(monkeypatch)
-    assert "P2-Wave-3-§12.A.v3" in sys
+    assert "P2-Wave-3-§12.A.v4" in sys
 
 
 def test_v3_forbids_building_on_template(monkeypatch):
     """The 'Building on §X...' template fired ~77% in pre-v3 Lunon and 0%
-    in Qianfan #1; v3 forbids it explicitly in the antipattern list."""
+    in Qianfan #1; v3+v4 forbid it explicitly in the antipattern list."""
     sys = _sys(monkeypatch)
     # The rule body must call this out by name in the forbidden list so a
     # writer that emits 'Building on the framework introduced in §1...'
@@ -114,18 +125,47 @@ def test_v3_forbids_building_on_template(monkeypatch):
     assert "'Building on [the framework" in sys[forbidden_idx:]
 
 
-def test_v3_forbids_section_n_refs_in_openings(monkeypatch):
-    """§N refs in opening sentences was a v2 allowance that produced the
-    judge-flagged 'forward references to missing sections' bug. v3
-    forbids §N refs in openings entirely (still allowed in body text
-    per the unchanged narrowing)."""
+def test_v4_allows_chapter_n_refs_with_substantive_recap(monkeypatch):
+    """v4 amendment: chapter-reference openings paired with a substantive
+    recap of what the prior chapter established are ALLOWED (Qianfan
+    fires this shape at 75-89% across the verified corpus). v3 blanket-
+    banned ANY §N reference in openings; v4 removed that ban and added
+    an explicit Acceptable patterns block with the 3 Qianfan idioms.
+
+    A future revert that re-bans Chapter-N refs in openings would fail
+    this test, surfacing the regression before it ships against post-
+    merge smoke output where the writer has been told the idiom is OK."""
+    sys = _sys(monkeypatch)
+    # The v3 'ANY §N' antipattern bullet must be GONE.
+    assert "ANY '§N'" not in sys, "v3 blanket §N ban must be removed in v4"
+    # The v3 'OPENING-SENTENCE FORBIDDEN-§N RULE OVERRIDES' addendum must
+    # also be gone (it extended the v3 ban over the body-narrowing's
+    # named-artefact allowance).
+    assert "OPENING-SENTENCE FORBIDDEN-§N RULE OVERRIDES" not in sys
+    # The new Acceptable chapter-reference idioms block must be present.
+    assert "Acceptable chapter-reference idioms" in sys
+    # The three Qianfan-verified opening idioms must be named in that
+    # block so future readers see the substantive shape of valid
+    # chapter-reference openings.
+    assert "Recap-then-pivot" in sys
+    assert "ZH recap-then-pivot" in sys
+    assert "Multi-chapter recap" in sys
+
+
+def test_v4_keeps_bare_pointer_forbidden(monkeypatch):
+    """The DISTINCTION v4 enforces is QUALIFIED chapter ref (allowed) vs
+    BARE pointer (forbidden). 'As discussed in §3, ...' / 'Per §3, ...' /
+    '如§1所述, ...' are bare-pointer-as-recap antipatterns Qianfan
+    doesn't use; v4 names them in the FORBIDDEN list."""
     sys = _sys(monkeypatch)
     forbidden_idx = sys.find("FORBIDDEN opening patterns")
-    # The §N-in-openings antipattern must appear in the forbidden list AND
-    # the body narrowing must explicitly carve openings out of the
-    # 'named artefact OK' allowance.
-    assert "ANY '§N'" in sys[forbidden_idx:]
-    assert "OPENING-SENTENCE FORBIDDEN-§N RULE OVERRIDES" in sys
+    assert forbidden_idx > 0
+    forbidden_section = sys[forbidden_idx:]
+    # The bare-pointer antipattern must appear by name with concrete
+    # example variants so the writer sees the failure mode.
+    assert "BARE '§N'" in forbidden_section or "bare-pointer-as-recap" in forbidden_section
+    # At least one of the concrete bare-pointer examples must be present.
+    assert "As discussed in §1" in sys or "Per §3" in forbidden_section or "如§1所述" in forbidden_section
 
 
 def test_v3_forbids_this_section_meta_subject(monkeypatch):
