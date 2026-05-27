@@ -158,6 +158,59 @@ _SEEDS_MAX = 4
 _QUERIES_MIN = 48
 _QUERIES_MAX = 64
 
+# P3-W0a (2026-05-27): per-archetype `query.type` minimum proportions.
+# The HARD RULES bullet "Distribute query type to cover all needed analytical
+# functions" was structurally too vague — when the architect under-allocated
+# causal queries to the mechanism_explorer specialist (or critical queries to
+# the critic), the writer's evidence pack lost the substrate needed for RACE
+# Insight criteria 2 (Causal Reasoning) and 3 (Problem Insight). These per-
+# archetype minimums are sourced from the W3-Insight-Bundle spec, which
+# itself was derived from per-archetype query-type distributions in 14
+# Qianfan #1 reference articles (see transfer/p2_artifacts/phase3_engine_plan.md
+# §1 + transfer/p2_artifacts/wave3_insight_bundle_spec.md).
+#
+# Each row sums to ≤ 1.0 (pytest pins this; small residual lets the architect
+# choose where the marginal queries go). Values are FLOORS, not exact targets.
+# A plan that emits more `causal` queries than the minimum is accepted; a plan
+# below the minimum gets an audit shortfall (advisory, same pattern as outline
+# shape — fail-soft, surfaced in drift telemetry, not a retry trigger).
+_ARCHETYPE_QUERY_TYPE_MIN_PCT: dict[str, dict[str, float]] = {
+    "list-all": {"factual": 0.40, "comparative": 0.20, "causal": 0.10, "critical": 0.10, "trend": 0.10},
+    "compare": {"factual": 0.30, "comparative": 0.30, "causal": 0.10, "critical": 0.15, "trend": 0.10},
+    "explain-mechanism": {"factual": 0.25, "causal": 0.30, "comparative": 0.10, "critical": 0.20, "trend": 0.10},
+    "predict": {"factual": 0.20, "causal": 0.20, "trend": 0.25, "critical": 0.15, "comparative": 0.15},
+    "trend": {"factual": 0.20, "trend": 0.35, "causal": 0.15, "critical": 0.10, "comparative": 0.15},
+    "recommend": {"factual": 0.25, "comparative": 0.25, "critical": 0.20, "causal": 0.15, "trend": 0.10},
+}
+
+# Default for unknown archetype: a balanced floor that doesn't starve any
+# specialist. Sum = 0.95 — matches the ~5-10% headroom every named archetype
+# leaves so the integer query-count rounding (48-64 queries → 2-3 free) can
+# satisfy every floor simultaneously. Greptile PR #35 round-2 follow-up: the
+# previous sum=1.0 default fired advisory shortfalls on every unknown-archetype
+# run because integer rounding pushes ceilings above 100% (e.g., 48 queries:
+# 0.20 → ceil(9.6)=10, 4 types × 10 + 1 type × 12 = 52 > 48). Lowering
+# `critical` 0.15 → 0.10 (matches list-all / explain-mech / recommend floors)
+# preserves balance while creating a satisfiable distribution.
+_DEFAULT_QUERY_TYPE_MIN_PCT: dict[str, float] = {
+    "factual": 0.25,
+    "comparative": 0.20,
+    "causal": 0.20,
+    "critical": 0.10,
+    "trend": 0.20,
+}
+
+
+def _query_type_mins_for_archetype(archetype: str | None) -> dict[str, float]:
+    """Return the per-archetype query-type minimum-proportion dict.
+
+    Falls back to `_DEFAULT_QUERY_TYPE_MIN_PCT` when archetype is unknown
+    (parallel pattern to `_bounds_for_archetype`). Returns a fresh dict so
+    callers mutating the result don't corrupt the module-level constant
+    (mirrors PR #23 round-2 fix on `_bounds_for_archetype`).
+    """
+    return dict(_ARCHETYPE_QUERY_TYPE_MIN_PCT.get(archetype or "", _DEFAULT_QUERY_TYPE_MIN_PCT))
+
 
 # Wave 2 §1.2 (2026-05-26): per-archetype outline shape preset.
 # Calibrated against the 10-doc Qianfan reference corpus (profiled
@@ -300,6 +353,12 @@ def _format_retry_feedback(audit: dict, archetype: str | None = None) -> str:
         if b["seed_max"] > 0
         else "ZERO depth_seeds per subsection (this archetype uses flat outline, no H4 leaves)"
     )
+    # P3-W0a: include the per-archetype query-type floor in the retry
+    # feedback so the regenerator sees the SAME contract that the audit
+    # was checking against. Without this the architect would refresh the
+    # outline but leave the query-type distribution untouched.
+    q_mins = _query_type_mins_for_archetype(archetype)
+    q_floor_clause = "; ".join(f"{qt}≥{int(round(pct * 100))}%" for qt, pct in q_mins.items())
     lines.extend(
         [
             "",
@@ -307,7 +366,8 @@ def _format_retry_feedback(audit: dict, archetype: str | None = None) -> str:
             f"structural contract for archetype `{archetype or 'default'}` "
             f"({b['top_min']}-{b['top_max']} top sections, "
             f"{b['sub_min']}-{b['sub_max']} subsections each, "
-            f"{seed_clause}) is the highest-priority constraint — it "
+            f"{seed_clause}; query-type floors: {q_floor_clause}) "
+            "is the highest-priority constraint — it "
             "directly drives output depth and Comprehensiveness/Insight "
             f"scores. If you cannot find enough material for {b['top_min']} "
             "top sections on this prompt, break broader sections into "
@@ -356,10 +416,38 @@ def build(
         f"loop. A plan outside these bounds for this archetype will be "
         f"rejected and you'll be asked to regenerate.\n"
     )
+
+    # P3-W0a (2026-05-27): per-archetype query.type distribution floor.
+    # The HARD RULES bullet "distribute query type to cover all needed
+    # analytical functions" was structurally vague. RACE Insight criteria
+    # 2 (causal reasoning) + 3 (problem insight) depend on the writer
+    # receiving enough causal + critical evidence from mechanism_explorer +
+    # critic respectively. The architect was the upstream bottleneck — if
+    # it allocated 5/50 causal queries on an explain-mechanism task, the
+    # whole pipeline starved. These minimum proportions are FLOORS sourced
+    # from the per-archetype distributions in 14 Qianfan #1 reference
+    # articles; the architect may exceed them.
+    q_mins = _query_type_mins_for_archetype(archetype)
+    q_dist_lines = "; ".join(f"{qt}≥{int(round(pct * 100))}%" for qt, pct in q_mins.items())
+    archetype_query_type_block = (
+        f"QUERY TYPE DISTRIBUTION FLOOR FOR THIS ARCHETYPE (`{archetype}`) — "
+        f"each `query.type` must reach at least the minimum proportion "
+        f"shown. These floors are sourced from the per-archetype "
+        f"distributions in 14 Qianfan #1 reference articles, which "
+        f"underwrite RACE Insight criteria 2 (causal reasoning) and 3 "
+        f"(problem insight):\n"
+        f"  {q_dist_lines}\n"
+        f"Across all 48-64 queries combined, the FRACTIONS (not the absolute "
+        f"counts) must satisfy each floor. The audit surfaces shortfalls "
+        f"as advisory drift entries — they do not currently trigger a retry, "
+        f"but they ARE measured against this contract by the post-write "
+        f"compliance scorer.\n"
+    )
     user = (
         f"PROMPT ({language}):\n{prompt}\n\n"
         f"ARCHETYPE: {archetype}\nARCHETYPE EMPHASIS: {emphasis}\n\n"
         f"{archetype_outline_block}\n"
+        f"{archetype_query_type_block}\n"
         f"EXTRACTED INTENTS (each must become an acceptance criterion):\n"
         f"{json.dumps(intents, ensure_ascii=False)}\n\n"
         f"REGENERATED EVALUATION SUB-CRITERIA (each must become an acceptance "
@@ -548,6 +636,44 @@ def _normalize(plan: dict, *, archetype: str | None = None) -> None:
         audit["shortfalls"].append(f"queries={len(queries)}<{_QUERIES_MIN}")
     if len(queries) > _QUERIES_MAX:
         audit["shortfalls"].append(f"queries={len(queries)}>{_QUERIES_MAX}")
+
+    # P3-W0a (2026-05-27): per-archetype query.type distribution audit.
+    # Tallies actual fractions, compares against the archetype's minimum-
+    # proportion floor. Shortfalls are surfaced advisory-style (same pattern
+    # as outline shape: visible in drift telemetry, NOT a retry trigger).
+    # The retry-on-shortfall loop is gated on structural counts (top_min,
+    # sub_min, seed_min) — adding a query-type retry would be a separate
+    # decision and is out of scope here.
+    q_type_mins = _query_type_mins_for_archetype(archetype)
+    type_counts: dict[str, int] = {t: 0 for t in TYPE_TO_SPECIALIST}
+    for q in queries:
+        t = str(q.get("type", "factual")).strip().lower()
+        if t in type_counts:
+            type_counts[t] += 1
+    n_q = len(queries)
+    type_fractions: dict[str, float] = (
+        {t: round(type_counts[t] / n_q, 3) for t in TYPE_TO_SPECIALIST}
+        if n_q > 0
+        else dict.fromkeys(TYPE_TO_SPECIALIST, 0.0)
+    )
+    audit["query_type_counts"] = dict(type_counts)
+    audit["query_type_fractions"] = dict(type_fractions)
+    audit["query_type_min_pct"] = dict(q_type_mins)
+    audit["query_type_shortfalls"] = []
+    if n_q > 0:
+        for qtype, min_pct in q_type_mins.items():
+            actual = type_fractions.get(qtype, 0.0)
+            if actual < min_pct:
+                shortfall = f"query_type.{qtype}={actual:.2%}<{min_pct:.0%}"
+                audit["query_type_shortfalls"].append(shortfall)
+    # Query-type shortfalls are ADVISORY-ONLY: they're surfaced in
+    # `_outline_audit["query_type_shortfalls"]` and forwarded to drift
+    # telemetry, but NOT added to the global `shortfalls` list because
+    # that list is the retry-trigger and we don't want a 9-vs-10% query-
+    # type miss to cost a retry while the outline is structurally fine.
+    # The post-write compliance scorer + retry-feedback string (which
+    # interpolates the floors when a retry IS triggered for a separate
+    # reason) jointly enforce the contract.
     for sec in toc:
         subs = sec.get("subsections", []) or []
         audit["n_subsections_total"] += len(subs)
