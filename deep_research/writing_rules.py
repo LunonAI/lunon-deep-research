@@ -81,67 +81,115 @@ CLEANING_RESISTANT_RULE = (
     "payload."
 )
 
-# P2-Wave-2.5-E1.v2 (2026-05-23, post-v1-pilot revision):
-# v1 (committed earlier today) tested at 9.2% compliance on a 3-task pilot.
-# Root cause: writer chose TABLE-FIRST section openings for taxonomy archetypes
-# (id=91 had 0/50 sections with recap because every section opened with a
-# markdown table, not prose). The v1 directive assumed prose openings and
-# silently failed on tables.
+# P2-Wave-3-§12.A.v3 (2026-05-26, post-PR-31 fresh-corpus retro):
 #
-# v2 fixes the structural blind-spot: every section opens with a 1-2 sentence
-# PROSE PARAGRAPH first, even when the section's primary content is a data
-# table. The recap paragraph comes BEFORE the table; the table follows as
-# the populated detail. Tables stand on their own; the prose anchors them
-# to the §1 framework.
+# v2 (2026-05-23) was tested on 2026-05-26 Wave-2 smoke (id=91) and won the
+# A/B judge OVERALL vs the #1 reference (3:2 dim split). BUT the judge specifically
+# flagged "repeated setup language" and "many forward references to missing
+# sections" as Lunon weaknesses costing the Readability dim. Root-cause
+# analysis recorded in `transfer/p2_artifacts/reference_parity_gap_map.md`
+# §12.A: v2's "Calibrated against the #1 reference corpus" claim was BACKWARDS.
+# Fresh-corpus measurement against the live leaderboard #1 vintage
+# (`reference_deepresearch_0430`, overall 58.03) shows:
+#   - Lunon W2-smoke (id=91): 77% of H2 chapters open with the "Building on
+#     §X..." template; 79% include a §N reference in the opener.
+#   - the #1 reference (id=91): 0% open with that template; 4% include any §N
+#     reference in the opener.
+# the reference opens each chapter with SUBSTANTIVE content directly — no recap,
+# no §N back-reference, no "this section/chapter" as opening subject.
+# v2's calibration claim was built on a misreading of the lossy .docx paste,
+# where prose section-number prefixes (`1.1 Topic`) were interpreted as
+# inline §N references. They are heading numbers, not body references; the
+# the reference chapter openers do not name them at all.
 #
-# Calibrated against the #1 reference corpus per p2_artifacts/reference_methodology_deep.md
-# §1 finding (framework→population→synthesis loop) PLUS the bonus-article
-# audit's narrowing that section-number refs ARE acceptable when paired with
-# named artefacts.
+# v3 rewrite:
+#   - Keeps the prose-before-table structural requirement (this is the
+#     part of v2 that worked — Lunon won Comprehensiveness margin-3 on
+#     id=91, partly because every section reliably has a prose lead).
+#   - DROPS the "Building on §X..." / "Applied to..." / "Under the rubric..." /
+#     "Using the taxonomy..." templates entirely.
+#   - DROPS the allowance for §N references in opening sentences.
+#   - DROPS "this section/chapter/report" as the subject of opening sentences.
+#   - REPLACES acceptable templates with subject-noun-first openings, modeled
+#     directly on verified the #1 reference chapter openers.
+#   - Keeps the §1 / article-opener exemption.
+#
+# Knock-on coverage: this rewrite is the root-cause fix for gap-map §12.A
+# AND subsumes most of §12.B (filler-phrase pile-up: "Building on" 65→target-0,
+# "this section" 76→target-0) and §12.C (forward refs to missing sections —
+# §27.1.3, §54, §63-65, §70 in W2 smoke; those refs were emitted because the
+# v2 templates encouraged §N back-references and the writer guessed numbers
+# the architect later didn't produce).
 _SECTION_OPENING_RECAP_RULE = (
-    "SECTION-OPENING FRAMEWORK RECAP (P2-Wave-2.5-E1.v2):\n"
-    "EVERY section after the first opens with a 1-2 SENTENCE PROSE PARAGRAPH "
-    "that does two things: (a) recap the framework, taxonomy, dimensions, "
-    "or analytical spine established in §1 (or the most recent framework-"
-    "introducing section), and (b) state what this section ADDS by "
-    "populating that framework with new entities, evidence, or scenarios. "
-    "Only AFTER that prose paragraph may the section's primary content "
-    "(table, list, formula, narrative) appear.\n\n"
-    "Critical: when the section's main content is a markdown table, the "
-    "table does NOT replace the prose recap — the table follows the recap. "
-    "Pattern: prose-paragraph-then-table. NEVER table-first-no-prose.\n\n"
-    "Acceptable opening templates (EN):\n"
-    "- 'Building on the framework introduced in §1, this section populates "
-    "  the [dimension] axis with [entity class]. The table below records...'\n"
-    "- 'Applied to the dimensions set out above, the present chapter examines "
-    "  [entity class] under [scoped criterion]. [table or content follows]'\n"
-    "- 'Under the rubric from §1, this section operationalises [framework "
-    "  concept] for [entity class]; the matrix below shows...'\n"
-    "- 'Using the taxonomy established above, this section catalogues "
-    "  [entity class] across [dimensions]; the table records...'\n\n"
-    "Acceptable opening templates (ZH):\n"
-    "- '沿用第一节框架，本节将...维度具体化为...。下表记录...'\n"
-    "- '在前述维度下，本章考察...，下表显示...'\n"
-    "- '应用上一节的分类，本节对...进行操作化；下表给出...'\n"
-    "- '依据前述框架，本节将...。下表列出...'\n\n"
-    "Section-number references — NARROWING: refs to earlier sections like "
-    "'§1' or '第3节' are GOOD when paired with a named artefact "
-    "('§1's four-pillar framework', '第3节我们已对Iyer节奏维度作过分析'). "
-    "Bare temporal pointers without naming what was at that section "
-    "('as discussed in §1', 'as shown above') are BAD — they read as "
-    "filler. The named artefact is the substantive payload.\n\n"
-    "FORBIDDEN opening patterns:\n"
+    "SECTION-OPENING PROSE LEAD (P2-Wave-3-§12.A.v3 — reference-parity rewrite):\n"
+    "EVERY section, including those whose primary content is a markdown "
+    "table or list, MUST open with at least one substantive prose sentence "
+    "INTRODUCING THE TOPIC OF THIS SECTION. The prose lead names the actual "
+    "subject matter directly — it does NOT recap prior sections and does "
+    "NOT reference them by number.\n\n"
+    "Critical: each section reads like the opening of a book CHAPTER — "
+    "diving into the topic — not like a meeting summary that re-establishes "
+    "what was discussed before. When the section's primary content is a "
+    "table or list, the prose lead comes BEFORE that block; the data block "
+    "does NOT replace the prose lead. Pattern: prose-paragraph-then-data. "
+    "NEVER data-block-first-no-prose.\n\n"
+    "FORBIDDEN opening patterns (verified against the #1 reference corpus — "
+    "these antipatterns fire ~0% in the reference and ~80% in pre-v3 Lunon, and "
+    "were the named root cause of the RACE judge's 'repeated setup "
+    "language' and 'forward references to missing sections' findings on "
+    "the Wave-2 smoke):\n"
+    "- 'Building on [the framework/taxonomy/spine/dimensions/scaffold] "
+    "  [established/set out/introduced] in §N...' — formulaic recap that "
+    "  reads as compliance theatre.\n"
+    "- 'Applied to the dimensions set out above...' / 'Under the rubric "
+    "  from §N...' / 'Using the taxonomy established above...' — variants "
+    "  of the same recap-template antipattern.\n"
+    "- ANY '§N' or '第N节' reference inside the opening sentence(s) of a "
+    "  section. Section-number references may appear in body text, but "
+    "  NEVER as the leading move of a chapter. The opening must stand "
+    "  on its own substantively.\n"
+    "- 'This section' / 'This chapter' / 'This report' as the SUBJECT of "
+    "  the opening sentence. the reference never opens a chapter with a meta-"
+    "  subject; the opening subject is the substantive topic noun (the "
+    "  thing being discussed), not a referent to the document itself.\n"
     "- Opening with a markdown table (`|...|...|`) or list (`-` / `*`) "
-    "  without a prose recap paragraph first. The section MUST have a "
-    "  prose paragraph BEFORE any data block.\n"
-    "- Stating the section topic with no link to prior framework "
-    "  (disconnected exposition — judge penalises).\n"
-    "- Pure summary-of-prior-section recap with no statement of NEW "
-    "  value (reads as filler).\n"
-    "- Bare 'as discussed in §N' / 'as shown above' references with no "
-    "  named artefact.\n\n"
-    "The FIRST section (or article opening) is EXEMPT from the recap "
-    "requirement — it establishes the framework rather than recapping it."
+    "  without a prose sentence first. The section MUST have a prose "
+    "  paragraph BEFORE any data block.\n"
+    "- Stating only the section topic with no substantive claim about it "
+    "  (disconnected exposition — judge penalises). The opening must "
+    "  carry a claim, definition, anchor, or quantitative fact about the "
+    "  topic, not just name it.\n\n"
+    "Acceptable opening patterns (EN — modeled on verified the #1 reference "
+    "chapter openers):\n"
+    "- Definition opening: '<Topic-noun> is <definition / canonical "
+    "  characterisation>...' (e.g. 'The Cloth is the franchise's defining "
+    "  invention, and its conceptual genesis is unusually well documented.')\n"
+    "- Quantified-claim opening: '<Topic-noun> <verb> <number / "
+    "  quantitative anchor>...' (e.g. 'Within Athena's army, the eighty-"
+    "  eight Cloths are stratified into three principal ranks...')\n"
+    "- Factual-anchor opening: '<Subject> <action> <historical / textual "
+    "  evidence>...' (e.g. 'Kurumada repeatedly grounded his metaphysics "
+    "  in concrete velocity claims, producing a quantitative ladder...')\n"
+    "- Substantive-contextualisation opening: '<Topic-noun> originated in "
+    "  <context>, and <substantive claim about it>.'\n\n"
+    "Acceptable opening patterns (ZH — modeled on the reference ZH samples):\n"
+    "- '<主题名词>是<定义>...'\n"
+    "- '<具体数字>项<内容>...'\n"
+    "- '<事实陈述>，<进一步说明>。'\n"
+    "- '<主题名词>起源于<背景>，<关于它的实质性主张>。'\n\n"
+    "Section-number references in BODY text — narrowing (UNCHANGED from "
+    "v2; the narrowing applies ONLY to body text, NOT to openings):\n"
+    "Refs to earlier sections like '§1' or '第3节' are GOOD when paired "
+    "with a named artefact ('§1's four-pillar framework', '第3节我们已对"
+    "Iyer节奏维度作过分析'). Bare temporal pointers without naming what "
+    "was at that section ('as discussed in §1', 'as shown above') are "
+    "BAD — they read as filler. The named artefact is the substantive "
+    "payload. THE OPENING-SENTENCE FORBIDDEN-§N RULE OVERRIDES THIS "
+    "NARROWING — in opening sentences, even named-artefact §N refs are "
+    "forbidden.\n\n"
+    "The FIRST section (or article opening) is EXEMPT from the topic-"
+    "restriction — it establishes the framework rather than diving into "
+    "a sub-topic. The prose-before-table requirement still applies to it."
 )
 
 
