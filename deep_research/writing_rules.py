@@ -367,9 +367,19 @@ _TIER_RANKING_RULE = (
     "cells with 1-decimal or 3+-decimal precision.\n"
     "  3. Tier assignment: each entity placed per the thresholds; "
     "1-2 sentence rationale per entity naming the dominant dimension.\n"
+    # Greptile PR #47 round-6: keep the rerank instruction protocol-
+    # neutral (`±Npp`) to match the heading-anchor hint on the same
+    # line. The exact value is interpolated by the user-prompt
+    # `tier_ranking_block` from `plan.tier_ranking.sensitivity_check
+    # .perturbation_pp` (default 10, validator accepts 5-20). Prior
+    # `±10pp` literal here contradicted the user prompt whenever the
+    # plan specified a non-default perturbation — two conflicting
+    # instructions in the same LLM call.
     "  4. Sensitivity check sub-section (heading must contain "
-    "'sensitivity' / '敏感性' / '±Npp'): re-rank under ±10pp "
-    "perturbation of each weight; report:\n"
+    "'sensitivity' / '敏感性' / '±Npp'): re-rank under ±Npp "
+    "perturbation of each weight (the exact N is interpolated by the "
+    "user-prompt directive from `plan.tier_ranking.sensitivity_check"
+    ".perturbation_pp`); report:\n"
     "     - Number of entities that change tier under perturbation.\n"
     "     - The most-sensitive weight (highest tier-shift count).\n"
     "     - A rank-stability table: scenarios × entities → tier.\n"

@@ -489,7 +489,13 @@ def write_section(
         # floats and fell back to the default 10 with no signal —
         # callers who legitimately emitted `10.0` (e.g., from a JSON
         # source) saw their value silently discarded.
-        raw_pp = sensitivity.get("perturbation_pp") if isinstance(sensitivity, dict) else None
+        #
+        # Greptile PR #47 round-6: `sensitivity` is guaranteed to be a
+        # dict by the line above (either the actual sensitivity_check
+        # dict or `{}`), so the prior `isinstance(sensitivity, dict)`
+        # ternary was a dead branch — `else None` was unreachable.
+        # Direct `.get()` makes the data flow obvious.
+        raw_pp = sensitivity.get("perturbation_pp")
         if isinstance(raw_pp, bool) or not isinstance(raw_pp, (int, float)):
             perturbation_pp = 10
         else:
