@@ -31,7 +31,21 @@ import re
 # whitespace or end-of-string, which is what a sentence-terminating period
 # actually looks like. Dotted sub-section numbers (e.g. §1.2, §3.4.5) have a
 # digit immediately after the dot, so the lookahead skips them.
-_OPENING_TEMPLATE_PATTERN = re.compile(r"(?m)(^#{2}\s+[^\n]+\n+)(\s*Building on\b[^\n]*?\.(?=\s|$))[ \t]*")
+#
+# Greptile PR #39 round-3: `re.I` aligns this strip pattern with the
+# auditor's `opening_template_pattern` in
+# `writing_rules.check_xref_quality` (which is already case-insensitive).
+# Without the flag, a model regression that emitted lowercase
+# `"## 2 Foo\n\nbuilding on §1 …"` would slip past `repair()` unchanged
+# while `check_xref_quality` reported `opening_template_violations=1` —
+# a false divergence between what the post-write pass "repaired" and
+# what the auditor sees. The `^##` anchor (no letters) already
+# prevents false positives from mid-paragraph "building on" prose
+# regardless of the flag.
+_OPENING_TEMPLATE_PATTERN = re.compile(
+    r"(?m)(^#{2}\s+[^\n]+\n+)(\s*Building on\b[^\n]*?\.(?=\s|$))[ \t]*",
+    re.I,
+)
 
 
 def _heading_ids(text: str) -> set[str]:
@@ -114,6 +128,24 @@ def repair(text: str) -> tuple[str, dict]:
     # markdown rendering for every paragraph that happened to end in
     # `.\n\n## `. The capture group `(...)` makes `re.split` emit
     # separators as interleaved entries: [sent, sep, sent, sep, ..., sent].
+    # Rewriter closure shared between the heading-guard path (round-3)
+    # and the regular rewrite path below. Defined ONCE before the loop
+    # so the heading guard on the very first iteration can call it —
+    # the prior definition was inside the loop, which meant a
+    # heading-rooted dangler in the first sentence would have hit a
+    # NameError before _rewrite was bound. `_looks_dangling` is closed
+    # over from the outer scope; `stats` is mutated via nonlocal.
+    def _rewrite(m: re.Match) -> str:
+        nonlocal stats
+        num = m.group(1) or m.group(2) or m.group(3)
+        if num and _looks_dangling(num):
+            stats["dangling_refs_rewritten"] += 1
+            # Preserve parenthesization if the original was parenthesized
+            if m.group(0).startswith("("):
+                return "(a later section)"
+            return "a later section"
+        return m.group(0)
+
     tokens = re.split(r"((?<=[.!?])\s+)", text)
     out_tokens: list[str] = []
     # `tokens` alternates: even indices are sentences, odd indices are
@@ -141,6 +173,26 @@ def repair(text: str) -> tuple[str, dict]:
             stripped = stripped[:start] + stripped[end:]
         residual = re.sub(r"[\s\.,;:!?\(\)\[\]]+", "", stripped)
         if len(residual) < 15:
+            # Greptile PR #39 round-3: heading-rooted token guard.
+            # The sentence splitter `re.split(r"((?<=[.!?])\s+)", text)`
+            # groups a chapter heading with the first body sentence
+            # that follows it, because markdown headings don't end in
+            # `.!?` — there's no split-point between `## N Title\n\n`
+            # and the first body sentence. For short chapter names
+            # ("Results", "Summary", "Overview", "Methods" — all ≤7
+            # letters), the residual after stripping a dangling ref
+            # includes the heading characters, e.g. `"## 1 Results\n\n
+            # See (Section 99)."` → residual `"##1ResultsSee"` = 13
+            # chars < 15 → token deleted, heading silently destroyed.
+            # The rewrite path handles this safely (heading preserved,
+            # dangler swapped for "a later section"), so we route
+            # heading-rooted tokens there instead of deleting. We use
+            # `(?m)^#{2,4}\s+` (multiline + 2-4 hashes) so any `##`/
+            # `###`/`####` heading line inside the token survives.
+            if re.search(r"(?m)^#{2,4}\s+", sentence):
+                out_tokens.append(ref_pattern.sub(_rewrite, sentence))
+                out_tokens.append(sep)
+                continue
             # Sentence has no meaningful content after removing the
             # dangling ref — delete it entirely. 15 chars is the
             # heuristic bar; tighter and we'd preserve dangler-only
@@ -168,17 +220,8 @@ def repair(text: str) -> tuple[str, dict]:
             continue
 
         # Rewrite each dangling ref to "a later section" / "another section".
-        def _rewrite(m: re.Match) -> str:
-            nonlocal stats
-            num = m.group(1) or m.group(2) or m.group(3)
-            if num and _looks_dangling(num):
-                stats["dangling_refs_rewritten"] += 1
-                # Preserve parenthesization if the original was parenthesized
-                if m.group(0).startswith("("):
-                    return "(a later section)"
-                return "a later section"
-            return m.group(0)
-
+        # `_rewrite` is hoisted above the loop (round-3) so the heading-guard
+        # path can share the same closure.
         out_tokens.append(ref_pattern.sub(_rewrite, sentence))
         out_tokens.append(sep)
     text = "".join(out_tokens)
