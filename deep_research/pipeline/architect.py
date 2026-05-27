@@ -873,10 +873,13 @@ def _should_promote_entity_matrix(plan: dict, archetype: str | None) -> bool:
         if len(subs) < 3:
             continue
         # "proper-noun-like": at least one capitalized non-stopword token,
-        # or contains CJK content (Hanzi/Kana/Hangul carry entity signal
-        # without Title-Case markers), or contains a quoted name.
-        # Conservative check — we don't want to fire on generic structural
-        # titles like "Background" or "Methodology".
+        # OR contains CJK content (Hanzi/Kana/Hangul carry entity signal
+        # without Title-Case markers). Conservative check — we don't want
+        # to fire on generic structural titles like "Background" or
+        # "Methodology". A lowercase-quoted form (e.g. `the "apollo"
+        # mission`) is not currently detected; the lowercase residue would
+        # need to be caught by an explicit architect hint or by tightening
+        # the prompt rather than by the auto-promotion heuristic.
         proper_count = 0
         for sub in subs:
             title = str(sub.get("title", ""))
