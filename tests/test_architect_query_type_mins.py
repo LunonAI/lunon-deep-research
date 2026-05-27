@@ -347,22 +347,41 @@ def test_build_interpolates_different_floors_for_different_archetypes(monkeypatc
 
 def test_format_retry_feedback_includes_query_type_floor():
     """The `_format_retry_feedback` string is what gets fed back to the
-    architect on retry. If it omits the query-type floor, a retry would
-    fix structural shortfalls but leave query-type distribution untouched
-    — silent regression. PR #23 round-2 made retry feedback use the same
-    source-of-truth as the audit; P3-W0a extends that to query-type."""
+    architect on retry. Retries are ALWAYS triggered by structural
+    shortfalls (see `_normalize`: query-type shortfalls live in
+    `audit["query_type_shortfalls"]` and are advisory-only — never added
+    to `audit["shortfalls"]`, so a query-type miss alone cannot cost a
+    retry). But when a retry IS triggered for a structural reason, the
+    per-archetype floor clause must be appended to the feedback so the
+    regenerator fixes the structural problem AND keeps the query-type
+    contract intact on retry — without this, the architect would refresh
+    the outline but drift the query-type distribution. P3-W0a wires that
+    floor clause in."""
+    # Realistic audit shape: structural shortfall (drives the retry) plus
+    # a query-type shortfall in its dedicated advisory bucket.
     audit = {
-        "n_top_sections": 9,
-        "n_subsections_total": 27,
-        "n_seeds_total": 54,
-        "shortfalls": ["query_type.causal=10%<30%"],
+        "n_top_sections": 5,
+        "n_subsections_total": 15,
+        "n_seeds_total": 30,
+        "shortfalls": ["top_sections=5<8"],
+        "query_type_shortfalls": ["query_type.causal=10%<30%"],
     }
     feedback = architect._format_retry_feedback(audit, archetype="explain-mechanism")
-    # Must surface the floor for THIS archetype's causal type so the
-    # regenerator knows what fraction it needs to hit on retry.
+    # Floor clause for THIS archetype's causal type must appear — sourced
+    # from `_query_type_mins_for_archetype`, not from the audit. This is
+    # the contract clause that keeps query-type distribution stable on retry.
     assert "causal≥30%" in feedback, f"causal floor missing from retry feedback; got: {feedback}"
-    # And the prior shortfall must also be enumerated.
-    assert "query_type.causal=10%<30%" in feedback, f"prior shortfall missing from retry feedback; got: {feedback}"
+    # The structural shortfall (the actual retry trigger) must be enumerated
+    # so the regenerator knows what to fix.
+    assert "top_sections=5<8" in feedback, f"structural shortfall missing from retry feedback; got: {feedback}"
+    # Pin the advisory-only invariant: per-type shortfall strings from
+    # `query_type_shortfalls` must NOT leak into the LLM-facing feedback —
+    # only the floor clause does. If this assert ever fires, someone wired
+    # `_format_retry_feedback` to iterate `query_type_shortfalls` and the
+    # advisory/blocking separation needs to be re-justified.
+    assert "query_type.causal=10%<30%" not in feedback, (
+        f"per-type shortfall leaked into retry feedback (should stay advisory-only); got: {feedback}"
+    )
 
 
 def test_format_retry_feedback_handles_unknown_archetype():
