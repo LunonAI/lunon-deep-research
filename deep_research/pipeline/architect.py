@@ -1359,7 +1359,15 @@ def _normalize_dimensions(dims: list) -> list:
                 {
                     "axis_name": name,
                     "render_order": ro,
-                    "content_template": str(raw.get("content_template", "facts + analysis (3-6 sentences)")),
+                    # `or`-based guard, NOT `get(key, default)`: a LLM
+                    # response with `"content_template": null` would
+                    # otherwise reach `str(None)` and store the literal
+                    # string "None", producing `**Axis:** (None)` as the
+                    # writer directive hint. Same pattern PR #37 round-2
+                    # through round-5 applied to render_order,
+                    # instantiation_mode, and min_axes_per_entity.
+                    # Greptile PR #37 round-6 finding.
+                    "content_template": str(raw.get("content_template") or "facts + analysis (3-6 sentences)"),
                 }
             )
         # Other types (int, None, list) silently dropped — malformed

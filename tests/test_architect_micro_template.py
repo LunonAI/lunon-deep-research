@@ -181,6 +181,35 @@ def test_normalize_dimensions_fills_missing_object_fields():
     assert out[0]["content_template"]  # non-empty default
 
 
+def test_normalize_dimensions_coerces_null_content_template_to_default():
+    """Greptile PR #37 round-6: `dict.get(key, default)` returns the
+    stored `None` when the key is present-with-null — the default only
+    fires on a MISSING key. So a LLM response with
+    `"content_template": null` previously reached `str(None)` and stored
+    the literal string "None", which the writer then emitted as
+    `**Axis:** (None)` in the directive. The `or`-based guard mirrors
+    PR #37 round-2 through round-5's null-handling pattern."""
+    raw = [
+        {"axis_name": "Axis1", "render_order": 1, "content_template": None},  # the case Greptile flagged
+        {"axis_name": "Axis2", "render_order": 2, "content_template": ""},  # empty-string also coerced
+        {"axis_name": "Axis3", "render_order": 3, "content_template": "explicit valid template"},
+    ]
+    out = architect._normalize_dimensions(raw)
+    assert len(out) == 3
+    # Null and empty-string both coerce to the default — no "None"
+    # literal, no empty hint, no crash.
+    assert out[0]["content_template"] and out[0]["content_template"] != "None", (
+        f"null content_template leaked through; got {out[0]}"
+    )
+    assert out[1]["content_template"], f"empty content_template not defaulted; got {out[1]}"
+    # First two should share the same default value.
+    assert out[0]["content_template"] == out[1]["content_template"], (
+        f"defaults diverge between null and empty-string paths; got {out[:2]}"
+    )
+    # Explicit valid value preserved.
+    assert out[2]["content_template"] == "explicit valid template"
+
+
 def test_normalize_dimensions_tolerates_malformed_render_order():
     """Greptile PR #37 round-2: the LLM occasionally emits malformed
     `render_order` values (`null`, non-numeric strings, even nested lists).
