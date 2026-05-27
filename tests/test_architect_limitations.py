@@ -77,8 +77,14 @@ def test_normalize_missing_limitations_for_predict_suppresses_stress_test_shortf
     shortfall fires — the stress-test shortfall must be suppressed by the
     `lc_was_missing` guard (otherwise consumers would see two shortfalls
     for one root cause and might trigger a spurious stress-test retry).
-    Also pins the `has_stress_test` audit boolean is NOT written when the
-    chapter was absent (ambiguous-key avoidance).
+
+    Greptile PR #41 round-2: the same gate applies to the sub-section
+    audit keys. When the chapter is entirely absent, NONE of the three
+    per-chapter audit keys (`sub_section_types`, `missing_sub_section_
+    types`, `has_stress_test`) should be in audit — otherwise the keys
+    are indistinguishable from "chapter present but all 5 sub-types
+    missing," and a targeted-retry consumer could fire 5 sub-section
+    retries + 1 stress-test retry for a single root cause.
     """
     plan = _bare_plan_with_limitations()
     plan.pop("limitations_chapter")
@@ -88,13 +94,37 @@ def test_normalize_missing_limitations_for_predict_suppresses_stress_test_shortf
     assert lc_shortfalls == ["limitations_chapter=missing(required-for-archetype)"], (
         f"expected only the missing-chapter shortfall, got {lc_shortfalls}"
     )
-    # Stress-test boolean must not be in audit when chapter was absent.
+    # All three per-chapter audit keys must be absent when chapter was absent.
     assert "limitations_chapter_has_stress_test" not in audit
+    assert "limitations_chapter_sub_section_types" not in audit
+    assert "limitations_chapter_missing_sub_section_types" not in audit
     # Backfill: empty-dict shape, ready for the writer to fail-soft on.
     lc = plan["limitations_chapter"]
     assert isinstance(lc, dict)
     assert lc["sub_sections"] == []
     assert lc.get("scenario_stress_test") is None
+
+
+def test_normalize_missing_limitations_for_explain_mechanism_omits_subsection_audit():
+    """Greptile PR #41 round-2: same gate must apply for non-predict
+    required archetypes. explain-mechanism doesn't have stress-test
+    requirements, so we specifically verify the sub-section audit keys
+    are omitted (the `has_stress_test` key is irrelevant here)."""
+    plan = _bare_plan_with_limitations()
+    plan.pop("limitations_chapter")
+    architect._normalize(plan, archetype="explain-mechanism")
+    audit = plan["_outline_audit"]
+    # Single missing-chapter shortfall, no derived sub-section shortfalls.
+    lc_shortfalls = [s for s in audit["shortfalls"] if "limitations" in s]
+    assert lc_shortfalls == ["limitations_chapter=missing(required-for-archetype)"], (
+        f"unexpected derived shortfalls: {lc_shortfalls}"
+    )
+    # Per-chapter audit keys must NOT be present.
+    assert "limitations_chapter_sub_section_types" not in audit
+    assert "limitations_chapter_missing_sub_section_types" not in audit
+    # has_stress_test is gated on predict archetype AND not-missing — both
+    # conditions fail here, so it's also absent.
+    assert "limitations_chapter_has_stress_test" not in audit
 
 
 def test_normalize_trend_no_limitations_no_shortfall():
