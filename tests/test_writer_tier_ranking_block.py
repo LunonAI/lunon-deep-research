@@ -198,6 +198,38 @@ def test_tier_ranking_directive_uses_explicit_perturbation_pp(monkeypatch):
     assert "±15pp" in user, f"explicit perturbation_pp=15 not interpolated into directive; got: {user[:3000]}"
 
 
+def test_tier_ranking_directive_accepts_float_perturbation_pp(monkeypatch):
+    """Greptile PR #47 round-2: `perturbation_pp` emitted as a float
+    (e.g. `10.0` from a JSON deserializer that doesn't distinguish
+    int from int-valued float) was previously silently rejected by
+    `isinstance(raw_pp, int)` and fell back to the default 10 with
+    no signal. Post-fix, floats are int-coerced so the directive
+    interpolates a clean integer (`±15pp` not `±15.0pp`).
+
+    Fixture: explicit `15.0` float — pre-fix would silently fall back
+    to 10 (no signal); post-fix uses 15 and interpolates `±15pp`.
+    """
+    tr = _full_tr(sensitivity_check={"perturbation_pp": 15.0, "report": "rank_stability"})
+    plan = _bare_plan_with_tier_ranking(tr)
+    captured = _call_writer(monkeypatch, plan, sid="S7")
+    user = captured[0]["user"]
+    # The active perturbation must be 15 (from the float), not 10 (default).
+    assert "±15pp" in user, f"float perturbation_pp=15.0 not int-coerced + interpolated; got: {user[:3000]}"
+    # And the malformed float-as-string form must NOT leak through.
+    assert "±15.0pp" not in user, f"float should int-coerce; the .0 leaked into the directive: {user[:3000]}"
+
+
+def test_tier_ranking_directive_falls_back_perturbation_pp_when_string(monkeypatch):
+    """Symmetric to the float case: a non-numeric perturbation_pp
+    (e.g. `"ten"`) falls back to the default 10 — the type guard now
+    accepts only `int` and `float` (with explicit bool exclusion)."""
+    tr = _full_tr(sensitivity_check={"perturbation_pp": "ten", "report": "rank_stability"})
+    plan = _bare_plan_with_tier_ranking(tr)
+    captured = _call_writer(monkeypatch, plan, sid="S7")
+    user = captured[0]["user"]
+    assert "±10pp" in user, f"non-numeric perturbation_pp should fall back to 10; got: {user[:3000]}"
+
+
 # ---------- content / contract checks ----------
 
 

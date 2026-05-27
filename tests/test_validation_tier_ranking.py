@@ -283,3 +283,130 @@ def test_rubric_mismatch_keys_empty_when_no_framing_chapter():
     audit = validation._validate_tier_ranking(_well_formed_article(), {"tier_ranking": tr})
     assert audit is not None
     assert audit["rubric_mismatch_keys"] == []
+
+
+# ---------- Chapter-boundary heading-level coverage (Greptile PR #47 round-2) ----------
+
+
+def test_h3_tier_ranking_chapter_does_not_absorb_h3_siblings():
+    r"""Greptile PR #47 round-2: chapter-start regex accepts `#{1,3}`
+    so an H3 chapter `### 7.3 Tier Ranking` is a legitimate entry
+    point. Pre-fix, chapter-end was bounded at `#{1,2}` only — so an
+    H3 chapter would bleed past its H3 siblings (`### 7.4 …`,
+    `### 7.5 …`), and tables / sensitivity headings in those siblings
+    would register as if they belonged to tier_ranking. Post-fix,
+    chapter-end is bounded at the SAME hash-count as chapter-start,
+    so an H3 chapter ends at the next H1/H2/H3.
+
+    Fixture: an H3 tier_ranking chapter with NO table and NO
+    sensitivity sub-section, followed by an H3 sibling chapter that
+    contains both. Pre-fix: `scoring_table_present=True` and
+    `sensitivity_subsection_present=True` (sibling content absorbed).
+    Post-fix: both False (sibling content correctly excluded).
+    """
+    article = (
+        "# Title\n\n"
+        "## 7 Outer Section\n\n"
+        "### 7.3 Tier Ranking\n\n"  # H3 chapter with empty body
+        "The methodology is described in the next section.\n\n"
+        "### 7.4 Methodology Notes\n\n"  # sibling at SAME H3 level
+        "| Entity | R-1 | R-2 | S_final |\n"
+        "|---|---|---|---|\n"
+        "| A | 8.50 | 7.20 | 7.85 |\n\n"
+        "#### 7.4.1 Sensitivity Analysis Subnote\n\n"
+        "Under ±10pp perturbation, all tiers hold.\n"
+    )
+    audit = validation._validate_tier_ranking(article, {"tier_ranking": _full_tr()})
+    assert audit is not None
+    # Sibling's table must NOT be attributed to the empty H3 chapter.
+    assert audit["scoring_table_present"] is False, f"H3 chapter absorbed sibling H3 section's table: {audit}"
+    # Sibling's sensitivity heading must NOT be attributed either.
+    assert audit["sensitivity_subsection_present"] is False, f"H3 chapter absorbed sibling sensitivity heading: {audit}"
+    # And no decimal cells should leak from the sibling.
+    assert audit["two_decimal_cells"] == 0
+
+
+def test_h3_tier_ranking_chapter_keeps_own_h4_sensitivity_subsection():
+    """Complement to the above: when an H3 chapter has its OWN H4
+    sensitivity sub-section (the level-deeper-than-chapter form), it
+    must STAY in the scanned region — proportional bounding means
+    end-at-same-level, so deeper sub-sections survive.
+    """
+    article = (
+        "# Title\n\n"
+        "## 7 Outer\n\n"
+        "### 7.3 Tier Ranking\n\n"
+        "Per §1.2 rubric R-1, R-2, R-3:\n\n"
+        "| Entity | R-1 | R-2 | R-3 | S_final |\n"
+        "|---|---|---|---|---|\n"
+        "| A | 8.50 | 7.20 | 9.10 | 8.20 |\n\n"
+        "#### 7.3.1 Sensitivity Check\n\n"
+        "Under ±10pp perturbation, no entity changes tier.\n\n"
+        "### 7.4 Next Sibling\n\nUnrelated.\n"
+    )
+    audit = validation._validate_tier_ranking(article, {"tier_ranking": _full_tr()})
+    assert audit is not None
+    assert audit["scoring_table_present"] is True
+    assert audit["sensitivity_subsection_present"] is True
+    # Sibling content excluded.
+    assert "Unrelated" not in str(audit)
+
+
+# ---------- Title prefix-collision protection (Greptile PR #47 round-2) ----------
+
+
+def test_chapter_title_does_not_match_longer_prefix_heading():
+    """Greptile PR #47 round-2: applying the
+    `regex-prefix-collision-no-end-anchor` pattern fix from PR #42
+    round-7 to this validator. Title `"Tier Ranking"` must NOT
+    silently match a heading like `## 7 Tier Ranking Considerations`
+    — without an end anchor, `re.escape(title)` would, and the wrong
+    chapter's body would be extracted.
+
+    Fixture: an article with NO `## N Tier Ranking` heading but with
+    a `## 7 Tier Ranking Considerations` heading containing a full
+    scoring table. Pre-fix: the longer heading would match,
+    `scoring_table_present=True` for a chapter the writer never
+    actually rendered. Post-fix: no match, chapter_body is empty,
+    audit reports an all-zero structural result.
+    """
+    article = (
+        "# Title\n\n"
+        "## 7 Tier Ranking Considerations\n\n"  # longer; must NOT match
+        "Some discussion about tier-ranking methodology.\n\n"
+        "| Entity | R-1 | R-2 | S_final |\n"
+        "|---|---|---|---|\n"
+        "| A | 8.50 | 7.20 | 7.85 |\n\n"
+        "### 7.1 Sensitivity Analysis\n\n"
+        "±10pp perturbation discussion.\n"
+    )
+    audit = validation._validate_tier_ranking(article, {"tier_ranking": _full_tr()})
+    assert audit is not None
+    # The longer heading must NOT have been used as the chapter anchor —
+    # so the table / sensitivity heading inside it stay out of the audit.
+    assert audit["scoring_table_present"] is False, f"prefix-collision: 'Tier Ranking' matched longer heading: {audit}"
+    assert audit["sensitivity_subsection_present"] is False
+    assert audit["two_decimal_cells"] == 0
+
+
+def test_chapter_title_followed_by_known_terminators_still_matches():
+    """Symmetric: the end-anchor accepts the title followed by a known
+    heading terminator (`:`, `-`, `—`, `–`) — these are legitimate
+    heading-extension separators, not prefix-collision sources.
+    """
+    for terminator in (":", " -", " —", " –"):
+        article = (
+            "# Title\n\n"
+            f"## 7 Tier Ranking{terminator} Detailed Methodology\n\n"
+            "Per §1.2 R-1, R-2, R-3:\n\n"
+            "| Entity | R-1 | R-2 | S_final |\n"
+            "|---|---|---|---|\n"
+            "| A | 8.50 | 7.20 | 7.85 |\n\n"
+            "### 7.1 Sensitivity Check\n\n"
+            "±10pp.\n"
+        )
+        audit = validation._validate_tier_ranking(article, {"tier_ranking": _full_tr()})
+        assert audit is not None
+        assert audit["scoring_table_present"] is True, (
+            f"title with terminator {terminator!r} should still match: {audit}"
+        )
