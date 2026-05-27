@@ -1218,7 +1218,24 @@ def check_xref_quality(text: str) -> dict:
     generic_pattern = re.compile(r"(?:§\s*|(?:Section|Chapter|Sec\.)\s+)([\d\.]+)", re.I)
     zh_pattern = re.compile(r"第\s*([一二三四五六七八九十0-9\.]+)\s*[节章]")
 
-    paren_matches = list(paren_pattern.finditer(text))
+    # Greptile PR #39 round-5: mask heading lines so the patterns don't
+    # pick up `Chapter N` / `Section N` / `第N章` in TITLE text. The
+    # `generic_pattern`'s `(?:Section|Chapter|Sec\.)\s+([\d\.]+)` alt
+    # matches title words like "Chapter 47" in `## 5 Chapter 47 Overview`,
+    # and "47" then lands in `dangling_forward_refs` even though it's
+    # naming the chapter, not navigating to it. This is the same class
+    # of bug `xref_repair._rewrite_body_only` addressed in round-4 — the
+    # auditor needed the same filter. The mask replaces heading lines
+    # with same-length space runs so character offsets in the masked
+    # text match offsets in the original `text` exactly (the
+    # forward-defer proximity windows below still index into `text`).
+    masked_text = re.sub(
+        r"(?m)^#{2,4}[^\n]*",
+        lambda m: " " * len(m.group(0)),
+        text,
+    )
+
+    paren_matches = list(paren_pattern.finditer(masked_text))
     paren_refs = [m.group(1) for m in paren_matches]
     paren_spans = [(m.start(), m.end()) for m in paren_matches]
 
@@ -1227,12 +1244,12 @@ def check_xref_quality(text: str) -> dict:
 
     raw_refs: list[str] = []
     raw_ref_spans: list[tuple[int, int]] = []
-    for m in generic_pattern.finditer(text):
+    for m in generic_pattern.finditer(masked_text):
         if _in_paren(m.start()):
             continue
         raw_refs.append(m.group(1))
         raw_ref_spans.append((m.start(), m.end()))
-    zh_ref_matches = list(zh_pattern.finditer(text))
+    zh_ref_matches = list(zh_pattern.finditer(masked_text))
     zh_refs = [m.group(1) for m in zh_ref_matches]
     zh_ref_spans = [(m.start(), m.end()) for m in zh_ref_matches]
     all_refs = list(paren_refs) + raw_refs + zh_refs
@@ -1325,15 +1342,27 @@ def check_xref_quality(text: str) -> dict:
 
     # Per-chapter xref count. Split body on `## N` headings; count xrefs
     # within each chapter window (paren + non-paren-generic + ZH).
+    #
+    # Greptile PR #39 round-5: the chapter-split removes `## N Title`
+    # lines as separators, but H3/H4 sub-headings (`### N.M`, `#### N.M.P`)
+    # remain in the body. A sub-heading like `### 5.1 Section 99 Subtopic`
+    # would contribute "99" via generic_pattern, inflating the chapter's
+    # xref count. Mask all heading lines before scanning, same logic as
+    # the article-level mask above.
     def _count_refs_in(body: str) -> int:
-        body_paren = list(paren_pattern.finditer(body))
+        masked_body = re.sub(
+            r"(?m)^#{2,4}[^\n]*",
+            lambda m: " " * len(m.group(0)),
+            body,
+        )
+        body_paren = list(paren_pattern.finditer(masked_body))
         body_paren_spans = [(m.start(), m.end()) for m in body_paren]
 
         def _bp(pos: int) -> bool:
             return any(s <= pos < e for s, e in body_paren_spans)
 
-        bare = sum(1 for m in generic_pattern.finditer(body) if not _bp(m.start()))
-        return len(body_paren) + bare + len(zh_pattern.findall(body))
+        bare = sum(1 for m in generic_pattern.finditer(masked_body) if not _bp(m.start()))
+        return len(body_paren) + bare + len(zh_pattern.findall(masked_body))
 
     chapter_split = re.split(r"(?m)^(#{2}\s+[^\n]+)", text)
     per_chapter: dict[str, int] = {}
@@ -1361,9 +1390,25 @@ def check_xref_quality(text: str) -> dict:
 
     fail: list[str] = []
     chapters_below_floor = sum(1 for c in per_chapter.values() if c < 5)
-    if chapters_below_floor > max(1, len(per_chapter) // 5):
-        # Tolerate up to ~20% of chapters under the ≥5 floor (e.g.
-        # very short chapters) but flag broader miss.
+    # Tolerate up to ~20% of chapters under the ≥5 floor (e.g. very
+    # short chapters) but flag broader miss.
+    #
+    # Greptile PR #39 round-5: the prior `max(1, len(per_chapter) // 5)`
+    # formula computed `max(1, 0) = 1` for a single-chapter article,
+    # which meant `chapters_below_floor > 1` required ≥2 chapters to
+    # miss the floor — impossible with only 1 chapter. So a 1-chapter
+    # article with zero cross-references silently passed the audit.
+    # The 20% tolerance is intended for multi-chapter docs (allowing
+    # one or two short chapters to fall short); for a 1-chapter doc the
+    # tolerance must collapse to 0 — that single chapter IS the whole
+    # article and there's no peer chapter to dilute the miss against.
+    if len(per_chapter) <= 1:
+        # 0-chapter doc: chapters_below_floor is also 0 → never fires.
+        # 1-chapter doc: any below-floor chapter fires the fail entry.
+        tolerance = 0
+    else:
+        tolerance = max(1, len(per_chapter) // 5)
+    if chapters_below_floor > tolerance:
         fail.append(f"chapters_below_5_xref_floor={chapters_below_floor}/{len(per_chapter)}")
     if n_opening_templates > 0:
         fail.append(f"opening_template_violations={n_opening_templates}")

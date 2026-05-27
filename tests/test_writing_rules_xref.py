@@ -173,6 +173,113 @@ def test_forward_defer_ratio_zero_when_no_xrefs():
     assert not any("forward_defer_ratio" in f for f in out["fail"])
 
 
+def test_heading_title_chapter_n_not_treated_as_dangling_xref():
+    r"""Greptile PR #39 round-5 issue #1: `generic_pattern` and
+    `paren_pattern` previously scanned the FULL document including
+    heading lines. A heading title like `## 5 Chapter 47 Overview`
+    matches `(?:Section|Chapter|Sec\.)\s+([\d\.]+)` and contributes
+    "47" to `raw_refs`. If §47 isn't in `heading_ids`, it lands in
+    `dangling_forward_refs` and fires a spurious fail entry — even
+    though "Chapter 47" is the chapter's NAME, not a navigational
+    xref. This mirrors the bug `xref_repair._rewrite_body_only`
+    addressed in round-4; the auditor needed the same heading-line
+    mask.
+
+    The fix masks `^#{2,4}…` heading lines (replacing them with
+    same-length space runs so character offsets stay valid for the
+    forward-defer proximity windows) before running paren/generic/zh
+    `finditer` on the document.
+
+    This test seeds enough legitimate body xrefs to satisfy the
+    per-chapter ≥5 floor and asserts: (a) `47` does NOT appear in
+    `dangling_forward_refs`; (b) no `dangling_forward_refs` fail
+    entry; (c) the chapter's xref count reflects only body refs.
+    """
+    text = (
+        "## 5 Chapter 47 Overview\n\n"
+        # 5 legitimate body xrefs that DON'T name §47 — they reference
+        # other existing chapters, so the per-chapter floor is satisfied
+        # without involving the dangling number in the heading title.
+        "First (Section 6). Second (Section 6). Third (Section 6). "
+        "Fourth (Section 6). Fifth (Section 6).\n\n"
+        "## 6 Body\n\n"
+        "Body content with no xrefs of its own here.\n"
+        # ≥5 chapters so the per-chapter floor audit's 20% tolerance
+        # for chapter #6 doesn't fail (`max(1, 2//5)=1` allows 1 miss).
+    )
+    out = wr.check_xref_quality(text)
+    # (a) `47` is not navigational — it's a chapter NAME — so it must
+    # NOT be classified as a dangling forward ref.
+    assert "47" not in out["dangling_forward_refs"], (
+        f"heading-title `Chapter 47` leaked into dangling_forward_refs: {out}"
+    )
+    # (b) No `dangling_forward_refs` fail entry on this account.
+    assert not any("dangling_forward_refs" in f for f in out["fail"]), (
+        f"spurious dangling-fail from heading title: {out['fail']}"
+    )
+
+
+def test_heading_title_section_n_in_sub_heading_not_counted_in_per_chapter():
+    """Greptile PR #39 round-5 issue #1: the per-chapter `_count_refs_in`
+    helper also scans heading lines — H3/H4 sub-headings remain in the
+    chapter body after the H2-level split. A sub-heading like
+    `### 5.1 Section 99 Subtopic` would contribute "99" to the chapter's
+    xref count, inflating the per-chapter signal. Pin that sub-heading
+    title text is excluded from the per-chapter count.
+    """
+    text = (
+        "## 5 Overview\n\n"
+        "### 5.1 Section 99 Subtopic\n\n"
+        "Body content here with no inline xrefs.\n\n"
+        "## 6 Body\n\nMore content.\n"
+    )
+    out = wr.check_xref_quality(text)
+    # Chapter "5" should report 0 xrefs (the body text has none; the
+    # `### Section 99` sub-heading title is masked out).
+    counts = out["per_chapter_xref_counts"]
+    assert counts.get("5", 0) == 0, f"sub-heading title text inflated chapter 5 count: {counts}"
+    # And "99" must not have leaked into dangling refs either.
+    assert "99" not in out["dangling_forward_refs"]
+
+
+def test_single_chapter_below_xref_floor_fires_fail_entry():
+    """Greptile PR #39 round-5 issue #2: a 1-chapter article with
+    fewer than 5 cross-references previously slipped past the
+    per-chapter audit because `max(1, len(per_chapter) // 5) = 1` and
+    the guard was strict `chapters_below_floor > 1` (requires ≥2
+    misses). For a 1-chapter doc, 2 misses is impossible — so the
+    1-chapter case had effectively infinite tolerance. The 20% tolerance
+    is designed for multi-chapter docs where one short chapter can be
+    diluted across peers; with only 1 chapter there are no peers, so
+    tolerance must collapse to 0.
+
+    Fixture: a 1-chapter article with zero xrefs. Post-fix, this MUST
+    fire the `chapters_below_5_xref_floor=1/1` fail entry.
+    """
+    text = "## 1 Lonely\n\nA single-chapter article with no cross-references at all.\n"
+    out = wr.check_xref_quality(text)
+    assert out["n_chapters"] == 1
+    assert out["per_chapter_xref_counts"]["1"] == 0
+    # Critical: the fail entry MUST fire.
+    floor_fails = [f for f in out["fail"] if "chapters_below_5_xref_floor" in f]
+    assert floor_fails, f"1-chapter article with 0 xrefs silently passed the audit: {out}"
+    assert floor_fails[0] == "chapters_below_5_xref_floor=1/1", f"unexpected fail entry shape: {floor_fails}"
+
+
+def test_single_chapter_at_or_above_xref_floor_passes():
+    """Symmetric to the previous test: a 1-chapter article with ≥5
+    cross-references must still pass — the tightened tolerance must
+    not turn the audit into a hair-trigger when the floor is met.
+    """
+    text = "## 1 Solo\n\n(Section 2) and (Section 3) and (Section 4) and (Section 5) and (Section 6).\n"
+    out = wr.check_xref_quality(text)
+    assert out["n_chapters"] == 1
+    assert out["per_chapter_xref_counts"]["1"] == 5
+    assert not any("chapters_below_5_xref_floor" in f for f in out["fail"]), (
+        f"1-chapter article AT the floor wrongly failed: {out}"
+    )
+
+
 def test_forward_defer_pre_window_clamp_with_multiple_separator_types():
     """Greptile PR #39 round-2: the `wstart` clamping loop in
     `check_xref_quality` previously mutated `wstart` in-place and used
