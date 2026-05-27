@@ -524,6 +524,16 @@ _TIER_RANKING_DEFAULT_PERTURBATION_PP = 10
 # Weights must sum to ~1.0 ± tolerance. Tolerance accommodates rounding
 # (LLMs frequently emit 0.20+0.20+0.20+0.20+0.18 = 0.98 instead of 1.0).
 _TIER_RANKING_WEIGHT_TOTAL_TOLERANCE = 0.05
+# Acceptable band for `sensitivity_check.perturbation_pp` around the default.
+# the reference q14/q3 both use ±10pp; anything in [5, 20] still produces a
+# meaningful sensitivity sub-section. Values outside this band (e.g., 1pp →
+# trivial perturbation, 50pp → no longer "sensitivity" so much as
+# re-weighting) get an audit shortfall. Missing/wrong-type values are
+# backfilled with the default and flagged. Greptile PR #43 round-2 fix:
+# the default constant was previously dead documentation — wiring it into
+# runtime audit + backfill removes that gap.
+_TIER_RANKING_PERTURBATION_PP_MIN = 5
+_TIER_RANKING_PERTURBATION_PP_MAX = 20
 
 
 def _normalize(plan: dict, *, archetype: str | None = None) -> None:
@@ -674,7 +684,17 @@ def _normalize(plan: dict, *, archetype: str | None = None) -> None:
     # sum-to-1.0 ± tolerance, tier count 2-5, sensitivity_check populated.
     tr = plan.get("tier_ranking")
     em = plan.get("entity_matrix")
-    em_entities = (em.get("entities") if isinstance(em, dict) else []) or []
+    # Greptile PR #43 round-2: previous `(em.get("entities") if isinstance(em, dict) else []) or []`
+    # only handled `em` being a non-dict OR `entities` being falsy. A non-empty,
+    # non-list `entities` value (e.g. a comma-separated string `"E1, E2, E3, E4, E5"`)
+    # would pass through and `len()` would return the character count (18), spuriously
+    # triggering `tr_is_required=True` for "predict" archetype plans where the
+    # entity_matrix block doesn't run pre-normalization. Explicit isinstance(list)
+    # guard fixes this; "compare" was already safe because the entity_matrix
+    # normalization block (~lines 641-653) coerces `entities` to list before this
+    # check runs.
+    _em_entities_raw = em.get("entities") if isinstance(em, dict) else []
+    em_entities = _em_entities_raw if isinstance(_em_entities_raw, list) else []
     tr_is_required = archetype in _TIER_RANKING_REQUIRED_ARCHETYPES and len(em_entities) >= _ENTITY_MATRIX_ENTITIES_MIN
     if tr_is_required:
         tr_was_missing = not isinstance(tr, dict)
@@ -708,6 +728,29 @@ def _normalize(plan: dict, *, archetype: str | None = None) -> None:
                 audit["shortfalls"].append(f"tier_ranking.tiers={n_tiers}>{_TIER_RANKING_MAX_TIERS}")
             if not audit["tier_ranking_has_sensitivity_check"]:
                 audit["shortfalls"].append("tier_ranking.sensitivity_check=missing")
+            else:
+                # Greptile PR #43 round-2: validate sensitivity_check.perturbation_pp
+                # against the default constant + acceptable band. Backfills with
+                # default when missing/wrong-type so downstream readers always
+                # see a usable value; emits shortfall on backfill OR
+                # out-of-band so the audit trail is honest.
+                sc = tr["sensitivity_check"]
+                pp = sc.get("perturbation_pp")
+                if not isinstance(pp, (int, float)) or isinstance(pp, bool):
+                    sc["perturbation_pp"] = _TIER_RANKING_DEFAULT_PERTURBATION_PP
+                    audit["tier_ranking_sensitivity_perturbation_pp"] = _TIER_RANKING_DEFAULT_PERTURBATION_PP
+                    audit["shortfalls"].append(
+                        "tier_ranking.sensitivity_check.perturbation_pp=missing"
+                        f"(backfilled-to-{_TIER_RANKING_DEFAULT_PERTURBATION_PP})"
+                    )
+                else:
+                    audit["tier_ranking_sensitivity_perturbation_pp"] = pp
+                    if pp < _TIER_RANKING_PERTURBATION_PP_MIN or pp > _TIER_RANKING_PERTURBATION_PP_MAX:
+                        audit["shortfalls"].append(
+                            f"tier_ranking.sensitivity_check.perturbation_pp={pp}"
+                            f"!in[{_TIER_RANKING_PERTURBATION_PP_MIN},"
+                            f"{_TIER_RANKING_PERTURBATION_PP_MAX}]"
+                        )
             if not tr.get("scoring_formula"):
                 audit["shortfalls"].append("tier_ranking.scoring_formula=empty")
 
