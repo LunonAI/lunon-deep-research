@@ -191,16 +191,23 @@ def test_stress_test_shortfall_string_interpolates_archetype(monkeypatch):
     message that would make targeted-retry consumers treat the two
     archetypes identically.
 
-    We extend the stress-test set (AND the required set, since the
-    stress-test branch is gated on lc_is_required first) to also cover
-    "explain-mechanism", emulate a chapter missing the stress test,
-    and verify the shortfall names the actual archetype.
+    Setup: extend `_LIMITATIONS_STRESS_TEST_ARCHETYPES` to also cover
+    "explain-mechanism". (`_LIMITATIONS_REQUIRED_ARCHETYPES` already
+    contains "explain-mechanism", so the outer `lc_is_required` gate
+    passes without an additional patch.) Emulate a chapter missing the
+    stress test, then verify the shortfall names the actual archetype.
     """
     monkeypatch.setattr(
         architect,
         "_LIMITATIONS_STRESS_TEST_ARCHETYPES",
         frozenset({"predict", "explain-mechanism"}),
     )
+    # Pre-condition the docstring relies on: explain-mechanism is already
+    # in the required set, so no second monkeypatch is needed for the
+    # outer `lc_is_required` gate to pass. If a future refactor drops
+    # explain-mechanism from the required set, this test must be updated
+    # to also patch `_LIMITATIONS_REQUIRED_ARCHETYPES`.
+    assert "explain-mechanism" in architect._LIMITATIONS_REQUIRED_ARCHETYPES
     plan = _bare_plan_with_limitations(archetype="predict")
     plan["limitations_chapter"]["scenario_stress_test"] = None
     architect._normalize(plan, archetype="explain-mechanism")
@@ -226,12 +233,39 @@ def test_normalize_compare_does_not_require_stress_test():
 
 
 def test_normalize_handles_malformed_limitations_field_types():
-    """sub_sections as non-list → coerced to empty list."""
+    """sub_sections as non-list → coerced to empty list. Greptile PR #41
+    round-4: also pins the audit-key writes and the shortfall append that
+    follow the coercion. Because `lc_was_missing=False` (the chapter is
+    present, just with a malformed `sub_sections`), the `not lc_was_missing`
+    branch still runs and MUST:
+      (1) write `limitations_chapter_sub_section_types=[]` (post-coercion);
+      (2) write `limitations_chapter_missing_sub_section_types=[all 5]`;
+      (3) append the combined missing-types shortfall;
+      (4) for predict, write `limitations_chapter_has_stress_test=True`
+          (the fixture's stress test is intact — only sub_sections was
+          mangled) and NOT append a stress-test shortfall.
+    A regression that silently dropped any of these writes would not be
+    caught by a coercion-only assertion.
+    """
     plan = _bare_plan_with_limitations()
     plan["limitations_chapter"]["sub_sections"] = "not a list"
     architect._normalize(plan, archetype="predict")
     lc = plan["limitations_chapter"]
+    audit = plan["_outline_audit"]
+    # (1) Coercion.
     assert lc["sub_sections"] == []
+    # (2) Audit keys are written (not gated out — chapter was present).
+    assert audit["limitations_chapter_sub_section_types"] == []
+    assert audit["limitations_chapter_missing_sub_section_types"] == list(architect._LIMITATIONS_SUBSECTION_TYPES)
+    # (3) Missing-types shortfall is appended (all 5 absent).
+    expected_sf = "limitations_chapter.missing_sub_section_types=" + ",".join(architect._LIMITATIONS_SUBSECTION_TYPES)
+    assert expected_sf in audit["shortfalls"], f"got {audit['shortfalls']}"
+    # (4) Stress-test fixture is intact → True + no stress-test shortfall.
+    assert audit["limitations_chapter_has_stress_test"] is True
+    assert not any("scenario_stress_test=missing" in s for s in audit["shortfalls"])
+    # And crucially: the chapter-missing shortfall must NOT fire here —
+    # the chapter was present, just with one malformed field.
+    assert not any(s.startswith("limitations_chapter=missing") for s in audit["shortfalls"])
 
 
 def test_normalize_unknown_archetype_no_limitations_audit():
