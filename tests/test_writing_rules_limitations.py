@@ -19,7 +19,7 @@ def test_limitations_rule_string_present():
     """`_LIMITATIONS_RULE` constant exists and is a non-empty string."""
     assert hasattr(wr, "_LIMITATIONS_RULE"), "_LIMITATIONS_RULE constant missing from writing_rules module"
     assert isinstance(wr._LIMITATIONS_RULE, str), f"_LIMITATIONS_RULE must be str; got {type(wr._LIMITATIONS_RULE)}"
-    assert len(wr._LIMITATIONS_RULE) > 200, (
+    assert len(wr._LIMITATIONS_RULE) > 800, (
         f"_LIMITATIONS_RULE looks suspiciously short (only {len(wr._LIMITATIONS_RULE)} chars); "
         f"the 5-sub-section discipline + falsification quality bar should yield 800+ chars"
     )
