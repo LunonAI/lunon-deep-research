@@ -163,11 +163,16 @@ def test_tier_ranking_directive_excludes_bool_weight_values(monkeypatch):
     # The bool weights should NOT appear in the JSON-serialized payload.
     # We can verify by checking the serialized dict has only R-3.
     assert '"R-3": 0.5' in user
-    # bool values formatted as `true`/`false` (json.dumps) should NOT
-    # appear in the weights payload (they were filtered out).
+    # Greptile PR #47 round-4: assert BOTH forbidden JSON fragments
+    # directly. The prior `A or B` form was logically weak — `or`
+    # short-circuits true on either leg, so a regression that only
+    # dropped one of the two bool weights (e.g., filtered `R-1` but
+    # leaked `R-2`) would still satisfy the assertion. Two explicit
+    # `not in` checks force both weights to be excluded.
     weights_idx = user.find("Weights")
     rules_after = user[weights_idx : weights_idx + 500] if weights_idx >= 0 else ""
-    assert "true" not in rules_after.lower() or '"r-1": true' not in rules_after.lower()
+    assert '"R-1": true' not in rules_after, f"bool `R-1: True` leaked into weights payload: {rules_after}"
+    assert '"R-2": false' not in rules_after, f"bool `R-2: False` leaked into weights payload: {rules_after}"
 
 
 def test_tier_ranking_directive_falls_back_perturbation_pp_when_bool(monkeypatch):
