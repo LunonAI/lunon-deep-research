@@ -365,6 +365,71 @@ def _build_good_plan_obj():
             "entities": [f"E{i + 1}" for i in range(architect._ENTITY_MATRIX_ENTITIES_MIN)],
             "dimensions": [f"D{i + 1}" for i in range(architect._ENTITY_MATRIX_DIMENSIONS_MIN)],
         },
+        # P3-W2 + P3-W5 merge follow-up (2026-05-27): predict / compare /
+        # etc. archetypes now require BOTH a populated framing_chapter (§1
+        # contract) and a populated limitations_chapter (penultimate
+        # falsification chapter). Without both, the "good plan" carries
+        # `framing_chapter=missing(...)` and/or `limitations_chapter=missing(...)`
+        # shortfalls and breaks the `shortfalls == []` invariant the retry
+        # tests assert.
+        #
+        # Minimal valid framing chapter: 4 sub-sections (scope/rubric/
+        # roadmap/vocabulary), 5 vocabulary terms, 4 rubric items.
+        "framing_chapter": {
+            "title": "Framework",
+            "sub_sections": [
+                {"id": "S1.1", "type": "scope", "title": "Scope", "content_directive": "..."},
+                {"id": "S1.2", "type": "rubric", "title": "Rubric", "content_directive": "..."},
+                {"id": "S1.3", "type": "roadmap", "title": "Roadmap", "content_directive": "..."},
+                {"id": "S1.4", "type": "vocabulary", "title": "Vocab", "content_directive": "..."},
+            ],
+            "published_vocabulary": ["v1", "v2", "v3", "v4", "v5"],
+            "published_rubric_items": [
+                {"id": "R-1", "label": "L1", "weight": 0.25},
+                {"id": "R-2", "label": "L2", "weight": 0.25},
+                {"id": "R-3", "label": "L3", "weight": 0.25},
+                {"id": "R-4", "label": "L4", "weight": 0.25},
+            ],
+        },
+        # P3-W7 merge follow-up (2026-05-27): predict + compare archetypes
+        # with ≥5 entity_matrix entities require tier_ranking. Minimal valid
+        # form so retry tests preserve the `shortfalls == []` invariant.
+        # Weights mirror framing_chapter.published_rubric_items above
+        # (R-1..R-4 each 0.25) per the schema's "should mirror" guidance —
+        # the §1 chapter publishes the rubric; the tier-ranking chapter
+        # consumes it.
+        "tier_ranking": {
+            "title": "Tier Ranking",
+            "scoring_formula": "S_final = Σ(w_i × d_i)",
+            "weights": {"R-1": 0.25, "R-2": 0.25, "R-3": 0.25, "R-4": 0.25},
+            "tiers": [
+                {"name": "Tier 1", "threshold": ">=8.0"},
+                {"name": "Tier 2", "threshold": "<8.0"},
+            ],
+            "sensitivity_check": {"perturbation_pp": 10, "report": "rank_stability"},
+        },
+        # P3-W5 merge follow-up (2026-05-27): predict / compare / explain-
+        # mechanism / list-all archetypes require a populated limitations_
+        # chapter (penultimate falsification chapter). Without this the
+        # "good plan" carries a `limitations_chapter=missing(required-for-
+        # archetype)` shortfall and breaks the `shortfalls == []` invariant.
+        # Minimal valid form: 5 sub-section types + scenario_stress_test
+        # (required only for predict; benign on other archetypes).
+        "limitations_chapter": {
+            "title": "Limitations",
+            "sub_sections": [
+                {"id": "S9.1", "type": "data_granularity", "title": "DG", "content_directive": "..."},
+                {"id": "S9.2", "type": "scope_cap", "title": "Scope", "content_directive": "..."},
+                {"id": "S9.3", "type": "time_validity", "title": "Time", "content_directive": "..."},
+                {"id": "S9.4", "type": "sampling", "title": "Sample", "content_directive": "..."},
+                {"id": "S9.5", "type": "falsifiers", "title": "Falsifiers", "content_directive": "..."},
+            ],
+            "scenario_stress_test": {
+                "scenarios": ["base", "optimistic", "pessimistic"],
+                "recompute_target": "tier_ranking",
+                "directive": "...",
+            },
+        },
     }
 
 
