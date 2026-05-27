@@ -74,6 +74,17 @@ def _persist_drift(s, language: str, query: str) -> None:
             # and never reached the dev-run telemetry. Wave 1 §7.2 added
             # the derived `inline_def_ratio` field above.
             "footnote_normalize": fn_stats,
+            # P3-W0a (2026-05-27): forward the architect's _outline_audit
+            # (which now includes query_type_counts / query_type_fractions /
+            # query_type_shortfalls in addition to the pre-existing structural
+            # bound counts) into drift telemetry so dev4 / W13 analysers can
+            # correlate query-type distribution with downstream specialist
+            # evidence quality. The audit dict is small (a few hundred bytes
+            # per task), and routing the whole thing through here means
+            # future Phase 3 PRs that add architect-side audit fields (e.g.
+            # P3-W1 micro-template instantiation_mode, P3-W2 framing-chapter
+            # vocabulary count) inherit drift telemetry for free.
+            "architect_audit": (getattr(s, "plan", {}) or {}).get("_outline_audit", {}),
         }
         _DRIFT_PATH.parent.mkdir(parents=True, exist_ok=True)
         with _DRIFT_LOCK, _DRIFT_PATH.open("a", encoding="utf-8") as fh:
