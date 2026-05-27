@@ -390,6 +390,44 @@ _TIER_RANKING_RULE = (
 )
 
 
+# P3-W5.b (2026-05-27): LIMITATIONS CHAPTER STRUCTURE rule.
+#
+# System-prompt summary of the 5-sub-section discipline + falsification
+# quality bar; the heavy lifting (sub-section JSON + scenario stress-test
+# payload) is in the writer.py user-prompt `limitations_block`. This rule
+# gives the writer LLM a system-level anchor so the per-section directive
+# from writer.py reinforces — not contradicts — the structural contract.
+# Qianfan corpus-verified pattern: 6/11 articles (q3, q14, q23, q44, q56,
+# q89). The chapter is penultimate (before stakeholder closing if both
+# present, else last before References). Architect-side schema lives at
+# architect.py:180-210; post-write validator is `_validate_limitations_
+# chapter` in validation.py.
+_LIMITATIONS_RULE = (
+    "LIMITATIONS CHAPTER STRUCTURE (P3-W5; required for predict / "
+    "compare / explain-mechanism / list-all archetypes when "
+    "`limitations_chapter` is in the plan):\n"
+    "The limitations chapter MUST contain 5 sub-sections, in this order:\n"
+    "  1. Data granularity — name a SPECIFIC observable the sources could "
+    "not resolve (2+ sentences). Avoid 'data was limited'.\n"
+    "  2. Scope cap — cite the §1 framing-chapter scope boundary verbatim; "
+    "name what the article does NOT cover.\n"
+    "  3. Time validity — name a SPECIFIC year/phase boundary after which "
+    "the conclusions may stop holding.\n"
+    "  4. Sampling — name an under-represented entity class or population "
+    "with one sentence on the bias direction.\n"
+    "  5. Falsifiers — name 2-3 SPECIFIC empirical observations that would "
+    "refute the article's main claims (cite §1.2 rubric items by R-N id).\n"
+    "Each sub-section: 150-300 words. Every sentence must point to a "
+    "concrete, checkable gap; generic 'this report has limitations' "
+    "boilerplate is forbidden.\n"
+    "For predict archetype WITH tier_ranking present: append a 6th "
+    "sub-section SCENARIO STRESS TEST recomputing the ranking under "
+    "base / optimistic / pessimistic scenarios; report rank stability "
+    "as a markdown table (Scenario | Top-Ranked Entity | Tier shifts vs "
+    "base). <3 shifts = robust; ≥3 = sensitive (acknowledge explicitly)."
+)
+
+
 # P3-W6.b (2026-05-27): STAKEHOLDER-SEGMENTED CLOSING rule.
 #
 # System-prompt summary of the 3-5 addressee-block discipline + non-
@@ -926,6 +964,7 @@ def writer_system(
     suppress_dedup: bool = False,
     outline_shape: dict | None = None,
     has_stakeholder_chapter: bool = False,
+    has_limitations_chapter: bool = False,
     has_tier_ranking: bool = False,
 ) -> str:
     """Assemble the writer system prompt.
@@ -956,6 +995,19 @@ def writer_system(
     Defaults False (back-compat with any caller that doesn't thread
     the flag) — the rule's textual self-guard ("applies when
     stakeholder_chapter is in the plan...") still kicks in if a future
+    caller forgets to set the flag, so silent breakage is impossible.
+
+    Greptile PR #45 round-6 issue #2 (2026-05-27):
+    `has_limitations_chapter` gates `_LIMITATIONS_RULE` inclusion,
+    mirroring the stakeholder precedent. The architect only emits
+    `limitations_chapter` for predict / compare / explain-mechanism /
+    list-all archetypes; trend / recommend tasks never carry the
+    chapter and the ~1300-char rule is pure prompt noise for them.
+    Callers in writer.py pass
+    `has_limitations_chapter=bool(plan.get("limitations_chapter"))`.
+    Defaults False — the rule's textual self-guard ("required for
+    predict / compare / explain-mechanism / list-all archetypes when
+    `limitations_chapter` is in the plan") still kicks in if a future
     caller forgets to set the flag, so silent breakage is impossible.
 
     Greptile PR #47 round-5 preempt (2026-05-27): `has_tier_ranking`
@@ -1003,6 +1055,14 @@ def writer_system(
             _MERMAID_DIRECTIVE,
         ]
     )
+    # Greptile PR #45 round-6 issue #2: gate `_LIMITATIONS_RULE` on
+    # `has_limitations_chapter`. The architect only emits
+    # `plan["limitations_chapter"]` for predict / compare /
+    # explain-mechanism / list-all archetypes; for trend / recommend
+    # the ~1300-char rule is pure prompt noise. Mirrors the
+    # `has_stakeholder_chapter` precedent below.
+    if has_limitations_chapter:
+        middle_rules.append(_LIMITATIONS_RULE)
     # Greptile PR #47 round-5 preempt: gate `_TIER_RANKING_RULE` on
     # `has_tier_ranking`. The architect only populates
     # `plan["tier_ranking"]` for compare / predict archetypes with
