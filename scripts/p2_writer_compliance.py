@@ -211,49 +211,68 @@ _ALTERNATIVE_RE = re.compile(
     re.IGNORECASE,
 )
 # Wave 3 PR 2: NEW element (e) detector — multi-link causal chains targeting
-# RACE 2 (Logical Reasoning and Causal Relationships). Lunon's pre-Wave-3
-# rate vs the reference on id=91 was 0.02 vs 0.31 per 1k EN-words (20× behind).
-# Markers chosen for high specificity to chain construction (vs bare
-# "because"): "results in / leads to / produces / gives rise to / drives
-# / due to / in turn / subsequently". The `drives` and `causes` patterns
-# include negative lookaheads to avoid common false positives ("drives
-# the project / process / team", "causes for celebration"). ZH markers
-# include 导致 / 引发 / 进而 / 从而 / 因而.
+# RACE 2 (Logical Reasoning and Causal Relationships).
+#
+# Greptile PR #34 round-1 follow-up (2026-05-26): tightened the regex to
+# remove single-step / non-causal markers that fired on common non-chain
+# prose:
+#   - REMOVED bare `produces?|produced|producing` (fires on "this chapter
+#     produces an overview", "the team produced a report")
+#   - REMOVED bare `enables?|enabled|enabling` (fires on "the SDK enables
+#     rapid deployment" — extremely common in tech text)
+#   - REMOVED bare `due to` (single-step backward attribution)
+#   - REMOVED bare `subsequently` (pure temporal sequencing, not causation)
+#   - REMOVED `drives?|drove|driving` with the narrow 6-noun blocklist
+#     ("drives the market / adoption / narrative / change" still fired)
+#   - REMOVED bare `causes?|caused|causing` (single-step causation)
+#   - REMOVED ZH 带来 / 促使 / 因而 (less chain-specific than the kept set)
+# What survives are SPECIFIC chain construction markers:
+#   - Directional causation verbs that introduce a named effect:
+#     `leads?|led|leading to` / `results?|resulted in` / `gives?|gave|
+#     giving rise to`
+#   - Explicit chain connectors that REQUIRE a prior cause to make sense:
+#     `in turn` / `which (produces|enables|drives|leads|causes|results in)`
+#   - ZH causation markers retained for their chain-shape semantics:
+#     导致 / 引发 / 进而 / 从而
+# Element definition requires "2+ links" (per `_INSIGHT_MIN` rule body in
+# `deep_research/writing_rules.py`). The `_classify_leaf_elements` function
+# enforces this by requiring `>=2` matches per leaf, not `bool(search)`.
+# A single causal step is not a chain — two markers anywhere in the leaf
+# indicates multi-step causation.
 _CAUSAL_CHAIN_RE = re.compile(
-    # English causation markers — present + past + continuous tense forms.
-    # `leads?` matches lead/leads; `led` is past tense — needs separate
-    # alternation. Same for produces/produced, gives/gave, drives/drove.
-    r"(\b(?:leads?|led|leading) to\b|"
+    # Directional causation verbs (verb + preposition combinations that
+    # specifically introduce a causal relationship between named entities).
+    r"\b(?:leads?|led|leading) to\b|"
     r"\b(?:results?|resulted) in\b|"
-    r"\b(?:produces?|produced|producing)\b|"
     r"\b(?:gives?|gave|giving) rise to\b|"
-    # `drives?|drove|driving` followed by something that is NOT "the
-    # project|team|company|process|system|effort" (those are common
-    # business-prose false positives for chain construction).
-    r"\b(?:drives?|drove|driving)\s+(?!the\s+(?:project|team|company|process|system|effort)\b)|"
-    # `causes?|caused|causing` followed by something that is NOT "for"
-    # ("causes for celebration" / "causes for concern" are not causation).
-    r"\b(?:causes?|caused|causing)\s+(?!for\b)|"
-    r"\b(?:enables?|enabled|enabling)\b|"
-    r"\bdue to\b|\bin turn\b|\bsubsequently\b|"
-    r"\bwhich (?:produces|produced|enables|enabled|drives|drove|leads|led)\b|"
-    # ZH causation markers.
-    r"导致|引发|带来|促使|进而|从而|因而)",
+    # Explicit chain connectors that require a prior cause to make sense.
+    r"\bin turn\b|"
+    # "Which X" where X is a causation verb — explicit second-link syntax.
+    r"\bwhich (?:produces|produced|enables|enabled|drives|drove|leads|led|"
+    r"causes|caused|results in|resulted in)\b|"
+    # ZH causation markers (chain-shape in usage).
+    r"导致|引发|进而|从而",
     re.IGNORECASE,
 )
 # Wave 3 PR 2: NEW element (f) detector — problem/tradeoff/tension framing
-# targeting RACE 3 (Problem Insight and Solutions). Lunon's pre-Wave-3
-# rate vs the reference was 0.11 vs 0.25 (2.3× behind). Markers chosen to fire
-# on EXPLICIT problem/tension/paradox framing followed by an implied or
-# stated resolution — NOT on the bare word "tradeoff" (which is already
-# matched by `_ALTERNATIVE_RE`). The two detectors are designed to be
-# orthogonal so per-element rates remain independent. ZH markers include
-# 悖论 / 矛盾 / 挑战在于 / 关键问题 / 核心难题 / 应对...方法 / 解决...途径.
+# targeting RACE 3 (Problem Insight and Solutions).
+#
+# Greptile PR #34 round-1 follow-up (2026-05-26): removed two markers that
+# fired without problem/paradox framing:
+#   - REMOVED bare `\bto resolve\b` — matches "to resolve a DNS query",
+#     "steps taken to resolve a merge conflict" (non-problem prose).
+#   - REMOVED bare `\breconcile\b` — matches "reconcile accounts", "reconcile
+#     data discrepancies" (financial / data prose, not problem-tradeoff).
+# Both markers required problem-context preceding them to be meaningful;
+# the remaining patterns ("the paradox" / "the tension" / "the challenge
+# of" / "the problem of" / "to address this" / "the resolution lies" /
+# "resolves this" with anaphoric `this`) all encode the problem framing
+# explicitly in their own match.
 _PROBLEM_TRADEOFF_RE = re.compile(
     r"(\bthe (?:apparent )?paradox\b|\bthe tension\b|\bthe challenge of\b|"
     r"\bthe problem of\b|\bthe central issue\b|\bthe key obstacle\b|"
-    r"\bto address this\b|\bto resolve\b|\bthe resolution (?:of|lies)\b|"
-    r"\bresolves this\b|\breconcile\b|"
+    r"\bto address this\b|\bthe resolution (?:of|lies)\b|"
+    r"\bresolves this\b|"
     r"悖论|矛盾|挑战在于|关键问题|核心难题|应对.{0,8}方法|解决.{0,8}途径)",
     re.IGNORECASE,
 )
@@ -374,7 +393,14 @@ def _classify_leaf_elements(leaf_body: str) -> dict[str, bool]:
         "quant": bool(_QUANT_RE.search(leaf_body)),
         "alternative": bool(_ALTERNATIVE_RE.search(leaf_body)),
         # Wave 3 PR 2: 2 new elements targeting RACE Insight criteria 2 + 3.
-        "causal_chain": bool(_CAUSAL_CHAIN_RE.search(leaf_body)),
+        # Greptile PR #34 round-1 follow-up: causal_chain requires `>=2`
+        # markers per leaf, not `bool(search)`. The element definition in
+        # `_INSIGHT_MIN` explicitly says "A SINGLE causal step is NOT a
+        # chain" — chains need 2+ links. The earlier bool-based check
+        # would fire on a single "leads to" / "results in" occurrence
+        # (single-step causation), inflating the compliance rate and
+        # masking real chain-construction deficits.
+        "causal_chain": len(_CAUSAL_CHAIN_RE.findall(leaf_body)) >= 2,
         "problem_tradeoff": bool(_PROBLEM_TRADEOFF_RE.search(leaf_body)),
     }
 

@@ -290,19 +290,27 @@ _INSIGHT_MIN = (
     "      defensive postures imply opposite tradeoffs at peak intensity').\n"
     "\n"
     "  (e) CAUSAL CHAIN → targets RACE 2 (Logical Reasoning and Causal "
-    "      Relationships). A MULTI-STEP causal explanation. A single causal "
-    "      step ('because X') is NOT a chain — the chain shows the "
-    "      intervening mechanism with 2+ links: X leads to Y, which in turn "
-    "      produces Z because of evidence W. (e.g. 'Saori Kido's emergence "
-    "      as Athena-incarnate is causally chained: her grandfather's "
+    "      Relationships). A MULTI-STEP causal explanation with TWO OR "
+    "      MORE links. A single causal step ('A produces B', 'X due to "
+    "      Y', 'C enables D') is NOT a chain — single-step causation is "
+    "      under-payoff for this element. The chain shows the intervening "
+    "      mechanism with 2+ links: X leads to Y, which in turn produces "
+    "      Z because of evidence W. (e.g. 'Saori Kido's emergence as "
+    "      Athena-incarnate is causally chained: her grandfather's "
     "      Foundation Aries-Gold-Cloth deal in the Battle of the Twelve "
     "      Houses arc preserves the Cosmo-channeling capacity through her "
     "      bloodline; this latent Cosmo activates upon witnessing Seiya's "
     "      first Pegasus Meteor Fist, which in turn awakens the Seventh "
     "      Sense she needs to wield the Athena Cloth in the Sanctuary "
-    "      finale'). Marker phrases include 'leads to / results in / "
-    "      produces / gives rise to / drives / due to / in turn / 导致 / "
-    "      引发 / 进而 / 从而'. NEW IN WAVE 3 PR 2 — this element was the "
+    "      finale'). Chain-marker phrases (compliance detector counts "
+    "      these and requires ≥2 in the same leaf): 'leads to / led to / "
+    "      leading to / results in / resulted in / gives rise to / gave "
+    "      rise to / giving rise to / in turn / which produces|enables|"
+    "      drives|leads|causes|results in / 导致 / 引发 / 进而 / 从而'. "
+    "      Bare 'enables' / 'produces' / 'due to' / 'subsequently' DO "
+    "      NOT count toward the chain count — they're single-step verbs "
+    "      that the detector intentionally ignores to avoid false-positive "
+    "      compliance credit. NEW IN WAVE 3 PR 2 — this element was the "
     "      largest structural gap vs the reference (Lunon at 0.02 per 1k words "
     "      vs the reference 0.31 — 20× behind on multi-link causal density).\n"
     "\n"
@@ -416,8 +424,16 @@ _INSIGHT_DISTRIBUTION_DEFAULT = {
     "contrarian_min": 3,
     "quant_min": 3,
     "alternative_min": 30,
-    "causal_chain_min": 25,  # Wave 3 PR 2: NEW — targets RACE 2 (Causal Reasoning)
-    "problem_tradeoff_min": 5,  # Wave 3 PR 2: NEW — targets RACE 3 (Problem-Solution)
+    # Wave 3 PR 2: NEW elements targeting RACE 2 + 3.
+    # Greptile PR #34 round-1 follow-up: causal_chain target lowered after
+    # tightening the detector to require 2+ chain markers per leaf (the
+    # original broad detector fired on single-step "enables" / "produces" /
+    # "due to" / "subsequently"). Under the strict detector the reference
+    # observed rates are 0-5% per archetype (mean ~2.5%), so the default
+    # floor is set to 2 — a writer producing any genuine multi-link chains
+    # comfortably clears it.
+    "causal_chain_min": 2,
+    "problem_tradeoff_min": 3,
 }
 _INSIGHT_DISTRIBUTION_BY_ARCHETYPE: dict[str, dict[str, int]] = {
     # Wave 3 PR-0 fresh-corpus recalibration (2026-05-26). All targets set
@@ -429,48 +445,63 @@ _INSIGHT_DISTRIBUTION_BY_ARCHETYPE: dict[str, dict[str, int]] = {
         "contrarian_min": 5,
         "quant_min": 25,  # was 5; Q observed 33 — predict densely quantifies
         "alternative_min": 35,  # was 10; Q observed 42 — predict compares scenarios
-        "causal_chain_min": 45,  # NEW (Wave 3 PR 2); Q observed 57 — RACE 2 central
-        "problem_tradeoff_min": 6,  # NEW; Q observed 8
+        # NEW elements (Wave 3 PR 2). Greptile PR #34 round-1 follow-up:
+        # causal_chain target lowered from 45 → 2 after tightening detector
+        # (strict 2-link requirement gave Q strict-rate of 3% on id=3;
+        # the prior 45 target was based on the broad detector that fired
+        # on single-step "enables/produces/due to" non-chains).
+        "causal_chain_min": 2,
+        "problem_tradeoff_min": 5,  # Q observed 8 — kept near the broader-detector reading since prob detector tightening only dropped 2 markers
     },
     "trend": {
         "forward_looking_min": 35,  # was 45; Q observed 40 (close)
         "contrarian_min": 1,
         "quant_min": 10,  # was 2; Q observed 14 — trend articles quantify more
         "alternative_min": 3,  # was 5; Q observed 4 (close)
-        "causal_chain_min": 10,  # NEW; Q observed 12
-        "problem_tradeoff_min": 1,  # NEW; Q observed 2 — trend is descriptive
+        "causal_chain_min": 1,  # Greptile PR #34 follow-up: was 10; Q strict-rate 1%
+        "problem_tradeoff_min": 1,  # Q observed 2 — trend is descriptive
     },
     "recommend": {
         "forward_looking_min": 25,  # was 40; Q observed 30 — was over-targeting
         "contrarian_min": 1,
         "quant_min": 5,
         "alternative_min": 40,  # was 15; Q observed 48 — recommend compares options
-        "causal_chain_min": 15,  # NEW; Q observed 20
-        "problem_tradeoff_min": 1,  # NEW; Q observed 1 — recommend is decisive
+        "causal_chain_min": 1,  # Greptile PR #34 follow-up: was 15; Q strict-rate 1%
+        "problem_tradeoff_min": 1,  # Q observed 1 — recommend is decisive
     },
     "list-all": {
         "forward_looking_min": 50,  # was 55; Q observed 62 (close)
         "contrarian_min": 1,  # was 10; Q observed 3 — was 3× too high
         "quant_min": 0,  # was 17; Q observed 0 — was way too high
         "alternative_min": 60,  # was 47; Q observed 76 — was too low
-        "causal_chain_min": 30,  # NEW; Q observed 42 — even list-all has causation
-        "problem_tradeoff_min": 3,  # NEW; Q observed 5
+        # Greptile PR #34 follow-up: causal_chain was 30; Q strict-rate
+        # 0% on id=91. list-all is enumeration-shaped (entity profiles)
+        # and rarely uses multi-link chains — keeping the floor at 0
+        # surfaces no false deficit but lets a writer voluntarily land
+        # chains in synthesis sections.
+        "causal_chain_min": 0,
+        "problem_tradeoff_min": 3,  # Q observed 5
     },
     "compare": {
         "forward_looking_min": 40,  # was 50; Q observed 47 (close)
         "contrarian_min": 3,  # was 10; Q observed 6 — was too high
         "quant_min": 20,  # was 17; Q observed 27
         "alternative_min": 15,  # was 47; Q observed 22 — was way too high
-        "causal_chain_min": 20,  # NEW; Q observed 30
-        "problem_tradeoff_min": 3,  # NEW; Q observed 3
+        "causal_chain_min": 3,  # Greptile PR #34 follow-up: was 20; Q strict-rate 5%
+        "problem_tradeoff_min": 3,  # Q observed 3
     },
     "explain-mechanism": {
         "forward_looking_min": 15,  # was 28; Q observed 19
         "contrarian_min": 3,  # was 8; Q observed 4 — was too high
         "quant_min": 3,  # was 1; Q observed 6
         "alternative_min": 25,  # was 42; Q observed 32 — was too high
-        "causal_chain_min": 25,  # NEW; Q observed 31 — RACE 2 central to this archetype
-        "problem_tradeoff_min": 4,  # NEW; Q observed 5
+        # Greptile PR #34 follow-up: causal_chain was 25; Q strict-rate
+        # 4% mean on ids 8/20/23/56. RACE 2 (Causal Reasoning) is the
+        # archetype's mission but the multi-link chain density even in
+        # the reference is modest under the strict detector — most explain-mech
+        # causation is single-step "X because Y" which doesn't count.
+        "causal_chain_min": 3,
+        "problem_tradeoff_min": 4,  # Q observed 5
     },
 }
 
