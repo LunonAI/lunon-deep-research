@@ -142,12 +142,29 @@ def repair(text: str) -> tuple[str, dict]:
         residual = re.sub(r"[\s\.,;:!?\(\)\[\]]+", "", stripped)
         if len(residual) < 15:
             # Sentence has no meaningful content after removing the
-            # dangling ref — delete it entirely (and its separator, so
-            # we don't leave a dangling `\n\n` or `  ` in the output).
-            # 15 chars is the heuristic bar; tighter and we'd preserve
-            # dangler-only sentences, looser and we'd over-delete
-            # legitimate prose.
+            # dangling ref — delete it entirely. 15 chars is the
+            # heuristic bar; tighter and we'd preserve dangler-only
+            # sentences, looser and we'd over-delete legitimate prose.
             stats["sentences_deleted"] += 1
+            # Greptile PR #39 round-2: do NOT drop the deleted sentence's
+            # trailing `sep`. When the dangler-only sentence ends a
+            # paragraph (its sep is `\n\n`), discarding it collapses the
+            # following `## N` heading inline with the preceding sentence
+            # — silently producing invalid markdown. Concrete failure:
+            # `"## 1 Intro\n\nReal content. See (Section 99).\n\n## 2 Body"`
+            # would become `"...Real content. ## 2 Body"` (heading inline).
+            # Fix: carry the deleted sentence's sep forward onto the
+            # preceding sep slot when it is more newline-rich, so the
+            # next surviving sentence (or heading) retains its block-
+            # level prefix. The rewrite path already preserves sep
+            # unconditionally; this restores symmetry.
+            if out_tokens and sep.count("\n") > out_tokens[-1].count("\n"):
+                out_tokens[-1] = sep
+            elif not out_tokens and sep:
+                # Deletion at the very start of the text — no preceding
+                # sep to merge into. Emit sep as a leading separator so
+                # the first surviving sentence keeps its prefix.
+                out_tokens.append(sep)
             continue
 
         # Rewrite each dangling ref to "a later section" / "another section".

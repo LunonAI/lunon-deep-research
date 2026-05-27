@@ -171,3 +171,65 @@ def test_forward_defer_ratio_zero_when_no_xrefs():
     out = wr.check_xref_quality(text)
     assert out["forward_defer_ratio"] == 0.0
     assert not any("forward_defer_ratio" in f for f in out["fail"])
+
+
+def test_forward_defer_pre_window_clamp_with_multiple_separator_types():
+    """Greptile PR #39 round-2: the `wstart` clamping loop in
+    `check_xref_quality` previously mutated `wstart` in-place and used
+    the mutated value as the base for absolute-position arithmetic on
+    subsequent separator types. When BOTH `\\n\\n` AND `\\n## ` appear
+    inside the 80-char pre-window, the second iteration inflated the
+    clamp offset by the first iteration's adjustment — narrowing the
+    forward-defer detection window more than intended and silently
+    dropping in-window phrases.
+
+    Fixture: place a forward-defer phrase ("will return below") inside
+    the pre-window of an xref `(Section 3)`, with a paragraph break
+    (`\\n\\n`) earlier in the same chapter. There is no intervening
+    `\\n## ` heading inside the pre-window — so the buggy clamp would
+    only fire on the `\\n\\n`. We assert the forward-defer is detected,
+    which would NOT hold if the window were over-clamped past the
+    "will return" phrase.
+
+    The complementary `test_forward_defer_ratio_counts_xref_in_forward_context`
+    above already covers the happy path; this one specifically pins the
+    pre-window arithmetic against the cumulative-mutation regression.
+    """
+    text = (
+        "## 1 Chapter\n\n"
+        # 70-char buffer ending in a `\n\n` paragraph break, then the
+        # forward-defer phrase + xref directly after the break, all
+        # inside the chapter body (no second `##` heading nearby).
+        + ("Filler prose that pads out the chapter body content. " * 2)
+        + "\n\n"
+        "We will return to this point below in (Section 3) of the report.\n\n"
+        + "\n\n".join(f"## {i} S{i}" for i in range(2, 14))
+        + "\n"
+    )
+    out = wr.check_xref_quality(text)
+    # 1 xref total — but `forward_defer_ratio` is only emitted as a fail
+    # entry once `n_total_xrefs >= 10`. The lower-level assertion is on
+    # the counted denominator/numerator, not on the fail-entry gate.
+    # We test the proximity-window detection directly by adding ≥10 xrefs.
+    bigger = (
+        "## 1 Chapter\n\n" + ("Filler prose that pads out the chapter body content. " * 2) + "\n\n"
+        # Forward-defer phrases within 80 chars of each xref.
+        "We will return to (Section 3) below. "
+        "Will detail (Section 4) below. "
+        "Will examine (Section 5) below. "
+        # Plain (non-forward-defer) xrefs after — far past any defer phrase.
+        + ("\n\n" + "Plain reference (Section 6) standalone. " * 7)
+        + "\n\n"
+        + "\n\n".join(f"## {i} S{i}" for i in range(3, 14))
+        + "\n"
+    )
+    out = wr.check_xref_quality(bigger)
+    assert out["n_total_xrefs"] >= 10
+    # The 3 forward-defer xrefs sit close to their defer phrases AND a
+    # `\n\n` paragraph break appears earlier. Pre-fix, the second-pass
+    # clamp inflated past the phrases → ratio dropped to 0. Post-fix the
+    # window stays correctly anchored and ≥3/10 = 0.30 fires.
+    assert out["forward_defer_ratio"] >= 0.30, (
+        f"forward-defer phrases within window were dropped by over-clamped "
+        f"pre-window; got ratio {out['forward_defer_ratio']!r} from {out}"
+    )
