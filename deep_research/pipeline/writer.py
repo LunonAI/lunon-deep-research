@@ -432,6 +432,98 @@ def write_section(
                     )
                 framing_block = "\n".join(parts) + "\n"
 
+    # P3-W7.b (2026-05-27): TIER RANKING + SENSITIVITY CHECK CONTRACT injection.
+    #
+    # The architect populates `plan["tier_ranking"]` (architect.py schema
+    # lines 153-179) for compare / predict archetypes when entity_matrix
+    # has ≥5 entities AND ≥4 dimensions. It carries a `scoring_formula`,
+    # `weights` dict (mirroring §1 framing-chapter rubric items),
+    # `tiers` list with thresholds, and `sensitivity_check` with the
+    # default ±10pp perturbation. The post-merge audit on `main` found
+    # that while the architect plans this chapter, the writer LLM had
+    # no in-prompt directive to render it — so the scoring table and
+    # sensitivity sub-section weren't produced. Qianfan corpus-verified
+    # pattern: 3-5/11 articles, distinctive in q14 §7.3-§7.6 (10 teams,
+    # S_base/RBM/S_final with 2-decimal scores) and q3 §8.1 (11 sectors,
+    # 6-dimension weighted scoring + ±10pp sensitivity).
+    #
+    # The directive emphasises: (a) 2-decimal precision on all scores,
+    # (b) the sensitivity check must be COMPUTATIONAL (actual recomputed
+    # S_final values), not narrative — the Lunon writer has historically
+    # hallucinated the sensitivity table without grounding.
+    tier_ranking_block = ""
+    tr = plan.get("tier_ranking")
+    if isinstance(tr, dict) and unit.get("title") and unit["title"] == tr.get("title"):
+        weights_raw = tr.get("weights") if isinstance(tr.get("weights"), dict) else {}
+        # Greptile pre-scan (W7 PR #43 round-3): bool is a subclass of int,
+        # so a naive `isinstance(v, (int, float))` would silently admit
+        # `True`/`False` as weight values. Filter explicitly.
+        weights = {k: v for k, v in weights_raw.items() if isinstance(v, (int, float)) and not isinstance(v, bool)}
+        tiers = [t for t in (tr.get("tiers") or []) if isinstance(t, dict) and t.get("name")]
+        sensitivity = tr.get("sensitivity_check") if isinstance(tr.get("sensitivity_check"), dict) else {}
+        # Same bool-subclass guard on perturbation_pp.
+        raw_pp = sensitivity.get("perturbation_pp") if isinstance(sensitivity, dict) else None
+        perturbation_pp = raw_pp if isinstance(raw_pp, int) and not isinstance(raw_pp, bool) else 10
+        scoring_formula = tr.get("scoring_formula") or "S_final = Σ(weight_i × dim_i)"
+        if weights and tiers:
+            parts = [
+                "\nTIER RANKING + SENSITIVITY CHECK CONTRACT (P3-W7; this "
+                "section IS the tier-ranking chapter — Qianfan corpus-verified "
+                "pattern in 3-5/11 articles, most distinctive in q14 §7.3-§7.6 "
+                "(10 teams, S_base/RBM/S_final with 2-decimal scores) and "
+                "q3 §8.1 (11 sectors, 6-dimension weighted scoring with "
+                "±10pp sensitivity)):"
+            ]
+            parts.append(
+                f"  Scoring formula (use VERBATIM in the chapter opening "
+                f"so readers can trace the math): {scoring_formula}"
+            )
+            parts.append(
+                f"  Weights (mirror §1 framing-chapter rubric items by id): {json.dumps(weights, ensure_ascii=False)}"
+            )
+            parts.append(f"  Tiers and thresholds: {json.dumps(tiers, ensure_ascii=False)}")
+            parts.append(
+                "  REQUIRED chapter structure:\n"
+                "    1. Opening (~2 paragraphs): state the scoring formula "
+                "explicitly + cite §1 rubric items by id (R-1, R-2, ...) so "
+                "weights trace back to the published rubric.\n"
+                "    2. SCORING TABLE — markdown table:\n"
+                "       - Rows = entities (from §1 entity_matrix).\n"
+                "       - Columns = entity name + each rubric dimension score "
+                "+ S_final + tier.\n"
+                "       - ALL scores reported to 2 DECIMAL PLACES (e.g., "
+                "7.45, 6.32, 8.81 — NEVER 7.5 or 7, NEVER 7.452). Pin "
+                "precision to 2; the validator checks for ≥1 cell matching "
+                "`\\b\\d+\\.\\d{2}\\b` AND zero cells with 3+ decimals.\n"
+                "    3. TIER ASSIGNMENT: each entity placed in a tier per "
+                "the thresholds; 1-2 sentence rationale per entity naming "
+                "the DOMINANT dimension(s) driving the placement.\n"
+                f"    4. SENSITIVITY CHECK (sub-section heading must "
+                f"contain 'sensitivity' / '敏感性' / '±{perturbation_pp}pp'): "
+                f"re-rank under ±{perturbation_pp}pp perturbation of each "
+                "weight. For each perturbed weight, recompute S_final for "
+                "ALL entities and report:\n"
+                "       - Number of entities that change tier under the "
+                "perturbation.\n"
+                "       - The most-sensitive weight (whose perturbation "
+                "causes the highest tier-shift count).\n"
+                "       - A RANK-STABILITY TABLE: rows = scenarios (base / "
+                "each weight ±pp), columns = entities, cells = tier "
+                "assignment.\n"
+                "    Interpretation directive: rank stability across "
+                "±perturbation = robust findings; ≥3 tier shifts in any "
+                "perturbed scenario = sensitive ranking, acknowledge "
+                "explicitly that conclusions depend on weight choice.\n"
+                "  Sensitivity perturbation MUST be COMPUTATIONAL not "
+                "narrative — produce the ACTUAL recomputed S_final values "
+                "(2 decimals each), not a paragraph describing what would "
+                "happen if weights were perturbed. The Lunon writer has "
+                "historically hallucinated this sub-section as prose; the "
+                "validator checks for the table structure (2-decimal cells "
+                "+ sensitivity sub-heading)."
+            )
+            tier_ranking_block = "\n".join(parts) + "\n"
+
     user = (
         f"PROMPT ({language}):\n{prompt}\n\n"
         f"You are writing ONLY this section of the report (other sections are "
@@ -443,6 +535,7 @@ def write_section(
         f"{depth_block}"
         f"{entity_matrix_block}"
         f"{framing_block}"
+        f"{tier_ranking_block}"
         f"REPORT OUTLINE (titles only, for coherence): "
         f"{json.dumps(prior_titles, ensure_ascii=False)}\n\n"
         f"ACCEPTANCE CRITERIA THIS SECTION MUST SATISFY:\n"

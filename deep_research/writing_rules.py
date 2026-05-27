@@ -338,6 +338,48 @@ _MERMAID_DIRECTIVE = (
 )
 
 
+# P3-W7.b (2026-05-27): TIER RANKING + SENSITIVITY CHECK rule.
+#
+# System-prompt summary of the weighted-scoring discipline + 2-decimal
+# precision + ±10pp sensitivity check. The heavy lifting (entity-
+# specific weights / tiers payload) is in the writer.py user-prompt
+# `tier_ranking_block`. Qianfan corpus-verified pattern: 3-5/11
+# articles, distinctive in q14 §7.3-§7.6 and q3 §8.1. Architect-side
+# schema at architect.py:153-179; post-write validator
+# `_validate_tier_ranking` at validation.py enforces table-row count,
+# 2-decimal precision (no 1-dec or 3+-dec cells), sensitivity sub-
+# section heading detection, and rubric-id cross-reference with
+# framing_chapter.
+_TIER_RANKING_RULE = (
+    "TIER RANKING + SENSITIVITY CHECK (P3-W7; applies when "
+    "`tier_ranking` is in the plan — compare / predict archetypes "
+    "with ≥5 entities and ≥4 rubric dimensions):\n"
+    "The chapter has 4 required parts:\n"
+    "  1. Opening: state the scoring formula explicitly (e.g., "
+    "S_final = Σ(weight_i × dim_i)); cite §1 rubric items by id "
+    "(R-1, R-2, ...) so weights trace to the published rubric.\n"
+    "  2. Scoring table — markdown:\n"
+    "     - Rows = entities (from §1 entity_matrix).\n"
+    "     - Columns = entity name + each rubric dimension score + "
+    "S_final + tier.\n"
+    "     - ALL scores reported to 2 DECIMAL PLACES (e.g., 7.45, "
+    "6.32, 8.81). NEVER 7.5 or 7. NEVER 7.452. The validator rejects "
+    "cells with 1-decimal or 3+-decimal precision.\n"
+    "  3. Tier assignment: each entity placed per the thresholds; "
+    "1-2 sentence rationale per entity naming the dominant dimension.\n"
+    "  4. Sensitivity check sub-section (heading must contain "
+    "'sensitivity' / '敏感性' / '±Npp'): re-rank under ±10pp "
+    "perturbation of each weight; report:\n"
+    "     - Number of entities that change tier under perturbation.\n"
+    "     - The most-sensitive weight (highest tier-shift count).\n"
+    "     - A rank-stability table: scenarios × entities → tier.\n"
+    "Sensitivity check MUST be COMPUTATIONAL — produce actual "
+    "recomputed S_final values, not narrative prose. The validator "
+    "checks for table structure (2-decimal cells + sensitivity sub-"
+    "heading); narrative-only sensitivity sections fail."
+)
+
+
 # P2-Option-A-#3 (2026-05-23): _INSIGHT_MIN rewritten to be Insight-positive
 # across ALL archetypes. The previous version (post-W9 over-correction) told
 # the writer to NOT add forward-looking content for list-all/compare/
@@ -876,6 +918,7 @@ def writer_system(
             _SECTION_OPENING_PROSE_LEAD_RULE,
             _MID_PARAGRAPH_XREF_RULE,
             _MERMAID_DIRECTIVE,
+            _TIER_RANKING_RULE,
         ]
     )
     middle_block = "\n\n".join(middle_rules)
