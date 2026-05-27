@@ -115,9 +115,7 @@ def test_repair_preserves_paragraph_boundaries_before_next_heading():
     # Critical: `## 2 Body` must remain at the start of a line.
     assert "\n\n## 2 Body" in out, f"paragraph→heading separator collapsed: {out!r}"
     # The separator must NOT have been replaced by a single space.
-    assert "Second sentence here. ## 2 Body" not in out, (
-        f"sentence and heading collapsed inline: {out!r}"
-    )
+    assert "Second sentence here. ## 2 Body" not in out, f"sentence and heading collapsed inline: {out!r}"
 
 
 def test_repair_preserves_paragraph_boundaries_with_dangling_ref_present():

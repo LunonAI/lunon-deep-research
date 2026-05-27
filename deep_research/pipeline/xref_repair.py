@@ -31,9 +31,7 @@ import re
 # whitespace or end-of-string, which is what a sentence-terminating period
 # actually looks like. Dotted sub-section numbers (e.g. §1.2, §3.4.5) have a
 # digit immediately after the dot, so the lookahead skips them.
-_OPENING_TEMPLATE_PATTERN = re.compile(
-    r"(?m)(^#{2}\s+[^\n]+\n+)(\s*Building on\b[^\n]*?\.(?=\s|$))[ \t]*"
-)
+_OPENING_TEMPLATE_PATTERN = re.compile(r"(?m)(^#{2}\s+[^\n]+\n+)(\s*Building on\b[^\n]*?\.(?=\s|$))[ \t]*")
 
 
 def _heading_ids(text: str) -> set[str]:

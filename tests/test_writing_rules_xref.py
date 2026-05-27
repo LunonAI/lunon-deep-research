@@ -131,18 +131,14 @@ def test_forward_defer_ratio_ignores_non_xref_phrase_occurrences():
         "## 2 Y\n\n"
         "First (Section 3). Second (Section 4). Third (Section 5). Fourth (Section 6). "
         "Fifth (Section 7). Sixth (Section 8). Seventh (Section 9). Eighth (Section 10). "
-        "Ninth (Section 11). Tenth (Section 12).\n\n"
-        + "\n\n".join(f"## {i} S{i}" for i in range(3, 13))
-        + "\n"
+        "Ninth (Section 11). Tenth (Section 12).\n\n" + "\n\n".join(f"## {i} S{i}" for i in range(3, 13)) + "\n"
     )
     out = wr.check_xref_quality(text)
     assert out["n_total_xrefs"] >= 10, f"expected ≥10 xrefs: {out}"
     assert out["forward_defer_ratio"] == 0.0, (
         f"isolated 'below' phrases must not contribute when not near an xref: {out}"
     )
-    assert not any("forward_defer_ratio" in f for f in out["fail"]), (
-        f"spurious forward_defer failure: {out['fail']}"
-    )
+    assert not any("forward_defer_ratio" in f for f in out["fail"]), f"spurious forward_defer failure: {out['fail']}"
 
 
 def test_forward_defer_ratio_counts_xref_in_forward_context():
@@ -163,12 +159,8 @@ def test_forward_defer_ratio_counts_xref_in_forward_context():
     assert out["n_total_xrefs"] >= 10
     # 4 of the 10 xrefs are within ±80 chars of a forward-defer phrase →
     # ratio ≈ 0.4 (must be > 0.30 to fire the fail entry).
-    assert out["forward_defer_ratio"] >= 0.30, (
-        f"xrefs in forward-defer context not detected: {out}"
-    )
-    assert any("forward_defer_ratio" in f for f in out["fail"]), (
-        f"expected forward_defer fail entry: {out['fail']}"
-    )
+    assert out["forward_defer_ratio"] >= 0.30, f"xrefs in forward-defer context not detected: {out}"
+    assert any("forward_defer_ratio" in f for f in out["fail"]), f"expected forward_defer fail entry: {out['fail']}"
 
 
 def test_forward_defer_ratio_zero_when_no_xrefs():
