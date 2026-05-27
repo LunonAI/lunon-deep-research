@@ -148,3 +148,14 @@ class PipelineState:
     # forwarded into inner_loop_drift.jsonl so dev4 / W13 analysers can
     # track per-archetype mermaid emission rates and repair pressure.
     mermaid_validate_stats: dict = field(default_factory=dict)
+    # P3-W3.b (2026-05-27): per-task xref_repair stats dict
+    # {templates_repaired, dangling_refs_rewritten, sentences_deleted}.
+    # Populated from pipeline.xref_repair.repair() in the post-pass chain
+    # (orchestrate.py between zh_writer_pass and mermaid_validate). The
+    # in-prompt `_MID_PARAGRAPH_XREF_RULE` directive is the primary force
+    # producing clean cross-refs; this post-pass is the safety net that
+    # catches "Building on §X" template regressions + dangling forward-
+    # refs the writer occasionally emits. All-zero stats indicate clean
+    # writer output; non-zero stats let dev4 / W13 analysers quantify
+    # how often the safety net fires.
+    xref_repair_stats: dict = field(default_factory=dict)

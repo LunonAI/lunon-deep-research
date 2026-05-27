@@ -290,6 +290,57 @@ def test_truncated_bodies_empty_when_next_heading_within_range():
     )
 
 
+# ---------- CJK anchor coverage ----------
+
+
+def test_chinese_entity_name_satisfies_anchor_check():
+    """Greptile PR #45 round-5 issue #2: a Chinese-only sub-section body
+    naming a concrete entity (e.g., "宝武钢铁集团" / "国家发改委") MUST NOT
+    be flagged generic. Pre-fix the anchor regex had no CJK alternation
+    so every ZH-only body was systematically false-positived on the
+    anti-generic bar, producing misleading drift telemetry on the reference corpus (predominantly ZH)."""
+    article = (
+        "## 5 局限性\n\n"
+        "### 5.1 Data Granularity\n\n"
+        "宝武钢铁集团的钢铁产量数据未覆盖到分厂级别的细粒度。\n\n"
+        "### 5.2 Scope Cap\n\n"
+        "本文未覆盖国家发改委政策范围之外的领域。\n\n"
+        "### 5.3 Time Validity\n\n"
+        "粤港澳大湾区在2028年之后的规划尚未确定。\n\n"
+        "### 5.4 Sampling\n\n"
+        "中国人民银行的内部数据未公开，存在抽样偏差。\n\n"
+        "### 5.5 Falsifiers\n\n"
+        "如果上海证券交易所改变交易规则，本文结论可能被证伪。\n"
+    )
+    audit = validation._validate_limitations_chapter(article, _full_lc())
+    assert audit is not None
+    # All 5 ZH bodies name 4+-char CJK entities — none should be generic.
+    assert audit["generic_subsections"] == [], (
+        f"ZH bodies with concrete entity names must satisfy the anti-generic bar; got: {audit}"
+    )
+
+
+def test_chinese_short_phrases_do_not_satisfy_anchor_check():
+    """A ZH body containing only short generic phrases (2-3 char CJK
+    runs like "数据", "需要", "可持续") MUST still be flagged generic.
+    The 4+ length bar in the CJK alternation rejects common phrases
+    while admitting entity / organization / location names."""
+    article = (
+        "## 5 局限性\n\n"
+        "### 5.1 Data Granularity\n\n"
+        "数据 有限。需要 更多 信息。可能 不够。\n\n"  # all 2-char runs
+        "### 5.2 Scope Cap\n\nPer R-1, excluded.\n\n"
+        "### 5.3 Time Validity\n\nBeyond 2028 invalid.\n\n"
+        "### 5.4 Sampling\n\nPer R-2, sampling.\n\n"
+        "### 5.5 Falsifiers\n\nPer R-4, refuted.\n"
+    )
+    audit = validation._validate_limitations_chapter(article, _full_lc())
+    assert audit is not None
+    assert "data_granularity" in audit["generic_subsections"], (
+        f"ZH body of 2-char generic phrases must NOT satisfy anti-generic bar; got: {audit}"
+    )
+
+
 # ---------- run() integration ----------
 
 
