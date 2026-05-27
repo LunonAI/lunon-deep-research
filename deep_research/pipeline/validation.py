@@ -265,8 +265,9 @@ def run(inp: ValidationInput) -> ValidationOutput:
     # When the architect populated `plan["stakeholder_chapter"]` because the
     # prompt signaled plural audience, each stakeholder sub-section must
     # carry NON-OVERLAPPING content. Pairwise Jaccard on n-grams; pairs
-    # above 0.20 fail. Returns None when no chapter is present (single-
-    # audience prompts), so the check is silent in that case.
+    # above `wr._STAKEHOLDER_JACCARD_MAX` fail. Returns None when no
+    # chapter is present (single-audience prompts), so the check is
+    # silent in that case.
     sc_audit = _validate_stakeholder_overlap(inp.article, inp.plan.get("stakeholder_chapter"))
     if sc_audit is not None:
         counts["stakeholder_chapter"] = sc_audit
@@ -276,8 +277,9 @@ def run(inp: ValidationInput) -> ValidationOutput:
                     "check": "stakeholder_overlap",
                     "severity": "medium",
                     "detail": (
-                        f"{len(sc_audit['overlap_pairs'])} stakeholder pair(s) above 0.20 "
-                        f"Jaccard (max={sc_audit['max_pair_overlap']}); each block must address "
+                        f"{len(sc_audit['overlap_pairs'])} stakeholder pair(s) above "
+                        f"{wr._STAKEHOLDER_JACCARD_MAX:.2f} Jaccard "
+                        f"(max={sc_audit['max_pair_overlap']}); each block must address "
                         f"its audience with disjoint advice: {sc_audit['overlap_pairs']}"
                     ),
                 }
@@ -529,8 +531,9 @@ def _validate_stakeholder_overlap(article: str, stakeholder_chapter) -> dict | N
 
     For each pair of stakeholder sub-sections, compute Jaccard similarity
     on 4-gram tokens (word 4-grams for EN; char 4-grams for ZH). Pairs
-    with similarity > 0.20 are flagged in `overlap_pairs`. Qianfan's
-    stakeholder sub-sections in q23/q3/q14 are nearly content-disjoint.
+    with similarity > `wr._STAKEHOLDER_JACCARD_MAX` (currently 0.20)
+    are flagged in `overlap_pairs`. Qianfan's stakeholder sub-sections
+    in q23/q3/q14 are nearly content-disjoint.
 
     Greptile PR #42 round-2: short bodies (EN <4 words or ZH <4 chars)
     previously produced empty 4-gram sets and were silently skipped,
@@ -700,7 +703,16 @@ def _validate_stakeholder_overlap(article: str, stakeholder_chapter) -> dict | N
             union = len(sa | sb)
             jaccard = inter / union if union else 0.0
             max_overlap = max(max_overlap, jaccard)
-            if jaccard > 0.20:
+            # Greptile PR #46 round-1 issue #1 (2026-05-27): the
+            # threshold MUST be sourced from
+            # `wr._STAKEHOLDER_JACCARD_MAX` (the same constant the
+            # writer system-prompt directive references) so a future
+            # tightening (e.g., to 0.15) flows automatically into both
+            # the validator literal AND the prompt-displayed value.
+            # Pre-fix the threshold was duplicated as a `0.20` literal
+            # here AND embedded as `_STAKEHOLDER_JACCARD_MAX = 0.20`
+            # in writing_rules with no import link — silent drift risk.
+            if jaccard > wr._STAKEHOLDER_JACCARD_MAX:
                 overlap_pairs.append((a, b, round(jaccard, 3)))
             if n_used < 4:
                 short_pairs.append((a, b, n_used))

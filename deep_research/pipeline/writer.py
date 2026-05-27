@@ -96,6 +96,12 @@ def write_opening(plan, prompt, language, archetype, domain, digest, *, task_id=
     from .architect import _bounds_for_archetype
 
     outline_shape = _bounds_for_archetype(archetype)
+    # Greptile PR #46 round-1 issue #2 (2026-05-27): thread the
+    # `has_stakeholder_chapter` flag so the system prompt only carries
+    # the ~850-char stakeholder rule when the plan actually has the
+    # chapter. The architect emits stakeholder_chapter as None for
+    # single-audience prompts; bool() correctly yields False on None
+    # and on empty dicts.
     sys = wr.writer_system(
         archetype,
         domain,
@@ -103,6 +109,7 @@ def write_opening(plan, prompt, language, archetype, domain, digest, *, task_id=
         [s.get("title") for s in plan.get("report_toc", [])],
         task_id=task_id,
         outline_shape=outline_shape,
+        has_stakeholder_chapter=bool(plan.get("stakeholder_chapter")),
     )
     user = (
         f"PROMPT ({language}):\n{prompt}\n\nREPORT TITLE: "
@@ -175,6 +182,10 @@ def write_section(
     from .architect import _bounds_for_archetype
 
     outline_shape = _bounds_for_archetype(archetype)
+    # Greptile PR #46 round-1 issue #2 (2026-05-27): mirror the
+    # `has_stakeholder_chapter` flag from `write_opening`. The per-
+    # section call assembles the same system prompt; the architect's
+    # decision lives on the plan, not the unit.
     sys = wr.writer_system(
         archetype,
         domain,
@@ -182,6 +193,7 @@ def write_section(
         [s.get("title") for s in plan.get("report_toc", [])],
         task_id=task_id,
         outline_shape=outline_shape,
+        has_stakeholder_chapter=bool(plan.get("stakeholder_chapter")),
     )
 
     capel_block = ""
@@ -432,6 +444,80 @@ def write_section(
                     )
                 framing_block = "\n".join(parts) + "\n"
 
+    # P3-W6.b (2026-05-27): STAKEHOLDER-SEGMENTED CLOSING CONTRACT injection.
+    #
+    # The architect populates `plan["stakeholder_chapter"]` (architect.py
+    # schema lines 211-222) with 3-5 stakeholder addressee blocks when
+    # the user prompt signals a plural audience (investors AND policy-
+    # makers; researchers AND industry; etc.). The post-write validator
+    # `_validate_stakeholder_overlap` at validation.py:517-716 has been
+    # ACTIVE since PR #42 (P3-W6) catching Jaccard 4-gram overlap >0.20
+    # between pairs — but the writer LLM had no in-prompt directive
+    # instructing it to render the chapter that way. The validator was
+    # auditing blind output. This block matches `framing_block`'s pattern
+    # (title-gated extraction + JSON serialisation + prose contract) so
+    # the writer LLM sees explicit non-overlap discipline ONLY when the
+    # section currently being written IS the stakeholder chapter.
+    # Qianfan corpus-verified pattern: 6/11 articles, typically 4 stake-
+    # holders for predict / 7 for compare-contest (q23). The 3-5 emit-
+    # bound mirrors architect.py — wider acceptance would create a dead
+    # branch when the architect produces a 6+ stakeholder chapter.
+    stakeholder_block = ""
+    sc = plan.get("stakeholder_chapter")
+    if isinstance(sc, dict) and unit.get("title") and unit["title"] == sc.get("title"):
+        stakeholders = [s for s in (sc.get("stakeholders") or []) if isinstance(s, dict) and s.get("label")]
+        if 3 <= len(stakeholders) <= 5:
+            parts = [
+                "\nSTAKEHOLDER-SEGMENTED CLOSING CONTRACT (P3-W6; this section "
+                "IS the stakeholder chapter — Qianfan corpus-verified pattern in "
+                "6/11 articles, typically 4 stakeholders for predict / 7 for "
+                "compare-contest tasks):"
+            ]
+            payload = [{"label": s["label"], "directive": s.get("content_directive", "")} for s in stakeholders]
+            parts.append(
+                f"  {len(stakeholders)} REQUIRED stakeholder sub-sections: {json.dumps(payload, ensure_ascii=False)}"
+            )
+            parts.append(
+                "  Per stakeholder sub-section:\n"
+                "    - Heading explicitly names the addressee. EN forms: "
+                "'For Policymakers' / 'Recommendations for Investors' / "
+                "'From the {Stakeholder} Perspective'. ZH forms: "
+                "'对政策制定者的建议' / '对投资者的建议' / '面向{stakeholder}的建议'.\n"
+                "    - 200-500 words of advice SPECIFIC to that stakeholder's "
+                "decision context (their budget / time horizon / decision "
+                "authority / information access).\n"
+                "    - Opening phrase modelled on the Qianfan corpus: "
+                "'For {stakeholder}, the priority is…' / "
+                "'{Stakeholder} should focus on…' / "
+                "'The key consideration for {stakeholder} is…' / "
+                "'From the {stakeholder} perspective, three steps emerge…'.\n"
+                "    - Reference 1-2 specific entities from prior chapters "
+                "where relevant.\n"
+                # Greptile PR #46 round-2 issue #1 (2026-05-27): user-
+                # prompt directive must source the threshold from
+                # `wr._STAKEHOLDER_JACCARD_MAX` so a future tightening
+                # (e.g., to 0.15) propagates to ALL three surfaces:
+                # validator literal, system-prompt rule, AND user-prompt
+                # directive. Pre-fix the user-prompt block still had a
+                # hardcoded `0.20` literal — the writer LLM would have
+                # been steered toward a stale target after a threshold
+                # change.
+                "  NON-OVERLAP DISCIPLINE (CRITICAL — the post-write validator "
+                "`_validate_stakeholder_overlap` enforces pairwise Jaccard "
+                f"4-gram overlap < {wr._STAKEHOLDER_JACCARD_MAX:.2f} between "
+                "every pair of sub-sections):\n"
+                "    - Each block's recommendations MUST address content "
+                "DISJOINT from the other blocks.\n"
+                "    - Do NOT re-state advice that applies to multiple "
+                "stakeholders — choose the PRIMARY stakeholder and place the "
+                "recommendation under THAT block only.\n"
+                "    - Forbidden: generic recommendations applicable to "
+                "'all stakeholders'; boilerplate advice that doesn't name "
+                "the stakeholder's specific constraints (budget, time "
+                "horizon, decision authority, information access)."
+            )
+            stakeholder_block = "\n".join(parts) + "\n"
+
     user = (
         f"PROMPT ({language}):\n{prompt}\n\n"
         f"You are writing ONLY this section of the report (other sections are "
@@ -443,6 +529,7 @@ def write_section(
         f"{depth_block}"
         f"{entity_matrix_block}"
         f"{framing_block}"
+        f"{stakeholder_block}"
         f"REPORT OUTLINE (titles only, for coherence): "
         f"{json.dumps(prior_titles, ensure_ascii=False)}\n\n"
         f"ACCEPTANCE CRITERIA THIS SECTION MUST SATISFY:\n"
