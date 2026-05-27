@@ -25,10 +25,15 @@ Rules measured (each per article):
      pre-Wave-2 failure mode: forward-looking 0.14× short, contrarian
      1.77× over, quant 2.44× over.
 
-  4. Section-opening recap (§E1 / `_SECTION_OPENING_RECAP_RULE`): % of
-     sections (excluding §1) that open with a 1-2 sentence prose recap
-     paragraph before the section's primary content. Verified id=91
-     ~90% landing pre-Wave-2.
+  4. Section-opening prose lead (§E1 / `_SECTION_OPENING_PROSE_LEAD_RULE`):
+     % of sections (INCLUDING §1) that open with a 1-2 sentence prose lead
+     before the section's primary content. P2-Wave-3-§12.A.v3 dropped the
+     recap concept entirely (Building-on templates, §N back-references)
+     and narrowed the §1 exemption to the topic-restriction only — the
+     prose-before-data requirement still applies to the article opener.
+     This scorer's §1 grading matches the canonical gate
+     (`scripts/p2_e_compliance.py::e1_section_opening_recap`). Verified
+     id=91 ~90% landing pre-Wave-2.
 
   5. Outline-bound compliance (§1.2): H2/H3/H4 counts vs the
      per-archetype shape preset from `pipeline/architect._ARCHETYPE_
@@ -434,18 +439,29 @@ def _score_heading_numbering(article: str) -> dict:
 
 
 def _score_section_opening_recap(article: str) -> dict:
-    """% of `## N ` sections (excluding §1) that open with a prose
-    recap paragraph (not a table/list) before the section's primary
+    """% of `## N ` sections (including §1) that open with a prose lead
+    paragraph (not a table/list/sub-heading) before the section's primary
     content. Heuristic: the first non-blank line after the heading is
-    not a markdown table (`|`) or list (`-`/`*`) bullet."""
+    not a markdown table (`|`), list (`-`/`*`/`<n>.`), or nested
+    heading (`#`).
+
+    §1 inclusion (P2-Wave-3-§12.A.v3, 2026-05-26): pre-v3 this scorer
+    skipped §1 because the §1 exemption was wholesale. v3 narrowed the
+    exemption to the topic-restriction only — the prose-before-data
+    requirement still applies to the article opener, in line with the
+    canonical gate (`scripts/p2_e_compliance.py::e1_section_opening_recap`).
+    Without §1 grading here, a table-first or list-first article opener
+    would score as compliant by default and the scorer would diverge from
+    the canonical gate's output during smoke comparisons.
+    """
     h2_pattern = re.compile(r"^##[ \t]+\d+[ \t]+\S.*$", re.MULTILINE)
     sections = [(m.start(), m.group(0)) for m in h2_pattern.finditer(article)]
-    if len(sections) <= 1:
-        return {"n_h2_sections": len(sections), "recap_compliance_rate": None}
-    # Process sections AFTER the first.
+    if not sections:
+        return {"n_h2_sections": 0, "recap_compliance_rate": None}
+    # Grade ALL sections under v3 (§1 included).
     n_total = 0
     n_recap = 0
-    for i, (start, heading) in enumerate(sections[1:], start=1):
+    for i, (start, heading) in enumerate(sections):
         n_total += 1
         # Body window = from this heading to the next H2 (or EOF).
         end = sections[i + 1][0] if i + 1 < len(sections) else len(article)
@@ -476,6 +492,9 @@ def _score_section_opening_recap(article: str) -> dict:
     rate = (n_recap / n_total) if n_total else 0.0
     return {
         "n_h2_sections": len(sections),
+        # Kept the `n_non_first_sections` field name for output-schema
+        # backwards-compat with downstream smoke-log parsers; the value now
+        # equals n_h2_sections (every section is graded under v3).
         "n_non_first_sections": n_total,
         "n_with_recap": n_recap,
         "recap_compliance_rate": round(rate, 3),
