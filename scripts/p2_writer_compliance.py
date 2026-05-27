@@ -25,10 +25,12 @@ Rules measured (each per article):
      pre-Wave-2 failure mode: forward-looking 0.14× short, contrarian
      1.77× over, quant 2.44× over.
 
-  4. Section-opening recap (§E1 / `_SECTION_OPENING_RECAP_RULE`): % of
-     sections (excluding §1) that open with a 1-2 sentence prose recap
-     paragraph before the section's primary content. Verified id=91
-     ~90% landing pre-Wave-2.
+  4. Section-opening prose lead (§E1 / `_SECTION_OPENING_PROSE_LEAD_RULE`):
+     % of sections (excluding §1) that open with a 1-2 sentence prose lead
+     before the section's primary content. P2-Wave-3-§12.A.v3 dropped the
+     recap concept entirely (Building-on templates, §N back-references);
+     this metric now measures prose-before-data compliance only. Verified
+     id=91 ~90% landing pre-Wave-2.
 
   5. Outline-bound compliance (§1.2): H2/H3/H4 counts vs the
      per-archetype shape preset from `pipeline/architect._ARCHETYPE_
