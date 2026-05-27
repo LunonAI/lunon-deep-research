@@ -210,6 +210,53 @@ _ALTERNATIVE_RE = re.compile(
     r"取舍|不如|优于|劣于|胜过)",
     re.IGNORECASE,
 )
+# Wave 3 PR 2: NEW element (e) detector — multi-link causal chains targeting
+# RACE 2 (Logical Reasoning and Causal Relationships). Lunon's pre-Wave-3
+# rate vs the reference on id=91 was 0.02 vs 0.31 per 1k EN-words (20× behind).
+# Markers chosen for high specificity to chain construction (vs bare
+# "because"): "results in / leads to / produces / gives rise to / drives
+# / due to / in turn / subsequently". The `drives` and `causes` patterns
+# include negative lookaheads to avoid common false positives ("drives
+# the project / process / team", "causes for celebration"). ZH markers
+# include 导致 / 引发 / 进而 / 从而 / 因而.
+_CAUSAL_CHAIN_RE = re.compile(
+    # English causation markers — present + past + continuous tense forms.
+    # `leads?` matches lead/leads; `led` is past tense — needs separate
+    # alternation. Same for produces/produced, gives/gave, drives/drove.
+    r"(\b(?:leads?|led|leading) to\b|"
+    r"\b(?:results?|resulted) in\b|"
+    r"\b(?:produces?|produced|producing)\b|"
+    r"\b(?:gives?|gave|giving) rise to\b|"
+    # `drives?|drove|driving` followed by something that is NOT "the
+    # project|team|company|process|system|effort" (those are common
+    # business-prose false positives for chain construction).
+    r"\b(?:drives?|drove|driving)\s+(?!the\s+(?:project|team|company|process|system|effort)\b)|"
+    # `causes?|caused|causing` followed by something that is NOT "for"
+    # ("causes for celebration" / "causes for concern" are not causation).
+    r"\b(?:causes?|caused|causing)\s+(?!for\b)|"
+    r"\b(?:enables?|enabled|enabling)\b|"
+    r"\bdue to\b|\bin turn\b|\bsubsequently\b|"
+    r"\bwhich (?:produces|produced|enables|enabled|drives|drove|leads|led)\b|"
+    # ZH causation markers.
+    r"导致|引发|带来|促使|进而|从而|因而)",
+    re.IGNORECASE,
+)
+# Wave 3 PR 2: NEW element (f) detector — problem/tradeoff/tension framing
+# targeting RACE 3 (Problem Insight and Solutions). Lunon's pre-Wave-3
+# rate vs the reference was 0.11 vs 0.25 (2.3× behind). Markers chosen to fire
+# on EXPLICIT problem/tension/paradox framing followed by an implied or
+# stated resolution — NOT on the bare word "tradeoff" (which is already
+# matched by `_ALTERNATIVE_RE`). The two detectors are designed to be
+# orthogonal so per-element rates remain independent. ZH markers include
+# 悖论 / 矛盾 / 挑战在于 / 关键问题 / 核心难题 / 应对...方法 / 解决...途径.
+_PROBLEM_TRADEOFF_RE = re.compile(
+    r"(\bthe (?:apparent )?paradox\b|\bthe tension\b|\bthe challenge of\b|"
+    r"\bthe problem of\b|\bthe central issue\b|\bthe key obstacle\b|"
+    r"\bto address this\b|\bto resolve\b|\bthe resolution (?:of|lies)\b|"
+    r"\bresolves this\b|\breconcile\b|"
+    r"悖论|矛盾|挑战在于|关键问题|核心难题|应对.{0,8}方法|解决.{0,8}途径)",
+    re.IGNORECASE,
+)
 
 
 def _split_into_leaves(article: str, archetype: str) -> list[str]:
@@ -326,6 +373,9 @@ def _classify_leaf_elements(leaf_body: str) -> dict[str, bool]:
         "contrarian": bool(_CONTRARIAN_RE.search(leaf_body)),
         "quant": bool(_QUANT_RE.search(leaf_body)),
         "alternative": bool(_ALTERNATIVE_RE.search(leaf_body)),
+        # Wave 3 PR 2: 2 new elements targeting RACE Insight criteria 2 + 3.
+        "causal_chain": bool(_CAUSAL_CHAIN_RE.search(leaf_body)),
+        "problem_tradeoff": bool(_PROBLEM_TRADEOFF_RE.search(leaf_body)),
     }
 
 
@@ -354,10 +404,25 @@ def _score_footnotes(article: str) -> dict:
 
 
 def _score_insight_distribution(article: str, archetype: str) -> dict:
-    """`_INSIGHT_MIN` element distribution (§3.2) per archetype."""
+    """`_INSIGHT_MIN` element distribution (§3.2 + Wave 3 PR 2 extension)
+    per archetype.
+
+    Wave 3 PR 2 (2026-05-26): scoring extended from 4 to 6 elements
+    (added `causal_chain` + `problem_tradeoff` targeting RACE Insight
+    criteria 2 + 3). Per-element gap is computed against the per-
+    archetype targets in `_INSIGHT_DISTRIBUTION_BY_ARCHETYPE`, recali-
+    brated from fresh the reference corpus measurements (PR-0)."""
     leaves = _split_into_leaves(article, archetype)
     n_leaves = len(leaves)
-    counts = {"forward_looking": 0, "contrarian": 0, "quant": 0, "alternative": 0}
+    counts = {
+        "forward_looking": 0,
+        "contrarian": 0,
+        "quant": 0,
+        "alternative": 0,
+        # Wave 3 PR 2: 2 new elements scored alongside the original 4.
+        "causal_chain": 0,
+        "problem_tradeoff": 0,
+    }
     for leaf in leaves:
         elems = _classify_leaf_elements(leaf)
         for k, v in elems.items():
@@ -374,6 +439,8 @@ def _score_insight_distribution(article: str, archetype: str) -> dict:
         "contrarian": round(rates["contrarian"] - targets["contrarian_min"], 1),
         "quant": round(rates["quant"] - targets["quant_min"], 1),
         "alternative": round(rates["alternative"] - targets["alternative_min"], 1),
+        "causal_chain": round(rates["causal_chain"] - targets["causal_chain_min"], 1),
+        "problem_tradeoff": round(rates["problem_tradeoff"] - targets["problem_tradeoff_min"], 1),
     }
     return {
         "archetype": archetype,
@@ -385,6 +452,8 @@ def _score_insight_distribution(article: str, archetype: str) -> dict:
             "contrarian": targets["contrarian_min"],
             "quant": targets["quant_min"],
             "alternative": targets["alternative_min"],
+            "causal_chain": targets["causal_chain_min"],
+            "problem_tradeoff": targets["problem_tradeoff_min"],
         },
         "per_element_gap_pct": gaps,
         "elements_below_target": [k for k, g in gaps.items() if g < 0],

@@ -216,10 +216,11 @@ _SECTION_OPENING_PROSE_LEAD_RULE = (
 # unit from PR #20). "Grounded" stays — every insight element must be tied
 # to a named source / concrete data, not free speculation.
 _INSIGHT_MIN = (
-    "INSIGHT DENSITY — DISTRIBUTIONAL COVERAGE (Wave 2 §3.2 rewrite):\n"
+    "INSIGHT DENSITY — DISTRIBUTIONAL COVERAGE (Wave 3 PR 2 extension of "
+    "Wave 2 §3.2):\n"
     "Every leaf section (H4 `#### 1.1.1 Foo` in deep-hierarchy archetypes, "
     "or H2 `## N Foo` body in flat archetypes like list-all) must close with "
-    "a substantive analytical payoff drawn from the four elements below. "
+    "a substantive analytical payoff drawn from the SIX elements below. "
     "Pre-Wave-2 the rule said 'pick AT LEAST ONE of the four' — the verified "
     "id=91 smoke (2026-05-26) showed the writer over-fires the EASY elements "
     "(contrarian 1.77× over, quant 2.44× over) and under-fires the HARD one "
@@ -256,42 +257,87 @@ _INSIGHT_MIN = (
     "contrarian framing or heavy quantification. The exact percentages "
     "for THIS section's archetype are in the user-prompt block.\n"
     "\n"
-    "FOUR ELEMENTS (unchanged from PR #21 / Option-A-#3):\n"
+    "SIX ELEMENTS (Wave 3 PR 2: extended from 4 to 6 to cover RACE Insight "
+    "criteria 2 + 3 that were structurally uncovered by the original 4):\n"
     "\n"
-    "  (a) FORWARD-LOOKING IMPLICATION — a stated consequence, follow-on "
-    "      effect, or downstream condition, grounded in a named source and "
-    "      tied to a concrete time horizon (e.g. 'By 2027, Pegasus-class "
-    "      Cloths are likely to undergo a second V-stage revision per the "
-    "      Hades-arc continuity, conditional on canonical resolution of the "
-    "      Cloth-of-Sagittarius reassignment timeline').\n"
+    "  (a) FORWARD-LOOKING IMPLICATION → targets RACE 4 (Forward-Looking and "
+    "      Inspirational Thinking). A stated consequence, follow-on effect, "
+    "      or downstream condition, grounded in a named source and tied to "
+    "      a concrete time horizon (e.g. 'By 2027, Pegasus-class Cloths are "
+    "      likely to undergo a second V-stage revision per the Hades-arc "
+    "      continuity, conditional on canonical resolution of the Cloth-of-"
+    "      Sagittarius reassignment timeline').\n"
     "\n"
-    "  (b) NAMED CONTRARIAN FRAMING — an explicit alternative to the "
-    "      consensus interpretation, attributed to a specific source or "
-    "      reasoning chain (e.g. 'Despite the standard reading that Marin's "
-    "      Cosmo level is bounded at Silver Saint tier, the Episode G data "
+    "  (b) NAMED CONTRARIAN FRAMING → targets RACE 1 (Analysis Depth and "
+    "      Originality). An explicit alternative to the consensus "
+    "      interpretation, attributed to a specific source or reasoning "
+    "      chain (e.g. 'Despite the standard reading that Marin's Cosmo "
+    "      level is bounded at Silver Saint tier, the Episode G data "
     "      suggests a Gold-class burst capacity under specific conditions').\n"
     "\n"
-    "  (c) QUANTIFIED PROJECTION OR CONFIDENCE RANGE — a numeric range, "
+    "  (c) QUANTIFIED PROJECTION OR CONFIDENCE RANGE → targets RACE 1 "
+    "      (Analysis Depth — quantified rigour). A numeric range, "
     "      probability, or scoped estimate, with stated assumptions (e.g. "
     "      '60-75% of the Sanctuary's Silver-tier roster falls within the "
     "      Mach 2-5 speed band per the 1986-1989 canon; outliers are "
     "      explicitly the Ophiuchus and Crystal Saint cases').\n"
     "\n"
-    "  (d) NAMED-ALTERNATIVE COMPARISON — a direct comparison against a "
-    "      named alternative entity, framework, theory, or counterfactual "
+    "  (d) NAMED-ALTERNATIVE COMPARISON → targets RACE 1 (Analysis Depth — "
+    "      original synthesis via comparison). A direct comparison against "
+    "      a named alternative entity, framework, theory, or counterfactual "
     "      (e.g. 'Whereas Mu's Crystal Wall absorbs kinetic energy radially, "
     "      Aiolia's Lightning Plasma propagates directionally; the two "
     "      defensive postures imply opposite tradeoffs at peak intensity').\n"
+    "\n"
+    "  (e) CAUSAL CHAIN → targets RACE 2 (Logical Reasoning and Causal "
+    "      Relationships). A MULTI-STEP causal explanation. A single causal "
+    "      step ('because X') is NOT a chain — the chain shows the "
+    "      intervening mechanism with 2+ links: X leads to Y, which in turn "
+    "      produces Z because of evidence W. (e.g. 'Saori Kido's emergence "
+    "      as Athena-incarnate is causally chained: her grandfather's "
+    "      Foundation Aries-Gold-Cloth deal in the Battle of the Twelve "
+    "      Houses arc preserves the Cosmo-channeling capacity through her "
+    "      bloodline; this latent Cosmo activates upon witnessing Seiya's "
+    "      first Pegasus Meteor Fist, which in turn awakens the Seventh "
+    "      Sense she needs to wield the Athena Cloth in the Sanctuary "
+    "      finale'). Marker phrases include 'leads to / results in / "
+    "      produces / gives rise to / drives / due to / in turn / 导致 / "
+    "      引发 / 进而 / 从而'. NEW IN WAVE 3 PR 2 — this element was the "
+    "      largest structural gap vs the reference (Lunon at 0.02 per 1k words "
+    "      vs the reference 0.31 — 20× behind on multi-link causal density).\n"
+    "\n"
+    "  (f) PROBLEM-TRADEOFF → targets RACE 3 (Problem Insight and "
+    "      Solutions). An explicit identification of a tension, paradox, "
+    "      challenge, or tradeoff, with substantive insight into how it "
+    "      resolves OR what the resolution constraint is (e.g. 'The "
+    "      apparent paradox — Bronze Saints repeatedly defeating Gold "
+    "      opponents despite the rank's stated power hierarchy — resolves "
+    "      via the Seventh-Sense doctrine: Cosmo depth, not Cloth tier, "
+    "      determines the outcome ceiling. The tradeoff is narrative "
+    "      versus mechanical consistency: Kurumada accepts the tier "
+    "      paradox to enable protagonist progression'). Marker phrases: "
+    "      'the (apparent) paradox / the tension / the challenge of / the "
+    "      central issue / to address this / the resolution lies / "
+    "      reconciles / 悖论 / 矛盾 / 挑战在于 / 关键问题'. NEW IN WAVE 3 "
+    "      PR 2 — Lunon was structurally uncovered on RACE 3.\n"
     "\n"
     "GROUNDING RULE (unchanged from prior policy): every element above MUST "
     "be evidence-backed — name a source, cite a date or named work, or "
     "ground the projection in stated assumptions. Free speculation without "
     "evidential support hurts more than absent insight.\n"
     "\n"
+    "DISTRIBUTIONAL COVERAGE — clarification (Wave 3 PR 2): the per-archetype "
+    "targets are about the SECTION-WIDE coverage rate, NOT per-leaf "
+    "requirements. A single leaf needs to carry AT LEAST ONE of (a)-(f); "
+    "across all leaves in the section, the proportions track the per-"
+    "archetype distribution targets in `_INSIGHT_DISTRIBUTION_BY_ARCHETYPE` "
+    "(some leaves carry causal_chain, others carry forward_looking, etc.). "
+    "Multiple elements can apply to ONE leaf — that's fine.\n"
+    "\n"
     "AVOID FORMULAIC INSERTION: do NOT bolt a generic 'looking ahead...' or "
-    "'further research is needed' onto every leaf. The four elements above "
+    "'further research is needed' onto every leaf. The six elements above "
     "are substantive payoffs grounded in the leaf's actual evidence. If the "
-    "evidence for this leaf genuinely cannot support any of (a)-(d) — a "
+    "evidence for this leaf genuinely cannot support any of (a)-(f) — a "
     "narrow definitional or list-membership leaf, for instance — state the "
     "leaf's bounded scope explicitly (e.g. 'the canonical record does not "
     "extend to X; the cross-arc comparison in §N.M handles the projection') "
@@ -325,34 +371,107 @@ _INSIGHT_MIN = (
 # overspecifying. The compliance scorer (`p2_writer_compliance.py`)
 # uses these targets to compute per-element gap percentages on every
 # smoke output.
+# Wave 3 PR-0 (2026-05-26) full-archetype fresh-corpus recalibration:
+# 14 reference tasks fetched via PR #31 (8/14/20/23/56/91 gate-verify-5
+# + 2/12/3/4/38/44/62/73 missing-archetype top-up) gave the first true
+# cross-archetype baseline. The Wave 2 PR #30 calibration used the
+# .docx vendor corpus which was lossy (gap-map §12.4) and missed
+# compare/predict/trend/recommend tasks entirely.
+#
+# Wave 3 PR 2 (2026-05-26) extension: added two NEW elements that map
+# directly to RACE Insight criteria 2 (Logical Reasoning and Causal
+# Relationships) and 3 (Problem Insight and Solutions) — both of which
+# Lunon's original 4 elements did NOT cover. Lunon was over-covering
+# RACE 1 (Originality) with 3 of 4 elements (contrarian + quant + alt)
+# while leaving RACE 2 and RACE 3 structurally uncovered:
+#   (e) CAUSAL CHAIN     → RACE 2 (Logical Reasoning and Causal Relationships)
+#   (f) PROBLEM-TRADEOFF → RACE 3 (Problem Insight and Solutions)
+# Per-archetype targets are derived from the reference corpus observed rates
+# minus 5-15% headroom so a Lunon writer at the observed rate lands
+# comfortably in-band.
+#
+# Wave 2 PR #30 → Wave 3 PR 2 calibration deltas (per-archetype targets
+# 5-15% below observed the reference rates):
+#   - list-all (n=1, id=91, the reference: fwd 62/contr 3/quant 0/alt 76/causal 42/problem 5):
+#     fwd 55→50, contr 10→1 (was 3× too high), quant 17→0 (was way too high),
+#     alt 47→60 (was too low), +causal 30, +problem 3
+#   - compare (n=2, ids 2,12, the reference: fwd 47/contr 6/quant 27/alt 22/causal 30/problem 3):
+#     fwd 50→40, contr 10→3 (was too high), quant 17→20 (small bump),
+#     alt 47→15 (was way too high), +causal 20, +problem 3
+#   - explain-mechanism (n=4, ids 8/20/23/56, Q: fwd 19/contr 4/quant 6/alt 32/causal 31/problem 5):
+#     fwd 28→15, contr 8→3 (was too high), quant 1→3, alt 42→25 (was too high),
+#     +causal 25 (RACE 2 central to this archetype), +problem 4
+#   - predict (n=1 reliable, id=3, Q: fwd 76/contr 8/quant 33/alt 42/causal 57/problem 8):
+#     fwd 45→70 (was way too low — predict is forward-by-mission),
+#     quant 5→25 (was way too low), alt 10→35 (was way too low),
+#     +causal 45 (RACE 2 central — predict needs causal grounding),
+#     +problem 6
+#   - trend (n=2, ids 38,44, Q: fwd 40/contr 2/quant 14/alt 4/causal 12/problem 2):
+#     fwd 45→35 (close), quant 2→10 (was too low), +causal 10, +problem 1
+#   - recommend (n=2, ids 62,73, Q: fwd 30/contr 2/quant 7/alt 48/causal 20/problem 1):
+#     fwd 40→25 (was too high), contr 5→1, alt 15→40 (was way too low —
+#     recommend compares options densely), +causal 15, +problem 1
 _INSIGHT_DISTRIBUTION_DEFAULT = {
-    "forward_looking_min": 30,
-    "contrarian_min": 8,
-    "quant_min": 5,
+    "forward_looking_min": 20,
+    "contrarian_min": 3,
+    "quant_min": 3,
     "alternative_min": 30,
+    "causal_chain_min": 25,  # Wave 3 PR 2: NEW — targets RACE 2 (Causal Reasoning)
+    "problem_tradeoff_min": 5,  # Wave 3 PR 2: NEW — targets RACE 3 (Problem-Solution)
 }
 _INSIGHT_DISTRIBUTION_BY_ARCHETYPE: dict[str, dict[str, int]] = {
-    # Forward-looking-by-mission archetypes. the reference trend (id=38)
-    # observed: fwd 58% / contr 2% / quant 3% / alt 7%. Predict and
-    # recommend extrapolated (no direct the reference corpus data) with
-    # slightly higher alt/contr for analytical depth.
-    "predict": {"forward_looking_min": 45, "contrarian_min": 5, "quant_min": 5, "alternative_min": 10},
-    "trend": {"forward_looking_min": 45, "contrarian_min": 1, "quant_min": 2, "alternative_min": 5},
-    "recommend": {"forward_looking_min": 40, "contrarian_min": 5, "quant_min": 5, "alternative_min": 15},
-    # Entity-enumerated archetypes. the reference list-all (id=8, 14, 44, 91)
-    # weighted mean: fwd 69% / contr 13% / quant 21% / alt 59%. The
-    # forward-looking rate is SURPRISINGLY HIGH for an enumeration
-    # archetype — the reference entity profiles consistently project trends
-    # ("by 2027 this lineage will...") rather than purely cataloguing.
-    "list-all": {"forward_looking_min": 55, "contrarian_min": 10, "quant_min": 17, "alternative_min": 47},
-    # compare: no direct the reference corpus data; use list-all calibration
-    # as the closest neighbor (both are entity-table archetypes).
-    "compare": {"forward_looking_min": 50, "contrarian_min": 10, "quant_min": 17, "alternative_min": 47},
-    # Deep analytical archetype. the reference explain-mech (id=20, 37, 56,
-    # 89) weighted mean: fwd 35% / contr 10% / quant 2% / alt 53%.
-    # Notably LOW on quant/contrarian (the reference explains with
-    # alternatives + forward-looking, not contrarian framing).
-    "explain-mechanism": {"forward_looking_min": 28, "contrarian_min": 8, "quant_min": 1, "alternative_min": 42},
+    # Wave 3 PR-0 fresh-corpus recalibration (2026-05-26). All targets set
+    # 5-15% below the observed the reference mean per archetype so a Lunon writer
+    # at the observed rate lands comfortably in-band. See block comment
+    # above this dict for per-archetype observed rates + delta rationale.
+    "predict": {
+        "forward_looking_min": 70,  # was 45; Q observed 76 — predict is forward-by-mission
+        "contrarian_min": 5,
+        "quant_min": 25,  # was 5; Q observed 33 — predict densely quantifies
+        "alternative_min": 35,  # was 10; Q observed 42 — predict compares scenarios
+        "causal_chain_min": 45,  # NEW (Wave 3 PR 2); Q observed 57 — RACE 2 central
+        "problem_tradeoff_min": 6,  # NEW; Q observed 8
+    },
+    "trend": {
+        "forward_looking_min": 35,  # was 45; Q observed 40 (close)
+        "contrarian_min": 1,
+        "quant_min": 10,  # was 2; Q observed 14 — trend articles quantify more
+        "alternative_min": 3,  # was 5; Q observed 4 (close)
+        "causal_chain_min": 10,  # NEW; Q observed 12
+        "problem_tradeoff_min": 1,  # NEW; Q observed 2 — trend is descriptive
+    },
+    "recommend": {
+        "forward_looking_min": 25,  # was 40; Q observed 30 — was over-targeting
+        "contrarian_min": 1,
+        "quant_min": 5,
+        "alternative_min": 40,  # was 15; Q observed 48 — recommend compares options
+        "causal_chain_min": 15,  # NEW; Q observed 20
+        "problem_tradeoff_min": 1,  # NEW; Q observed 1 — recommend is decisive
+    },
+    "list-all": {
+        "forward_looking_min": 50,  # was 55; Q observed 62 (close)
+        "contrarian_min": 1,  # was 10; Q observed 3 — was 3× too high
+        "quant_min": 0,  # was 17; Q observed 0 — was way too high
+        "alternative_min": 60,  # was 47; Q observed 76 — was too low
+        "causal_chain_min": 30,  # NEW; Q observed 42 — even list-all has causation
+        "problem_tradeoff_min": 3,  # NEW; Q observed 5
+    },
+    "compare": {
+        "forward_looking_min": 40,  # was 50; Q observed 47 (close)
+        "contrarian_min": 3,  # was 10; Q observed 6 — was too high
+        "quant_min": 20,  # was 17; Q observed 27
+        "alternative_min": 15,  # was 47; Q observed 22 — was way too high
+        "causal_chain_min": 20,  # NEW; Q observed 30
+        "problem_tradeoff_min": 3,  # NEW; Q observed 3
+    },
+    "explain-mechanism": {
+        "forward_looking_min": 15,  # was 28; Q observed 19
+        "contrarian_min": 3,  # was 8; Q observed 4 — was too high
+        "quant_min": 3,  # was 1; Q observed 6
+        "alternative_min": 25,  # was 42; Q observed 32 — was too high
+        "causal_chain_min": 25,  # NEW; Q observed 31 — RACE 2 central to this archetype
+        "problem_tradeoff_min": 4,  # NEW; Q observed 5
+    },
 }
 
 
