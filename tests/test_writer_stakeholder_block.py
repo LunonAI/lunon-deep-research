@@ -212,14 +212,21 @@ def test_stakeholder_content_directive_preserved_in_payload(monkeypatch):
 
 
 def test_stakeholder_directive_includes_non_overlap_signal(monkeypatch):
-    """The directive must surface the Jaccard < 0.20 non-overlap rule
-    so the writer is steered by construction toward the validator's
-    threshold. This is what makes the writer + validator a closed loop
-    (pre-W6.b, the validator was alone)."""
+    """The directive must surface the Jaccard non-overlap rule so the
+    writer is steered by construction toward the validator's threshold.
+    Greptile PR #46 round-2: the threshold value is sourced live from
+    `wr._STAKEHOLDER_JACCARD_MAX` (today 0.20). Check the live-rendered
+    value is in the prompt so a future threshold change automatically
+    propagates without test churn."""
+    from deep_research import writing_rules as wr
+
     plan = _bare_plan_with_stakeholder(_full_sc(n=4))
     captured = _call_writer(monkeypatch, plan, sid="S4")
     user = captured[0]["user"]
-    assert "0.20" in user, f"directive missing the Jaccard threshold signal; got: {user[:3000]}"
+    expected_threshold = f"{wr._STAKEHOLDER_JACCARD_MAX:.2f}"
+    assert expected_threshold in user, (
+        f"directive missing the live-rendered Jaccard threshold ({expected_threshold}); got: {user[:3000]}"
+    )
     assert "NON-OVERLAP" in user or "non-overlap" in user.lower(), (
         f"directive missing non-overlap discipline language; got: {user[:3000]}"
     )
