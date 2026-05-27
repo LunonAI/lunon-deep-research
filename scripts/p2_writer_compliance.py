@@ -412,9 +412,28 @@ def _classify_leaf_elements(leaf_body: str) -> dict[str, bool]:
     `_DATE_RE` is retained at module level for callers that explicitly
     need date detection (none currently).
     """
+    # P3-W4 (2026-05-27): contrarian-vs-causal_chain co-firing
+    # disambiguation. W3 smoke (2026-05-26) showed contrarian rate
+    # regressed 37.3% → 52.8% while causal_chain went 0% → 27.8%; the
+    # W3-smoke author's hypothesis (verified) is that prose like "Despite
+    # the standard reading that X, Y leads to Z" trips BOTH detectors
+    # (contrarian frame-phrase "despite" + causal_chain "leads to … X"
+    # patterns). The rate inflation is detector noise, not content
+    # over-production. P3-W4 resolves: when a leaf satisfies BOTH the
+    # causal_chain bar (≥2 markers) AND the contrarian regex, classify
+    # as causal_chain ONLY. The reverse direction is acceptable
+    # (a leaf may genuinely BE both contrarian-framed AND multi-step
+    # causal — but those are rare; per-corpus the typical co-fire is the
+    # boilerplate "despite/although X, Y leads to Z" pattern the reference uses
+    # as a causal-chain idiom, not contrarian framing).
+    has_causal_chain = len(_CAUSAL_CHAIN_RE.findall(leaf_body)) >= 2
+    has_contrarian = bool(_CONTRARIAN_RE.search(leaf_body))
+    if has_causal_chain and has_contrarian:
+        # Disambiguate: classify as causal_chain only.
+        has_contrarian = False
     return {
         "forward_looking": bool(_FORWARD_RE.search(leaf_body)),
-        "contrarian": bool(_CONTRARIAN_RE.search(leaf_body)),
+        "contrarian": has_contrarian,
         "quant": bool(_QUANT_RE.search(leaf_body)),
         "alternative": bool(_ALTERNATIVE_RE.search(leaf_body)),
         # Wave 3 PR 2: 2 new elements targeting RACE Insight criteria 2 + 3.
@@ -425,7 +444,7 @@ def _classify_leaf_elements(leaf_body: str) -> dict[str, bool]:
         # would fire on a single "leads to" / "results in" occurrence
         # (single-step causation), inflating the compliance rate and
         # masking real chain-construction deficits.
-        "causal_chain": len(_CAUSAL_CHAIN_RE.findall(leaf_body)) >= 2,
+        "causal_chain": has_causal_chain,
         "problem_tradeoff": bool(_PROBLEM_TRADEOFF_RE.search(leaf_body)),
     }
 
