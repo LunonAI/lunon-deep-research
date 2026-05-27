@@ -43,12 +43,14 @@ def test_tier_ranking_rule_names_computational_not_narrative():
 
 def test_tier_ranking_rule_installed_in_writer_system_for_compare():
     """The rule must be reachable through `writer_system()` for compare
-    archetype (one of the two emitting archetypes per architect schema)."""
+    archetype (one of the two emitting archetypes per architect schema)
+    when the `has_tier_ranking` gate fires."""
     sys_prompt = wr.writer_system(
         archetype="compare",
         domain="default",
         language="en",
         toc_titles=["Intro", "Body", "Tier Ranking"],
+        has_tier_ranking=True,
     )
     assert "TIER RANKING + SENSITIVITY CHECK" in sys_prompt, (
         f"writer_system for compare missing _TIER_RANKING_RULE; got prompt-head: {sys_prompt[:600]}..."
@@ -62,6 +64,7 @@ def test_tier_ranking_rule_installed_in_writer_system_for_predict():
         domain="default",
         language="en",
         toc_titles=["Intro", "Body", "Tier Ranking"],
+        has_tier_ranking=True,
     )
     assert "TIER RANKING + SENSITIVITY CHECK" in sys_prompt
 
@@ -73,8 +76,64 @@ def test_tier_ranking_rule_follows_mermaid_directive():
         domain="default",
         language="en",
         toc_titles=["Intro", "Body", "Tier Ranking"],
+        has_tier_ranking=True,
     )
     mermaid_pos = sys_prompt.find("SEMANTIC DIAGRAM DIRECTIVE")
     tr_pos = sys_prompt.find("TIER RANKING + SENSITIVITY CHECK")
     assert mermaid_pos >= 0 and tr_pos >= 0
     assert mermaid_pos < tr_pos
+
+
+# ---------- Conditional gating on `has_tier_ranking` (PR #47 round-5 preempt) ----------
+
+
+def test_tier_ranking_rule_installed_when_has_tier_ranking_true():
+    """Explicit positive case for the gate: passing `has_tier_ranking=True`
+    must include `_TIER_RANKING_RULE` in the system prompt. Mirrors the
+    `has_stakeholder_chapter` / `has_limitations_chapter` precedent.
+    """
+    sys_prompt = wr.writer_system(
+        archetype="compare",
+        domain="default",
+        language="en",
+        toc_titles=["Intro", "Body", "Tier Ranking"],
+        has_tier_ranking=True,
+    )
+    assert "TIER RANKING + SENSITIVITY CHECK" in sys_prompt, (
+        f"writer_system with has_tier_ranking=True missing _TIER_RANKING_RULE; got prompt-head: {sys_prompt[:600]}"
+    )
+
+
+def test_tier_ranking_rule_absent_when_has_tier_ranking_false():
+    """Explicit negative case: passing `has_tier_ranking=False` must
+    NOT include the ~700-char rule. For the (majority of) tasks where
+    the architect didn't populate `tier_ranking` (non-compare/predict,
+    or compare/predict with <5 entities / <4 dimensions), the rule is
+    pure prompt noise and burns context for no signal.
+    """
+    sys_prompt = wr.writer_system(
+        archetype="compare",
+        domain="default",
+        language="en",
+        toc_titles=["Intro", "Body"],
+        has_tier_ranking=False,
+    )
+    assert "TIER RANKING + SENSITIVITY CHECK" not in sys_prompt, (
+        f"writer_system with has_tier_ranking=False unexpectedly included "
+        f"_TIER_RANKING_RULE; got prompt-head: {sys_prompt[:600]}"
+    )
+
+
+def test_tier_ranking_rule_absent_when_has_tier_ranking_default():
+    """Back-compat: a caller that doesn't thread the flag at all must
+    also NOT receive the rule (default value is False). Pin the
+    default behavior so a future signature change can't silently
+    flip it.
+    """
+    sys_prompt = wr.writer_system(
+        archetype="compare",
+        domain="default",
+        language="en",
+        toc_titles=["Intro", "Body"],
+    )
+    assert "TIER RANKING + SENSITIVITY CHECK" not in sys_prompt

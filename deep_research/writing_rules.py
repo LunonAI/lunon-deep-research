@@ -916,6 +916,7 @@ def writer_system(
     suppress_dedup: bool = False,
     outline_shape: dict | None = None,
     has_stakeholder_chapter: bool = False,
+    has_tier_ranking: bool = False,
 ) -> str:
     """Assemble the writer system prompt.
 
@@ -946,6 +947,18 @@ def writer_system(
     the flag) — the rule's textual self-guard ("applies when
     stakeholder_chapter is in the plan...") still kicks in if a future
     caller forgets to set the flag, so silent breakage is impossible.
+
+    Greptile PR #47 round-5 preempt (2026-05-27): `has_tier_ranking`
+    gates `_TIER_RANKING_RULE` inclusion under the same rationale.
+    The architect only emits `plan["tier_ranking"]` for compare /
+    predict archetypes with ≥5 entities AND ≥4 rubric dimensions —
+    the minority of tasks. For everything else the ~700-char rule is
+    pure prompt noise. Mirrors the `has_stakeholder_chapter` pattern
+    and the parallel `has_limitations_chapter` gating in W5.b.
+    Callers in writer.py pass
+    `has_tier_ranking=bool(plan.get("tier_ranking"))`. Defaults False;
+    the rule's textual self-guard ("applies when `tier_ranking` is in
+    the plan…") prevents silent breakage if a future caller forgets.
     """
     ceil = length_ceiling(domain)
 
@@ -978,9 +991,17 @@ def writer_system(
             _SECTION_OPENING_PROSE_LEAD_RULE,
             _MID_PARAGRAPH_XREF_RULE,
             _MERMAID_DIRECTIVE,
-            _TIER_RANKING_RULE,
         ]
     )
+    # Greptile PR #47 round-5 preempt: gate `_TIER_RANKING_RULE` on
+    # `has_tier_ranking`. The architect only populates
+    # `plan["tier_ranking"]` for compare / predict archetypes with
+    # ≥5 entities AND ≥4 rubric dimensions — the minority of tasks.
+    # For everything else the ~700-char rule is pure prompt noise.
+    # Mirrors the `has_stakeholder_chapter` precedent below and the
+    # parallel `has_limitations_chapter` gating from W5.b.
+    if has_tier_ranking:
+        middle_rules.append(_TIER_RANKING_RULE)
     # Greptile PR #46 round-1 issue #2: gate `_STAKEHOLDER_RULE` on
     # `has_stakeholder_chapter`. The architect only emits
     # `plan["stakeholder_chapter"]` for plural-audience prompts; for

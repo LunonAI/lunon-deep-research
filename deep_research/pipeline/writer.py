@@ -102,6 +102,11 @@ def write_opening(plan, prompt, language, archetype, domain, digest, *, task_id=
     # chapter. The architect emits stakeholder_chapter as None for
     # single-audience prompts; bool() correctly yields False on None
     # and on empty dicts.
+    #
+    # Greptile PR #47 round-5 preempt: same gating for the ~700-char
+    # `_TIER_RANKING_RULE` — only compare/predict tasks with ≥5
+    # entities AND ≥4 rubric dimensions get tier_ranking, so the
+    # rule is pure prompt noise on the majority of tasks.
     sys = wr.writer_system(
         archetype,
         domain,
@@ -110,6 +115,7 @@ def write_opening(plan, prompt, language, archetype, domain, digest, *, task_id=
         task_id=task_id,
         outline_shape=outline_shape,
         has_stakeholder_chapter=bool(plan.get("stakeholder_chapter")),
+        has_tier_ranking=bool(plan.get("tier_ranking")),
     )
     user = (
         f"PROMPT ({language}):\n{prompt}\n\nREPORT TITLE: "
@@ -185,7 +191,8 @@ def write_section(
     # Greptile PR #46 round-1 issue #2 (2026-05-27): mirror the
     # `has_stakeholder_chapter` flag from `write_opening`. The per-
     # section call assembles the same system prompt; the architect's
-    # decision lives on the plan, not the unit.
+    # decision lives on the plan, not the unit. PR #47 round-5
+    # preempt: same threading for `has_tier_ranking`.
     sys = wr.writer_system(
         archetype,
         domain,
@@ -194,6 +201,7 @@ def write_section(
         task_id=task_id,
         outline_shape=outline_shape,
         has_stakeholder_chapter=bool(plan.get("stakeholder_chapter")),
+        has_tier_ranking=bool(plan.get("tier_ranking")),
     )
 
     capel_block = ""
