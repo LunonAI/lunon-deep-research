@@ -219,7 +219,8 @@ def test_v3_provides_both_en_and_zh_acceptable_templates(monkeypatch):
 def test_v3_body_narrowing_preserved_for_named_artefacts(monkeypatch):
     """The v2 body-text narrowing — §N refs in BODY are GOOD when paired
     with a named artefact, BAD as bare temporal pointers — is preserved
-    by v3. Only OPENING-sentence §N refs are newly forbidden."""
+    by v3 and v4. (v4 re-allows §N refs in OPENINGS too when paired with
+    a substantive recap; this test only checks the body-narrowing text.)"""
     sys = _sys(monkeypatch)
     body = sys.lower()
     assert "named artefact" in body
