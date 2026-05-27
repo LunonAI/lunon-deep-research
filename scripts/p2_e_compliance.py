@@ -24,7 +24,7 @@ import re
 from collections.abc import Callable
 from pathlib import Path
 
-# ---- E1.v3: section-opening prose-lead (Qianfan-parity, antipattern gate) -
+# ---- E1.v4: section-opening prose-lead (Qianfan-parity, antipattern gate) -
 #
 # v1 (committed 2026-05-23) tested at 9.2% compliance because the writer
 # chose table-first openings on taxonomy archetypes (id=91 had 0/50 sections
@@ -34,20 +34,31 @@ from pathlib import Path
 # that REWARDED "Building on §N..." / "this section examines..." vocab.
 #
 # v3 (2026-05-26, gap-map §12.A) flipped the semantic gate's meaning: the
-# fresh-corpus A/B retro showed Qianfan #1 fires those exact phrases at ~0%
-# and Lunon at ~77%, and the RACE judge flagged them as "repeated setup
-# language" and "forward references to missing sections". The writer-prompt
-# rule (`_SECTION_OPENING_PROSE_LEAD_RULE` in deep_research/writing_rules.py)
-# now BANS the v2-rewarded phrases as antipatterns. This script was the
-# matching compliance probe; under v3 the same regex now identifies the
-# FORBIDDEN tokens and the semantic gate PASSES when the OPENING SENTENCE(S)
-# contain NONE of them. Without this inversion the script would have
-# reported v3-correct openers (definition / quantified-claim / factual-
-# anchor / substantive-contextualisation) as non-compliant and v3-forbidden
-# "Building on §1..." openers as compliant — backwards.
+# fresh-corpus A/B retro showed Qianfan #1 fires the "Building on" /
+# "this section" phrases at ~0% and Lunon at ~77%, and the RACE judge
+# flagged them as "repeated setup language" + "forward references to
+# missing sections". The writer-prompt rule
+# (`_SECTION_OPENING_PROSE_LEAD_RULE` in deep_research/writing_rules.py)
+# now BANS those phrases as antipatterns and this script's regex matches
+# the same set as forbidden tokens — the gate PASSES when the opener
+# contains none of them.
 #
-# The structural gate (prose-before-data) survived v3 unchanged; it remains
-# the part of v2 that worked.
+# v4 (2026-05-26, post-PR-32-merge full-archetype retro): v3's blanket ban
+# on ANY §N / 第N章 reference in openings was OVERCORRECTION. Fresh-corpus
+# measurement on 14 Qianfan tasks across all 6 archetypes shows 75-89% of
+# chapters reference an earlier chapter ("Chapter N" / "第N章") in the
+# opening sentence — paired with a substantive recap of what that prior
+# chapter established. v4 drops the §N / 第N章 / "section N's framework"
+# patterns from the forbidden regex. The writer-prompt rule body still
+# distinguishes ACCEPTABLE recap-then-pivot openings (paired with named
+# artefact, Qianfan idiom) from the FORBIDDEN bare-pointer openings ('as
+# discussed in §3, ...'), but this regex enforces only the coarse
+# building-on / meta-subject ban; nuanced bare-pointer-vs-named-artefact
+# detection is harder to regex reliably and is left to the writer's
+# system-prompt directive + post-merge smoke validation.
+#
+# The structural gate (prose-before-data) survived v3 and v4 unchanged; it
+# remains the part of v2 that worked.
 
 
 # First-line-of-section-body test: does the section open with a markdown
@@ -56,15 +67,16 @@ from pathlib import Path
 # lead paragraph before the data block.
 _TABLE_OR_LIST_LEAD_RE = re.compile(r"^\s*(?:\|[^\n]*\||[-*+]\s+\S|#{1,4}\s+\S)")
 
-# v3 FORBIDDEN opening tokens — phrases the writer-prompt rule explicitly
-# bans in the opening sentence(s) of each section (P2-Wave-3-§12.A.v3).
+# v4 FORBIDDEN opening tokens — phrases the writer-prompt rule explicitly
+# bans in the opening sentence(s) of each section (P2-Wave-3-§12.A.v4).
 # Verified against the Qianfan #1 corpus: ~0% landing in Qianfan, ~77%
 # pre-v3 in Lunon. These were the exact templates the v2 semantic gate
-# REWARDED; v3 inverts the gate so the same regex marks them as failures.
-# Note: §N / `第N节` refs are forbidden ONLY in opening sentences — they
-# are still allowed in body text per the rule's body-text narrowing, which
-# is why the semantic check below is windowed to the OPENING ONLY.
-_V3_FORBIDDEN_OPENING_TOKENS = re.compile(
+# REWARDED; v3 inverted the gate to mark them as failures, and v4 keeps
+# the v3 set MINUS the §N / 第N章 / "section N's framework" patterns
+# (the v3 ban on those overcorrected — Qianfan uses Chapter-N refs in
+# 75-89% of chapter openings, paired with substantive recap; see v4
+# docstring above for the full retro).
+_V4_FORBIDDEN_OPENING_TOKENS = re.compile(
     r"(?:building on|extends? the (?:framework|rubric|taxonomy|matrix)|"
     r"using the (?:dimension|rubric|matrix|taxonomy|framework|classification)|"
     r"applied to the (?:framework|rubric|dimensions|matrix|taxonomy)|"
@@ -74,30 +86,32 @@ _V3_FORBIDDEN_OPENING_TOKENS = re.compile(
     r"within the framework (?:set out|established|introduced)|"
     r"(?:returns? to|revisits?) the (?:framework|rubric|dimensions)|"
     # Meta-subject openers ("This section adds...", "The present chapter...")
-    # — v3 explicitly forbids 'This section' / 'This chapter' / 'This report'
-    # as the SUBJECT of an opening sentence, REGARDLESS of the verb that
-    # follows. The verb slot is `\w+` (any word) rather than an enumerated
-    # list — earlier rounds used a closed list that missed common synonyms
-    # (explores / focuses / provides / offers / highlights / investigates
-    # / summarises / explains). The `\s+\w+` requirement keeps possessives
-    # like "This section's four-pillar framework" from matching (no space
-    # between `section` and `'s`).
+    # — v3/v4 explicitly forbid 'This section' / 'This chapter' / 'This
+    # report' as the SUBJECT of an opening sentence, REGARDLESS of the verb
+    # that follows. The verb slot is `\w+` (any word) rather than an
+    # enumerated list — earlier rounds used a closed list that missed
+    # common synonyms (explores / focuses / provides / offers / highlights
+    # / investigates / summarises / explains). The `\s+\w+` requirement
+    # keeps possessives like "This section's four-pillar framework" from
+    # matching (no space between `section` and `'s`).
     r"this (?:chapter|section|report)\s+\w+|"
     r"the present (?:section|chapter|report)|"
-    # ANY §N / section-N reference in the opener (v3 forbids these in
-    # openings even when paired with a named artefact).
-    r"§\s*\d+(?:\.\d+)?|"
-    r"section\s+\d+(?:\.\d+)?(?:'s|s')?\s+(?:framework|rubric|taxonomy|"
-    r"matrix|dimensions)|"
+    # v4 REMOVED: §N / 'section N's framework' patterns. v3 banned these in
+    # openings even when paired with a named artefact; v4 fresh-corpus data
+    # shows Qianfan uses Chapter-N refs in openings at 75-89% rate (paired
+    # with substantive recap — the named-artefact pattern). The v4 rule
+    # body distinguishes acceptable recap-then-pivot from forbidden bare-
+    # pointer, but this regex enforces only the coarser bans; nuanced
+    # bare-vs-paired §N detection is left to the writer's system-prompt
+    # directive + post-merge smoke validation.
     # ZH equivalents — recap-template and meta-subject phrasings.
     r"沿用|延续上述|应用上一节|遵循前述|依据前述|按前文|"
     r"在(?:上述|前述)(?:框架|维度|分类)下?|在前述基础上|"
-    r"基于(?:上文|前述|第\d+章)|根据第\d+章|"
+    r"基于(?:上文|前述)|"
     r"本(?:节|章|报告)(?:补充|拓展|添加|建立|应用|延伸|具体化|"
     r"考察|分析|讨论|研究|记录|测量|介绍|阐述|论述|涉及|探讨|"
     r"关注|涵盖|着重|聚焦|侧重|阐释|描述|呈现|展示|总结|概述|"
-    r"说明|审视|旨在|意在|尝试|致力)|"
-    r"第\s*\d+\s*(?:节|章))",
+    r"说明|审视|旨在|意在|尝试|致力))",
     re.IGNORECASE,
 )
 
@@ -114,33 +128,36 @@ _OPENING_WINDOW_CHARS = 280
 
 
 def e1_section_opening_recap(article: str) -> dict:
-    """E1.v3 compliance: structural + antipattern two-gate check.
+    """E1.v4 compliance: structural + antipattern two-gate check.
 
     A section is COMPLIANT iff:
       (structural) first non-heading content line is PROSE — not a markdown
                    table row, not a bulleted list, not another heading.
       (semantic)   the OPENING SENTENCE(S) (first ~280 chars) contain NONE
-                   of the v3-forbidden opener tokens
-                   (`_V3_FORBIDDEN_OPENING_TOKENS`).
+                   of the v4-forbidden opener tokens
+                   (`_V4_FORBIDDEN_OPENING_TOKENS`).
 
     Note on diagnostic bucket naming: v3 flipped the semantic gate's pass
-    condition (v2 rewarded the tokens; v3 penalises them) but the BUCKET
-    semantics still describe orthogonal failure modes:
+    condition (v2 rewarded the tokens; v3 penalises them); v4 kept that
+    inversion and narrowed the token set (Chapter-N refs in openings
+    moved from forbidden to allowed — Qianfan uses them at 75-89%). The
+    BUCKET semantics still describe orthogonal failure modes:
       - structural_ok + semantic_ok = compliant (prose lead, clean opener)
       - structural_ok only          = prose lead BUT opener uses a
-                                      v3-forbidden recap/meta-subject phrase
+                                      v4-forbidden recap/meta-subject phrase
       - semantic_ok only            = opener vocab clean BUT section opens
                                       with a table/list/sub-heading
       - neither                     = data-block lead AND forbidden phrase
 
-    §1 grading (v3): every section is graded, including sections[0]. v3's
-    narrowed §1 exemption frees the article opener from the introduce-a-
-    sub-topic requirement ONLY; all FORBIDDEN antipatterns (meta-subject
-    openers, §N refs in opener, table-first leads, topic-only stubs) still
-    apply to it. The earlier sections[1:] skip was v2-era logic where §1
-    had a wholesale exemption — under v3 that would silently mark a "This
-    report examines..." article opener as compliant by default, overstating
-    the post-merge smoke compliance rate.
+    §1 grading (v3, preserved in v4): every section is graded, including
+    sections[0]. The narrowed §1 exemption frees the article opener from
+    the introduce-a-sub-topic requirement ONLY; the FORBIDDEN antipatterns
+    (meta-subject openers, building-on templates, table-first leads,
+    topic-only stubs) still apply to it. The earlier sections[1:] skip
+    was v2-era logic where §1 had a wholesale exemption — under v3/v4
+    that would silently mark a "This report examines..." article opener
+    as compliant by default, overstating the post-merge smoke compliance
+    rate.
     """
     sections = re.split(r"(?=^#{1,3}\s+\S)", article, flags=re.MULTILINE)
     sections = [s for s in sections if s.strip()]
@@ -148,7 +165,7 @@ def e1_section_opening_recap(article: str) -> dict:
         return {"n_sections": 0, "n_compliant": 0, "rate": 0.0, "applicable": False}
     candidates = sections
     n_compliant = 0
-    n_only_structural = 0  # prose lead but uses v3-forbidden opener vocab
+    n_only_structural = 0  # prose lead but uses v4-forbidden opener vocab
     n_only_semantic = 0  # opener vocab clean but data-block-first
     n_neither = 0
     per_section = []
@@ -160,14 +177,13 @@ def e1_section_opening_recap(article: str) -> dict:
         first_line = body_stripped.split("\n", 1)[0] if body_stripped else ""
         is_data_block_lead = bool(_TABLE_OR_LIST_LEAD_RE.match(first_line))
         structural_ok = not is_data_block_lead and bool(first_line)
-        # LEVEL 2 semantic (v3): opening sentence(s) must NOT contain any
-        # v3-forbidden opener token. Windowed to the FIRST PARAGRAPH (with
-        # a char-cap backstop) because the v3 rule explicitly carves body-
-        # text §N refs out of the forbid — they're allowed in body when
-        # paired with a named artefact.
+        # LEVEL 2 semantic (v4): opening sentence(s) must NOT contain any
+        # v4-forbidden opener token. Windowed to the FIRST PARAGRAPH (with
+        # a char-cap backstop) because the rule's body-text narrowing
+        # allows §N refs in body paragraphs (paired with named artefacts).
         first_paragraph = body_stripped.split("\n\n", 1)[0]
         opener = first_paragraph[:_OPENING_WINDOW_CHARS]
-        semantic_ok = not bool(_V3_FORBIDDEN_OPENING_TOKENS.search(opener))
+        semantic_ok = not bool(_V4_FORBIDDEN_OPENING_TOKENS.search(opener))
         compliant = structural_ok and semantic_ok
         if compliant:
             n_compliant += 1

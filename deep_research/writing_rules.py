@@ -81,73 +81,95 @@ CLEANING_RESISTANT_RULE = (
     "payload."
 )
 
-# P2-Wave-3-§12.A.v3 (2026-05-26, post-PR-31 fresh-corpus retro):
+# P2-Wave-3-§12.A.v4 (2026-05-26, post-PR-32-merge full-archetype fresh-corpus retro):
 #
-# v2 (2026-05-23) was tested on 2026-05-26 Wave-2 smoke (id=91) and won the
-# A/B judge OVERALL vs Qianfan #1 (3:2 dim split). BUT the judge specifically
-# flagged "repeated setup language" and "many forward references to missing
-# sections" as Lunon weaknesses costing the Readability dim. Root-cause
-# analysis recorded in `transfer/p2_artifacts/qianfan_parity_gap_map.md`
-# §12.A: v2's "Calibrated against Qianfan #1 corpus" claim was BACKWARDS.
-# Fresh-corpus measurement against the live leaderboard #1 vintage
-# (`qianfan_deepresearch_0430`, overall 58.03) shows:
-#   - Lunon W2-smoke (id=91): 77% of H2 chapters open with the "Building on
-#     §X..." template; 79% include a §N reference in the opener.
-#   - Qianfan #1 (id=91): 0% open with that template; 4% include any §N
-#     reference in the opener.
-# Qianfan opens each chapter with SUBSTANTIVE content directly — no recap,
-# no §N back-reference, no "this section/chapter" as opening subject.
-# v2's calibration claim was built on a misreading of the lossy .docx paste,
-# where prose section-number prefixes (`1.1 Topic`) were interpreted as
-# inline §N references. They are heading numbers, not body references; the
-# Qianfan chapter openers do not name them at all.
+# v3 (just-merged PR #32) was a course-correction on v2's docx-corpus
+# miscalibration. v3 banned ANY §N / 第N节 reference inside the opening
+# sentences of a section (lines 147-150 of v3) AND added an
+# "OPENING-SENTENCE FORBIDDEN-§N RULE OVERRIDES THIS NARROWING" addendum
+# (v3 lines 187-189) that extended the ban over the body-narrowing's
+# named-artefact allowance. This was OVERCORRECTION.
 #
-# v3 rewrite:
-#   - Keeps the prose-before-table structural requirement (this is the
-#     part of v2 that worked — Lunon won Comprehensiveness margin-3 on
-#     id=91, partly because every section reliably has a prose lead).
-#   - DROPS the "Building on §X..." / "Applied to..." / "Under the rubric..." /
-#     "Using the taxonomy..." templates entirely.
-#   - DROPS the allowance for §N references in opening sentences.
-#   - DROPS "this section/chapter/report" as the subject of opening sentences.
-#   - REPLACES acceptable templates with subject-noun-first openings, modeled
-#     directly on verified Qianfan #1 chapter openers.
-#   - Keeps the §1 / article-opener exemption.
+# Post-merge full-archetype fresh-corpus measurement on 14 Qianfan #1
+# tasks (5 gate-verify-5 + 9 missing-archetype tasks across compare /
+# predict / trend / recommend) recorded in
+# `transfer/p2_artifacts/wave3_insight_bundle_spec.md` §PR-1:
+#   Pattern: "Chapter N" / "第N章" anywhere in opening sentence(s)
+#   Qianfan rate per task: 75% (id 8) / 57% (id 20) / 86% (id 23) /
+#                          89% (id 56) / 75% (id 91) and similar on
+#                          predict/trend/recommend samples.
+#   Overall: 75-89% of Qianfan chapters reference an earlier chapter in
+#   the opening sentence — this is an IDIOMATIC rhetorical move in the
+#   high-scoring corpus, NOT a v2-style antipattern.
+# Verified Qianfan opening idioms (across multiple ids):
+#   - "The framework constructed in Chapter 1 — [substantive recap of
+#     what Ch1 established] — finds its first and most consequential
+#     application in [topic of this chapter]." (id 91 chapter 2)
+#   - "第1章已论证：[recap of Ch1's substantive claim]。本章承接全链条
+#     技术框架中的数据环节，系统梳理[substantive new claim]。" (id 8 ch 2)
+#   - "The N preceding chapters have populated [topic]. [Substantive
+#     new claim]." (id 91 chapter 9)
+# These are SUBSTANTIVE recaps anchored to a named prior result, not
+# the bare "Building on §X established in §Y" template v3 correctly
+# banned (which IS still antipattern at Qianfan's 0% rate).
 #
-# Knock-on coverage: this rewrite is the root-cause fix for gap-map §12.A
-# AND subsumes most of §12.B (filler-phrase pile-up: "Building on" 65→target-0,
-# "this section" 76→target-0) and §12.C (forward refs to missing sections —
-# §27.1.3, §54, §63-65, §70 in W2 smoke; those refs were emitted because the
-# v2 templates encouraged §N back-references and the writer guessed numbers
-# the architect later didn't produce).
+# v4 amendment:
+#   - KEEPS all v3 antipatterns EXCEPT the §N-in-openings blanket ban:
+#     - Building-on / Applied-to / Under-the-rubric / Using-the-taxonomy
+#       templates STAY forbidden (Qianfan 0%).
+#     - "This section/chapter/report" as opening subject STAYS forbidden
+#       (Qianfan 0%).
+#     - Prose-before-table STAYS required.
+#     - Disconnected exposition STAYS forbidden.
+#   - RE-ALLOWS Chapter-N / 第N章 references in opening sentences when
+#     PAIRED with a substantive recap of what that earlier chapter
+#     established — matches Qianfan's 75-89% idiom rate.
+#   - DROPS the "OPENING-SENTENCE FORBIDDEN-§N RULE OVERRIDES THIS
+#     NARROWING" addendum — body-narrowing's named-artefact allowance
+#     now applies uniformly to body AND openings.
+#   - ADDS a new "Acceptable chapter-reference idioms" block with the
+#     three Qianfan-verified opening patterns.
+#   - Article-opener exemption is now SIMPLER: the §1/opener is free
+#     from the topic-restriction (since there's no prior chapter to
+#     recap) and the prose-before-table requirement still applies.
+#
+# v4 still subsumes the v3 root-cause fix for §12.A (recap-rule
+# mis-calibration). Forward-ref bugs from v2 (§54/§63/§64/§65/§70 in
+# the W2 smoke) are addressed by a separate post-write validator
+# (Wave 3 PR 4 candidate — gap-map §12.C); the rule body itself only
+# enforces the IDIOMATIC shape of acceptable opening references.
 _SECTION_OPENING_PROSE_LEAD_RULE = (
-    "SECTION-OPENING PROSE LEAD (P2-Wave-3-§12.A.v3 — Qianfan-parity rewrite):\n"
+    "SECTION-OPENING PROSE LEAD (P2-Wave-3-§12.A.v4 — Qianfan-parity "
+    "amendment to v3):\n"
     "EVERY section, including those whose primary content is a markdown "
     "table or list, MUST open with at least one substantive prose sentence "
     "INTRODUCING THE TOPIC OF THIS SECTION. The prose lead names the actual "
-    "subject matter directly — it does NOT recap prior sections and does "
-    "NOT reference them by number.\n\n"
+    "subject matter directly. References to earlier chapters ARE allowed "
+    "when paired with a substantive recap of what that chapter established "
+    "(this is the Qianfan idiom — see Acceptable patterns below); what is "
+    "FORBIDDEN is the formulaic '[Building on / Applied to / Under the "
+    "rubric of] §X' template that reads as compliance theatre.\n\n"
     "Critical: each section reads like the opening of a book CHAPTER — "
-    "diving into the topic — not like a meeting summary that re-establishes "
-    "what was discussed before. When the section's primary content is a "
+    "diving into the topic — not like a meeting summary that lists what "
+    "earlier sections discussed. When the section's primary content is a "
     "table or list, the prose lead comes BEFORE that block; the data block "
     "does NOT replace the prose lead. Pattern: prose-paragraph-then-data. "
     "NEVER data-block-first-no-prose.\n\n"
     "FORBIDDEN opening patterns (verified against the Qianfan #1 corpus — "
     "these antipatterns fire ~0% in Qianfan and ~80% in pre-v3 Lunon, and "
     "were the named root cause of the RACE judge's 'repeated setup "
-    "language' and 'forward references to missing sections' findings on "
-    "the Wave-2 smoke):\n"
+    "language' findings on the Wave-2 smoke):\n"
     "- 'Building on [the framework/taxonomy/spine/dimensions/scaffold] "
     "  [established/set out/introduced] in §N...' — formulaic recap that "
     "  reads as compliance theatre.\n"
     "- 'Applied to the dimensions set out above...' / 'Under the rubric "
     "  from §N...' / 'Using the taxonomy established above...' — variants "
     "  of the same recap-template antipattern.\n"
-    "- ANY '§N' or '第N节' reference inside the opening sentence(s) of a "
-    "  section. Section-number references may appear in body text, but "
-    "  NEVER as the leading move of a chapter. The opening must stand "
-    "  on its own substantively.\n"
+    "- BARE '§N' or '第N节' pointer with no named artefact, used as the "
+    "  leading move ('As discussed in §1, ...' / 'Per §3, ...' / "
+    "  '如§1所述，...'). The pointer itself is fine when paired with a "
+    "  substantive recap of what was at that section (see Acceptable "
+    "  patterns); the antipattern is the bare-pointer-as-recap.\n"
     "- 'This section' / 'This chapter' / 'This report' as the SUBJECT of "
     "  the opening sentence. Qianfan never opens a chapter with a meta-"
     "  subject; the opening subject is the substantive topic noun (the "
@@ -172,34 +194,50 @@ _SECTION_OPENING_PROSE_LEAD_RULE = (
     "  in concrete velocity claims, producing a quantitative ladder...')\n"
     "- Substantive-contextualisation opening: '<Topic-noun> originated in "
     "  <context>, and <substantive claim about it>.'\n\n"
+    "Acceptable chapter-reference idioms (v4-added; Qianfan fires this "
+    "shape 75-89% of the time across the verified corpus):\n"
+    "- Recap-then-pivot: 'The framework constructed in Chapter N — "
+    "  <substantive recap of what Ch N established> — finds its first "
+    "  application in <topic of this chapter>.' (verified id=91 ch 2; "
+    "  the recap must NAME what Ch N established, not just gesture at it)\n"
+    "- ZH recap-then-pivot: '第N章已论证：<recap of Ch N's substantive "
+    "  claim>。本章承接<connector>，系统梳理<substantive new claim>。' "
+    "  (verified id=8 ch 2)\n"
+    "- Multi-chapter recap: 'The N preceding chapters have populated "
+    "  <topic>. <Substantive new claim>.' (verified id=91 ch 9)\n"
+    "Critical distinction between the FORBIDDEN bare-pointer and the "
+    "ACCEPTABLE recap-then-pivot: the acceptable form NAMES what the "
+    "prior chapter established (the artefact, framework, finding) BEFORE "
+    "pivoting to the current chapter's claim. The forbidden form is the "
+    "bare pointer ('As discussed in §3...') that asks the reader to recall "
+    "what was at §3 without naming it.\n\n"
     "Acceptable opening patterns (ZH — modeled on Qianfan ZH samples):\n"
     "- '<主题名词>是<定义>...'\n"
     "- '<具体数字>项<内容>...'\n"
     "- '<事实陈述>，<进一步说明>。'\n"
     "- '<主题名词>起源于<背景>，<关于它的实质性主张>。'\n\n"
-    "Section-number references in BODY text — narrowing (UNCHANGED from "
-    "v2; the narrowing applies ONLY to body text, NOT to openings):\n"
+    "Section-number references — narrowing (UNCHANGED from v2; v4 removes "
+    "the v3 opening-sentence override):\n"
     "Refs to earlier sections like '§1' or '第3节' are GOOD when paired "
     "with a named artefact ('§1's four-pillar framework', '第3节我们已对"
     "Iyer节奏维度作过分析'). Bare temporal pointers without naming what "
     "was at that section ('as discussed in §1', 'as shown above') are "
     "BAD — they read as filler. The named artefact is the substantive "
-    "payload. THE OPENING-SENTENCE FORBIDDEN-§N RULE OVERRIDES THIS "
-    "NARROWING — in opening sentences, even named-artefact §N refs are "
-    "forbidden.\n\n"
+    "payload. This narrowing applies uniformly to OPENING sentences AND "
+    "body text in v4; the v3 'opening-sentence override' that forbade "
+    "even named-artefact §N refs in openings was removed because it "
+    "contradicted Qianfan's verified 75-89% rate.\n\n"
     "The FIRST section (or article opening) is EXEMPT from the topic-"
     "restriction — it establishes the framework rather than diving into "
     "a sub-topic. The prose-before-table requirement still applies to it. "
-    "ALL OTHER FORBIDDEN patterns above ALSO still apply to the first "
-    "section / article opener: do NOT open the article with 'This report "
-    "examines...' / 'This chapter introduces...' / 'This section discusses...' "
-    "(the meta-subject ban), do NOT lead with a '§N' / '第N节' reference "
-    "(there is no earlier section to refer to anyway), do NOT open with "
-    "a table or list before any prose, and do NOT state only the topic "
-    "with no substantive claim. The exemption is NARROW: it only frees "
-    "the opener from the requirement to introduce a sub-topic, allowing "
-    "it to establish the article-wide framework instead. Every other "
-    "antipattern in the FORBIDDEN list is in force."
+    "Other FORBIDDEN patterns still apply: do NOT open the article with "
+    "'This report examines...' / 'This chapter introduces...' / 'This "
+    "section discusses...' (the meta-subject ban), do NOT open with a "
+    "bare-pointer reference (there's nothing earlier to point at anyway), "
+    "do NOT open with a table or list before any prose, and do NOT state "
+    "only the topic with no substantive claim. The exemption is NARROW: "
+    "it only frees the opener from the requirement to introduce a sub-"
+    "topic, allowing it to establish the article-wide framework instead."
 )
 
 
