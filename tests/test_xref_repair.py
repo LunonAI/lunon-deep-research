@@ -118,6 +118,55 @@ def test_repair_preserves_paragraph_boundaries_before_next_heading():
     assert "Second sentence here. ## 2 Body" not in out, f"sentence and heading collapsed inline: {out!r}"
 
 
+def test_repair_preserves_paragraph_boundary_when_dangler_only_sentence_deleted():
+    r"""Greptile PR #39 round-2 (round-2 follow-up): when a dangler-only
+    sentence sits at the end of a paragraph (its trailing separator is
+    `\n\n`), the DELETE path previously discarded both the sentence AND
+    its sep — collapsing the following `## N` heading inline with the
+    preceding sentence and silently producing invalid markdown.
+
+    Concrete failure case (from the Greptile report):
+      "## 1 Intro\n\nReal content. See (Section 99).\n\n## 2 Body"
+    Pre-fix, repair produced:
+      "## 1 Intro\n\nReal content. ## 2 Body"  ← heading inlined
+    Post-fix, the `\n\n` separator from the deleted sentence is carried
+    forward onto the preceding separator slot so structural whitespace
+    is preserved.
+
+    The complementary REWRITE path already preserved sep unconditionally
+    (test_repair_preserves_paragraph_boundaries_with_dangling_ref_present);
+    this test pins symmetry for the delete path.
+    """
+    text = "## 1 Intro\n\nReal content. See (Section 99).\n\n## 2 Body\n\nNext chapter prose.\n"
+    out, stats = repair(text)
+    # The dangler-only sentence ("See (Section 99).") must have been deleted —
+    # the residual after stripping "(Section 99)" is "See ." which is <15 chars.
+    assert stats["sentences_deleted"] >= 1, f"expected a delete on dangler-only sentence: {stats}"
+    # Critical: the `## 2 Body` heading must remain block-level (preceded
+    # by `\n\n`), not collapsed inline with "Real content.".
+    assert "\n\n## 2 Body" in out, f"delete-path dropped trailing sep: {out!r}"
+    assert "Real content. ## 2 Body" not in out, f"heading inlined after delete: {out!r}"
+    # And the surviving "Real content." text is still present (the delete
+    # must not have over-reached).
+    assert "Real content." in out
+
+
+def test_repair_delete_path_preserves_multi_paragraph_structure():
+    r"""Greptile PR #39 round-2 follow-up: even when multiple dangler-only
+    sentences are deleted in sequence, the structural `\n\n` boundaries
+    around them must survive — the most newline-rich sep in the run wins."""
+    text = (
+        "## 1 Intro\n\n"
+        "Real content here ends paragraph.\n\n"
+        "See (Section 99). See (Section 98).\n\n"  # both dangler-only → both deleted
+        "## 2 Body\n\nNext chapter prose.\n"
+    )
+    out, stats = repair(text)
+    assert stats["sentences_deleted"] >= 2, f"expected ≥2 deletes, got {stats}"
+    # The paragraph break before `## 2 Body` survives both deletions.
+    assert "\n\n## 2 Body" in out, f"sep lost across multi-delete run: {out!r}"
+
+
 def test_repair_preserves_paragraph_boundaries_with_dangling_ref_present():
     """The boundary-preservation must hold even on the dangling-ref repair
     branch (the path that previously did `out_parts.append(...)` + final
