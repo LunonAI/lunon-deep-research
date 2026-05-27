@@ -126,6 +126,33 @@ criteria into a STRICT JSON research plan. Output ONLY this JSON object:
      {"id": "R-1", "label": str, "weight": float}, ...
    ]
  } | null,
+ "tier_ranking": {                /* P3-W7 (2026-05-27): compare/predict
+                                     archetypes with ≥5 entities in
+                                     entity_matrix. Publishes a weighted-
+                                     scoring formula + tier thresholds +
+                                     ±10pp sensitivity check. Qianfan-
+                                     verified pattern: q14 §7.3-§7.6 tier-
+                                     ranks 10 teams with S_base/RBM/S_final;
+                                     q3 §8.1 tier-ranks 11 sub-sectors.
+                                     When tier_ranking is populated, its
+                                     `weights` SHOULD mirror the
+                                     framing_chapter.published_rubric_items
+                                     weights — the rubric is published in
+                                     §1 and consumed by the tier-ranking
+                                     scoring chapter downstream. */
+   "title": str,                   /* e.g. "Tier Ranking" */
+   "scoring_formula": str,         /* e.g. "S_final = Σ(weight_i × dim_i)" */
+   "weights": {"R-1": float, "R-2": float, ...},   /* sum ≈ 1.0 ± 0.01 */
+   "tiers": [
+     {"name": "Tier 1", "threshold": ">=8.0"},
+     {"name": "Tier 2", "threshold": ">=6.0"},
+     {"name": "Tier 3", "threshold": "<6.0"}
+   ],
+   "sensitivity_check": {
+     "perturbation_pp": 10,         /* ±10 percentage points by default */
+     "report": "rank_stability"     /* what the sensitivity sub-section reports */
+   }
+ } | null,
  "stakeholder_chapter": {          /* P3-W6 (2026-05-27): closing chapter
                                       that splits recommendations into
                                       3-5 stakeholder addressee blocks
@@ -675,6 +702,34 @@ _FRAMING_CHAPTER_REQUIRED_ARCHETYPES = frozenset({"list-all", "compare", "explai
 # list-all may have rubrics but they're less load-bearing.
 _FRAMING_RUBRIC_REQUIRED_ARCHETYPES = frozenset({"compare", "predict", "recommend"})
 
+# P3-W7 (2026-05-27): tier_ranking bounds + archetype gating.
+# Qianfan q14 §7.3-§7.6 ranks 10 teams across 6 rubric items (Direction
+# 20% / Paper 22% / Collab 13% / Funding 18% / Industry 15% / Talent 12%).
+# q3 §8.1 ranks 11 sub-sectors across 6 dimensions. Both run a ±10pp
+# weight perturbation in a sensitivity sub-section to report rank
+# stability. The tier_ranking weights SHOULD mirror the framing_chapter's
+# published_rubric_items weights (§1 publishes the rubric; the tier-
+# ranking chapter consumes it) but `_normalize` does not pin equality —
+# downstream review catches divergence rather than coupling the two
+# audits.
+_TIER_RANKING_REQUIRED_ARCHETYPES = frozenset({"compare", "predict"})
+_TIER_RANKING_MIN_TIERS = 2
+_TIER_RANKING_MAX_TIERS = 5
+_TIER_RANKING_DEFAULT_PERTURBATION_PP = 10
+# Weights must sum to ~1.0 ± tolerance. Tolerance accommodates rounding
+# (LLMs frequently emit 0.20+0.20+0.20+0.20+0.18 = 0.98 instead of 1.0).
+_TIER_RANKING_WEIGHT_TOTAL_TOLERANCE = 0.05
+# Acceptable band for `sensitivity_check.perturbation_pp` around the default.
+# Qianfan q14/q3 both use ±10pp; anything in [5, 20] still produces a
+# meaningful sensitivity sub-section. Values outside this band (e.g., 1pp →
+# trivial perturbation, 50pp → no longer "sensitivity" so much as
+# re-weighting) get an audit shortfall. Missing/wrong-type values are
+# backfilled with the default and flagged. Greptile PR #43 round-2 fix:
+# the default constant was previously dead documentation — wiring it into
+# runtime audit + backfill removes that gap.
+_TIER_RANKING_PERTURBATION_PP_MIN = 5
+_TIER_RANKING_PERTURBATION_PP_MAX = 20
+
 # P3-W6 (2026-05-27): stakeholder chapter bounds. Qianfan corpus pattern
 # (6/11 articles): closing chapter splits recommendations into 3-5
 # addressee blocks (q23 §8.4-§8.10 has 7 sub-blocks; q3 §8.7 has 4;
@@ -957,6 +1012,92 @@ def _normalize(plan: dict, *, archetype: str | None = None) -> None:
                     audit["shortfalls"].append(
                         f"framing_chapter.rubric={len(fc['published_rubric_items'])}>{_FRAMING_RUBRIC_MAX}"
                     )
+
+    # P3-W7 (2026-05-27): tier_ranking audit. Required for compare/predict
+    # when entity_matrix has ≥5 entities (otherwise the ranking has too few
+    # rows to be meaningful). Audits: scoring_formula presence, weights
+    # sum-to-1.0 ± tolerance, tier count 2-5, sensitivity_check populated.
+    tr = plan.get("tier_ranking")
+    em = plan.get("entity_matrix")
+    # Greptile PR #43 round-2: previous `(em.get("entities") if isinstance(em, dict) else []) or []`
+    # only handled `em` being a non-dict OR `entities` being falsy. A non-empty,
+    # non-list `entities` value (e.g. a comma-separated string `"E1, E2, E3, E4, E5"`)
+    # would pass through and `len()` would return the character count (18), spuriously
+    # triggering `tr_is_required=True` for "predict" archetype plans where the
+    # entity_matrix block doesn't run pre-normalization. Explicit isinstance(list)
+    # guard fixes this; "compare" was already safe because the entity_matrix
+    # normalization block (~lines 641-653) coerces `entities` to list before this
+    # check runs.
+    _em_entities_raw = em.get("entities") if isinstance(em, dict) else []
+    em_entities = _em_entities_raw if isinstance(_em_entities_raw, list) else []
+    tr_is_required = archetype in _TIER_RANKING_REQUIRED_ARCHETYPES and len(em_entities) >= _ENTITY_MATRIX_ENTITIES_MIN
+    if tr_is_required:
+        tr_was_missing = not isinstance(tr, dict)
+        if tr_was_missing:
+            tr = {
+                "title": "",
+                "scoring_formula": "",
+                "weights": {},
+                "tiers": [],
+                "sensitivity_check": None,
+            }
+            plan["tier_ranking"] = tr
+            audit["shortfalls"].append("tier_ranking=missing(required-for-archetype-and-entity-count)")
+        if not isinstance(tr.get("weights"), dict):
+            tr["weights"] = {}
+        if not isinstance(tr.get("tiers"), list):
+            tr["tiers"] = []
+        # Greptile PR #43 round-3: `bool` is a subclass of `int` in Python, so
+        # the prior `isinstance(v, (int, float))` filter silently admitted
+        # boolean weights — a dict like `{"R-1": True}` would compute
+        # weights_sum=1.0 and pass the ±0.05 tolerance check, masking an LLM
+        # type error. The perturbation_pp guard below already excludes bool
+        # explicitly; this restores consistency by doing the same here.
+        weights_sum = sum(
+            float(v) for v in tr["weights"].values() if isinstance(v, (int, float)) and not isinstance(v, bool)
+        )
+        n_tiers = len(tr["tiers"])
+        audit["tier_ranking_weights_sum"] = round(weights_sum, 4)
+        audit["tier_ranking_n_tiers"] = n_tiers
+        audit["tier_ranking_has_sensitivity_check"] = isinstance(tr.get("sensitivity_check"), dict)
+        if not tr_was_missing:
+            if abs(weights_sum - 1.0) > _TIER_RANKING_WEIGHT_TOTAL_TOLERANCE:
+                audit["shortfalls"].append(
+                    f"tier_ranking.weights_sum={weights_sum:.3f}!=1.0±{_TIER_RANKING_WEIGHT_TOTAL_TOLERANCE}"
+                )
+            if n_tiers < _TIER_RANKING_MIN_TIERS:
+                audit["shortfalls"].append(f"tier_ranking.tiers={n_tiers}<{_TIER_RANKING_MIN_TIERS}")
+            if n_tiers > _TIER_RANKING_MAX_TIERS:
+                audit["shortfalls"].append(f"tier_ranking.tiers={n_tiers}>{_TIER_RANKING_MAX_TIERS}")
+            if not audit["tier_ranking_has_sensitivity_check"]:
+                audit["shortfalls"].append("tier_ranking.sensitivity_check=missing")
+            else:
+                # Greptile PR #43 round-2: validate sensitivity_check.perturbation_pp
+                # against the default constant + acceptable band. Backfills with
+                # default when missing/wrong-type so downstream readers always
+                # see a usable value; emits shortfall on backfill OR
+                # out-of-band so the audit trail is honest. Local name
+                # `senschk` (not `sc`) so it doesn't shadow the
+                # `stakeholder_chapter` block's `sc` variable below.
+                senschk = tr["sensitivity_check"]
+                pp = senschk.get("perturbation_pp")
+                if not isinstance(pp, (int, float)) or isinstance(pp, bool):
+                    senschk["perturbation_pp"] = _TIER_RANKING_DEFAULT_PERTURBATION_PP
+                    audit["tier_ranking_sensitivity_perturbation_pp"] = _TIER_RANKING_DEFAULT_PERTURBATION_PP
+                    audit["shortfalls"].append(
+                        "tier_ranking.sensitivity_check.perturbation_pp=missing"
+                        f"(backfilled-to-{_TIER_RANKING_DEFAULT_PERTURBATION_PP})"
+                    )
+                else:
+                    audit["tier_ranking_sensitivity_perturbation_pp"] = pp
+                    if pp < _TIER_RANKING_PERTURBATION_PP_MIN or pp > _TIER_RANKING_PERTURBATION_PP_MAX:
+                        audit["shortfalls"].append(
+                            f"tier_ranking.sensitivity_check.perturbation_pp={pp}"
+                            f"!in[{_TIER_RANKING_PERTURBATION_PP_MIN},"
+                            f"{_TIER_RANKING_PERTURBATION_PP_MAX}]"
+                        )
+            if not tr.get("scoring_formula"):
+                audit["shortfalls"].append("tier_ranking.scoring_formula=empty")
 
     # P3-W6 (2026-05-27): stakeholder_chapter audit. Unlike other Phase 3
     # artifacts, this one is OPTIONAL — only populated when the prompt
