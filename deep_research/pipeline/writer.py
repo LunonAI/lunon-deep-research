@@ -102,9 +102,15 @@ def write_opening(plan, prompt, language, archetype, domain, digest, *, task_id=
     # chapter. The architect emits stakeholder_chapter as None for
     # single-audience prompts; bool() correctly yields False on None
     # and on empty dicts.
+    #
     # Greptile PR #45 round-6 issue #2 (2026-05-27): same pattern for
     # `has_limitations_chapter` — trend / recommend archetypes never
     # carry the chapter, so the ~1300-char rule is omitted there.
+    #
+    # Greptile PR #47 round-5 preempt: same gating for the ~700-char
+    # `_TIER_RANKING_RULE` — only compare/predict tasks with ≥5
+    # entities AND ≥4 rubric dimensions get tier_ranking, so the
+    # rule is pure prompt noise on the majority of tasks.
     sys = wr.writer_system(
         archetype,
         domain,
@@ -114,6 +120,7 @@ def write_opening(plan, prompt, language, archetype, domain, digest, *, task_id=
         outline_shape=outline_shape,
         has_stakeholder_chapter=bool(plan.get("stakeholder_chapter")),
         has_limitations_chapter=bool(plan.get("limitations_chapter")),
+        has_tier_ranking=bool(plan.get("tier_ranking")),
     )
     user = (
         f"PROMPT ({language}):\n{prompt}\n\nREPORT TITLE: "
@@ -193,6 +200,7 @@ def write_section(
     # Greptile PR #45 round-6 issue #2 (2026-05-27): same for
     # `has_limitations_chapter` — must match `write_opening` to keep
     # both call sites symmetric (plan-driven, not unit-driven).
+    # PR #47 round-5 preempt: same threading for `has_tier_ranking`.
     sys = wr.writer_system(
         archetype,
         domain,
@@ -202,6 +210,7 @@ def write_section(
         outline_shape=outline_shape,
         has_stakeholder_chapter=bool(plan.get("stakeholder_chapter")),
         has_limitations_chapter=bool(plan.get("limitations_chapter")),
+        has_tier_ranking=bool(plan.get("tier_ranking")),
     )
 
     capel_block = ""
@@ -452,6 +461,114 @@ def write_section(
                     )
                 framing_block = "\n".join(parts) + "\n"
 
+    # P3-W7.b (2026-05-27): TIER RANKING + SENSITIVITY CHECK CONTRACT injection.
+    #
+    # The architect populates `plan["tier_ranking"]` (architect.py schema
+    # lines 153-179) for compare / predict archetypes when entity_matrix
+    # has ≥5 entities AND ≥4 dimensions. It carries a `scoring_formula`,
+    # `weights` dict (mirroring §1 framing-chapter rubric items),
+    # `tiers` list with thresholds, and `sensitivity_check` with the
+    # default ±10pp perturbation. The post-merge audit on `main` found
+    # that while the architect plans this chapter, the writer LLM had
+    # no in-prompt directive to render it — so the scoring table and
+    # sensitivity sub-section weren't produced. the reference corpus-verified
+    # pattern: 3-5/11 articles, distinctive in q14 §7.3-§7.6 (10 teams,
+    # S_base/RBM/S_final with 2-decimal scores) and q3 §8.1 (11 sectors,
+    # 6-dimension weighted scoring + ±10pp sensitivity).
+    #
+    # The directive emphasises: (a) 2-decimal precision on all scores,
+    # (b) the sensitivity check must be COMPUTATIONAL (actual recomputed
+    # S_final values), not narrative — the Lunon writer has historically
+    # hallucinated the sensitivity table without grounding.
+    tier_ranking_block = ""
+    tr = plan.get("tier_ranking")
+    if isinstance(tr, dict) and unit.get("title") and unit["title"] == tr.get("title"):
+        weights_raw = tr.get("weights") if isinstance(tr.get("weights"), dict) else {}
+        # Greptile pre-scan (W7 PR #43 round-3): bool is a subclass of int,
+        # so a naive `isinstance(v, (int, float))` would silently admit
+        # `True`/`False` as weight values. Filter explicitly.
+        weights = {k: v for k, v in weights_raw.items() if isinstance(v, (int, float)) and not isinstance(v, bool)}
+        tiers = [t for t in (tr.get("tiers") or []) if isinstance(t, dict) and t.get("name")]
+        sensitivity = tr.get("sensitivity_check") if isinstance(tr.get("sensitivity_check"), dict) else {}
+        # Greptile PR #47 round-2: bool-subclass guard on perturbation_pp,
+        # and also coerce float (e.g. `10.0` from a JSON deserializer
+        # that doesn't distinguish int from int-valued float) to int so
+        # the directive interpolates a clean `±10pp` rather than
+        # `±10.0pp`. Prior `isinstance(raw_pp, int)` silently rejected
+        # floats and fell back to the default 10 with no signal —
+        # callers who legitimately emitted `10.0` (e.g., from a JSON
+        # source) saw their value silently discarded.
+        #
+        # Greptile PR #47 round-6: `sensitivity` is guaranteed to be a
+        # dict by the line above (either the actual sensitivity_check
+        # dict or `{}`), so the prior `isinstance(sensitivity, dict)`
+        # ternary was a dead branch — `else None` was unreachable.
+        # Direct `.get()` makes the data flow obvious.
+        raw_pp = sensitivity.get("perturbation_pp")
+        if isinstance(raw_pp, bool) or not isinstance(raw_pp, (int, float)):
+            perturbation_pp = 10
+        else:
+            perturbation_pp = int(raw_pp)
+        scoring_formula = tr.get("scoring_formula") or "S_final = Σ(weight_i × dim_i)"
+        if weights and tiers:
+            parts = [
+                "\nTIER RANKING + SENSITIVITY CHECK CONTRACT (P3-W7; this "
+                "section IS the tier-ranking chapter — the reference corpus-verified "
+                "pattern in 3-5/11 articles, most distinctive in q14 §7.3-§7.6 "
+                "(10 teams, S_base/RBM/S_final with 2-decimal scores) and "
+                "q3 §8.1 (11 sectors, 6-dimension weighted scoring with "
+                "±10pp sensitivity)):"
+            ]
+            parts.append(
+                f"  Scoring formula (use VERBATIM in the chapter opening "
+                f"so readers can trace the math): {scoring_formula}"
+            )
+            parts.append(
+                f"  Weights (mirror §1 framing-chapter rubric items by id): {json.dumps(weights, ensure_ascii=False)}"
+            )
+            parts.append(f"  Tiers and thresholds: {json.dumps(tiers, ensure_ascii=False)}")
+            parts.append(
+                "  REQUIRED chapter structure:\n"
+                "    1. Opening (~2 paragraphs): state the scoring formula "
+                "explicitly + cite §1 rubric items by id (R-1, R-2, ...) so "
+                "weights trace back to the published rubric.\n"
+                "    2. SCORING TABLE — markdown table:\n"
+                "       - Rows = entities (from §1 entity_matrix).\n"
+                "       - Columns = entity name + each rubric dimension score "
+                "+ S_final + tier.\n"
+                "       - ALL scores reported to 2 DECIMAL PLACES (e.g., "
+                "7.45, 6.32, 8.81 — NEVER 7.5 or 7, NEVER 7.452). Pin "
+                "precision to 2; the validator checks for ≥1 cell matching "
+                "`\\b\\d+\\.\\d{2}\\b` AND zero cells with 3+ decimals.\n"
+                "    3. TIER ASSIGNMENT: each entity placed in a tier per "
+                "the thresholds; 1-2 sentence rationale per entity naming "
+                "the DOMINANT dimension(s) driving the placement.\n"
+                f"    4. SENSITIVITY CHECK (sub-section heading must "
+                f"contain 'sensitivity' / '敏感性' / '±{perturbation_pp}pp'): "
+                f"re-rank under ±{perturbation_pp}pp perturbation of each "
+                "weight. For each perturbed weight, recompute S_final for "
+                "ALL entities and report:\n"
+                "       - Number of entities that change tier under the "
+                "perturbation.\n"
+                "       - The most-sensitive weight (whose perturbation "
+                "causes the highest tier-shift count).\n"
+                "       - A RANK-STABILITY TABLE: rows = scenarios (base / "
+                "each weight ±pp), columns = entities, cells = tier "
+                "assignment.\n"
+                "    Interpretation directive: rank stability across "
+                "±perturbation = robust findings; ≥3 tier shifts in any "
+                "perturbed scenario = sensitive ranking, acknowledge "
+                "explicitly that conclusions depend on weight choice.\n"
+                "  Sensitivity perturbation MUST be COMPUTATIONAL not "
+                "narrative — produce the ACTUAL recomputed S_final values "
+                "(2 decimals each), not a paragraph describing what would "
+                "happen if weights were perturbed. The Lunon writer has "
+                "historically hallucinated this sub-section as prose; the "
+                "validator checks for the table structure (2-decimal cells "
+                "+ sensitivity sub-heading)."
+            )
+            tier_ranking_block = "\n".join(parts) + "\n"
+
     # P3-W5.b (2026-05-27): LIMITATIONS CHAPTER CONTRACT injection.
     #
     # The architect populates `plan["limitations_chapter"]` (architect.py
@@ -616,6 +733,7 @@ def write_section(
         f"{depth_block}"
         f"{entity_matrix_block}"
         f"{framing_block}"
+        f"{tier_ranking_block}"
         f"{limitations_block}"
         f"{stakeholder_block}"
         f"REPORT OUTLINE (titles only, for coherence): "

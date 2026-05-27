@@ -13,10 +13,27 @@ Exposes:
 - format_criteria_list(criteria_data)
 """
 
+import os
 import sys
 
-_DRB = "/home/connor/dev/deep_research_bench"
-if _DRB not in sys.path:
+# DRB harness location discovery. Honor `$DRB_REPO` first (the repo
+# convention), then probe well-known per-machine locations. The prior
+# hardcoded `/home/connor/dev/deep_research_bench` was a Linux-only
+# path baked in when the project lived on the old laptop; it broke
+# every import on the current Mac, which collapsed pytest collection
+# for any test transitively depending on this module
+# (`tests/test_orchestrate_xref_repair_wiring.py`,
+# `tests/test_drift_instrumentation.py`). When none of the candidates
+# resolve, leave sys.path alone and let the downstream
+# `from deepresearch_bench_race import …` raise its native
+# ModuleNotFoundError so the failure mode is clear.
+_DRB_CANDIDATES = (
+    os.environ.get("DRB_REPO"),
+    os.path.expanduser("~/dev/deep_research_bench"),
+    "/home/connor/dev/deep_research_bench",  # legacy Linux path
+)
+_DRB = next((p for p in _DRB_CANDIDATES if p and os.path.isdir(p)), None)
+if _DRB and _DRB not in sys.path:
     sys.path.insert(0, _DRB)
 
 from deepresearch_bench_race import format_criteria_list  # noqa: E402,F401
