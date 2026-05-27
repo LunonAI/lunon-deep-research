@@ -181,6 +181,44 @@ def test_normalize_dimensions_fills_missing_object_fields():
     assert out[0]["content_template"]  # non-empty default
 
 
+def test_normalize_dimensions_tolerates_malformed_render_order():
+    """Greptile PR #37 round-2: the LLM occasionally emits malformed
+    `render_order` values (`null`, non-numeric strings, even nested lists).
+    `dict.get()` returns an explicit `None` when the key is present-but-null
+    (the default `i + 1` never fires), and the prior `int(...)` would crash
+    with TypeError / ValueError, propagating up through `_normalize` and
+    leaving the plan unnormalized. Each malformed entry must fall back to
+    the positional index instead of raising — this path is the malformed-
+    input resilience guarantee for the whole normalize step.
+    """
+    raw = [
+        {"axis_name": "Null Order", "render_order": None},  # explicit null
+        {"axis_name": "Word Order", "render_order": "first"},  # non-numeric str
+        {"axis_name": "Nested Order", "render_order": ["1"]},  # nested list
+        {"axis_name": "Str Numeric", "render_order": "4"},  # numeric str → preserved
+        {"axis_name": "Float Order", "render_order": 5.7},  # float → int-truncated
+        {"axis_name": "Empty Str", "render_order": ""},  # empty str
+    ]
+    out = architect._normalize_dimensions(raw)
+    assert [d["axis_name"] for d in out] == [
+        "Null Order",
+        "Word Order",
+        "Nested Order",
+        "Str Numeric",
+        "Float Order",
+        "Empty Str",
+    ]
+    # Malformed entries fall back to positional index (1-based).
+    assert out[0]["render_order"] == 1  # None → i+1
+    assert out[1]["render_order"] == 2  # "first" → i+1
+    assert out[2]["render_order"] == 3  # ["1"] → i+1
+    # Numeric forms are preserved (string coerces, float truncates).
+    assert out[3]["render_order"] == 4
+    assert out[4]["render_order"] == 5
+    # Empty string also falls back (float("") raises ValueError).
+    assert out[5]["render_order"] == 6
+
+
 # --------------------------------------------------------------------------
 # 3. `_normalize` end-to-end — entity_matrix path produces the new fields.
 # --------------------------------------------------------------------------

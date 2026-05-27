@@ -842,10 +842,21 @@ def _normalize_dimensions(dims: list) -> list:
                 # Skip object-form dimensions without an axis_name (writer
                 # would render an empty sub-header otherwise).
                 continue
+            # `dict.get()` returns an explicit `None` (not the default) when
+            # the key is present-but-null, and the LLM occasionally emits
+            # `"render_order": null` or a non-numeric string. Both must
+            # fall back to the positional index instead of raising — this
+            # path is the malformed-input resilience guarantee for the
+            # whole normalize step.
+            ro_raw = raw.get("render_order")
+            try:
+                ro = int(float(ro_raw)) if ro_raw is not None else i + 1
+            except (TypeError, ValueError):
+                ro = i + 1
             out.append(
                 {
                     "axis_name": name,
-                    "render_order": int(raw.get("render_order", i + 1)),
+                    "render_order": ro,
                     "content_template": str(raw.get("content_template", "facts + analysis (3-6 sentences)")),
                 }
             )
