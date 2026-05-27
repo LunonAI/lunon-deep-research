@@ -59,16 +59,40 @@ criteria into a STRICT JSON research plan. Output ONLY this JSON object:
 {
  "task_analysis": str,
  "report_title": str,
- "entity_matrix": {                /* REQUIRED for list-all and compare; */
-   "entities": [str, ...],         /* omit (or set to null) for others. */
-   "dimensions": [str, ...]
- },                                /* 5-20 entities (rows), 4-8 dimensions
-                                      (columns). The article's spine is an
-                                      explicit entity×dimension matrix that
-                                      the writer renders as a table early on
-                                      AND uses to ensure EQUAL depth per
-                                      entity (no entity dropped, no entity
-                                      over-weighted vs siblings).            */
+ "entity_matrix": {                /* REQUIRED for list-all and compare. */
+   "entities": [str, ...],         /* OPTIONAL for predict/explain-mechanism/ */
+   "dimensions": [                  /* trend/recommend — populate when the */
+     {                              /* outline contains >=3 sibling sub-chapters */
+       "axis_name": str,            /* whose titles each name a distinct entity. */
+       "render_order": int,         /* For other prompts, set to null. */
+       "content_template": str
+     }, ...
+   ],
+   "instantiation_mode": "prose_subheaders"|"table_columns_only",
+   "min_axes_per_entity": int
+ },                                /* 5-30 entities (rows; per-archetype: list-all
+                                      up to 30, compare up to 20, others up
+                                      to 15), 4-8 dimensions (columns +
+                                      bolded per-entity sub-headers).
+                                      P3-W1 (2026-05-27): dimensions are
+                                      ordered objects with `axis_name`,
+                                      `render_order`, and `content_template`
+                                      so the writer can mechanically
+                                      instantiate each entity with byte-
+                                      identical sub-headers in declared
+                                      order (Qianfan's verified corpus-wide
+                                      pattern). Legacy `[str, ...]` form is
+                                      auto-wrapped to object form during
+                                      _normalize for backward compat.
+                                      `instantiation_mode` controls writer
+                                      render: "prose_subheaders" (default,
+                                      P3-W1) emits the axes as bolded
+                                      sub-headers per entity; "table_columns_only"
+                                      preserves the legacy S1-only table render.
+                                      `min_axes_per_entity` (default 3) is
+                                      the writer compliance floor — every
+                                      entity must instantiate at least this
+                                      many axes from the dimensions list.   */
  "report_toc": [ {"id": "S1", "title": str,
     "subsections": [ {"id": "S1.1", "title": str,
                       "depth_seeds": [str, ...] /* 2-4 specific
@@ -112,11 +136,26 @@ HARD RULES:
 - depth_seeds are the WRITER'S H4-leaf-section seeds — concrete claims,
   named entities, data points, or comparisons. Avoid generic seeds like
   "Background" or "Conclusion"; each seed is a specific substantive payload.
-- entity_matrix REQUIRED for list-all and compare archetypes. Populate
-  entities with EVERY entity the prompt names (verbatim where possible),
-  AND choose 4-8 dimensions a reader would compare them across (the
-  "columns" of the table the writer will render). Omit entity_matrix (or
-  set to null) for other archetypes.
+- entity_matrix REQUIRED for list-all and compare archetypes; OPTIONAL
+  for predict/explain-mechanism/trend/recommend (populate when the
+  outline contains >=3 sibling sub-chapters whose titles each name a
+  distinct entity; otherwise set to null). Populate entities with EVERY
+  entity the prompt names (verbatim where possible). Choose 4-8 dimensions
+  a reader would compare them across — these are BOTH the columns of the
+  matrix table AND the bolded sub-headers the writer instantiates per
+  entity. Each dimension is an object:
+    {"axis_name": "<short Title-Case label, used verbatim as bolded
+                    sub-header for every entity>",
+     "render_order": <1-indexed integer>,
+     "content_template": "<1-clause hint about content type for this
+                          axis, e.g. 'founding date + 2-3 numeric facts'
+                          or 'causal mechanism + named falsifier'>"}
+  Set `instantiation_mode` to "prose_subheaders" (default; writer emits
+  the dimensions as bolded sub-headers per entity AND a §1 table) or
+  "table_columns_only" (legacy; only the §1 table — use when the
+  archetype doesn't have a per-entity expansion in body chapters).
+  Set `min_axes_per_entity` to 3 unless you have a reason to require
+  every entity to instantiate every axis (then set equal to len(dimensions)).
 - Match the prompt's language."""
 
 
@@ -485,10 +524,94 @@ def _retry_is_better(retry_audit: dict, orig_audit: dict) -> bool:
 # (~15 named entities), id=8 ML materials (~7 method classes), id=20 Streamable
 # HTTP (~5 transport variants). 4-8 dimensions covers a useful comparison
 # table without overwhelming reader cognition.
+#
+# P3-W1 (2026-05-27): the flat 5-20 entity range was too conservative for
+# list-all where Qianfan id=91 has 25-28 knights and id=89 has similar
+# depth. Per-archetype cap dict raises list-all to 30; compare unchanged
+# at 20; new entries for predict/explain-mechanism/trend/recommend (which
+# also benefit from entity matrix when ≥3 sibling sub-chapters each name
+# a distinct entity — see _should_promote_entity_matrix below).
 _ENTITY_MATRIX_ENTITIES_MIN = 5
-_ENTITY_MATRIX_ENTITIES_MAX = 20
+_ENTITY_MATRIX_ENTITIES_MAX = 20  # back-compat; tests reference this directly
+_ENTITY_MATRIX_ENTITIES_MAX_BY_ARCHETYPE: dict[str, int] = {
+    "list-all": 30,
+    "compare": 20,
+    "predict": 15,
+    "explain-mechanism": 15,
+    "trend": 15,
+    "recommend": 15,
+}
 _ENTITY_MATRIX_DIMENSIONS_MIN = 4
 _ENTITY_MATRIX_DIMENSIONS_MAX = 8
+
+
+def _max_entities_for_archetype(archetype: str | None) -> int:
+    """Return the per-archetype upper bound on entity_matrix.entities.
+
+    Falls back to the legacy `_ENTITY_MATRIX_ENTITIES_MAX` (20) when the
+    archetype isn't in the per-archetype dict — preserves back-compat
+    with any caller that imports the flat constant. P3-W1 raises list-all
+    to 30 per the Qianfan id=91 verified-25-28-knight pattern.
+    """
+    return _ENTITY_MATRIX_ENTITIES_MAX_BY_ARCHETYPE.get(archetype or "", _ENTITY_MATRIX_ENTITIES_MAX)
+
+
+# P3-W1: archetypes for which entity_matrix is REQUIRED. Others may have it
+# but the architect chooses on its own (auto-promoted by _normalize when
+# the outline has the entity-list shape — see _should_promote_entity_matrix).
+_ENTITY_MATRIX_REQUIRED_ARCHETYPES = frozenset({"list-all", "compare"})
+_ENTITY_MATRIX_OPTIONAL_ARCHETYPES = frozenset({"predict", "explain-mechanism", "trend", "recommend"})
+
+
+# P3-W1: detection heuristic for "this outline has the entity-list shape".
+# Used to OFFER the entity_matrix contract to optional archetypes when
+# they're naturally entity-iterating. Conservative (under-promotes rather
+# than over-promotes) since false-positive promotion forces the writer
+# into a rigid template that may not fit the prompt.
+def _should_promote_entity_matrix(plan: dict, archetype: str | None) -> bool:
+    """Return True when an optional-archetype plan looks like it should
+    use entity_matrix (≥3 sibling sub-chapters with proper-noun-like
+    titles under a shared parent).
+
+    Returns False when the plan already has a populated entity_matrix
+    (don't re-suggest), when the archetype is required (caller already
+    handles it), or when the outline doesn't have the entity-list shape.
+    """
+    if archetype not in _ENTITY_MATRIX_OPTIONAL_ARCHETYPES:
+        return False
+    em = plan.get("entity_matrix")
+    if isinstance(em, dict) and (em.get("entities") or []):
+        return False
+    toc = plan.get("report_toc") or []
+    for sec in toc:
+        subs = sec.get("subsections") or []
+        if len(subs) < 3:
+            continue
+        # "proper-noun-like": at least one capitalized non-stopword token,
+        # or contains CJK content (Chinese proper nouns are unambiguous by
+        # context), or contains a quoted name. Conservative check — we
+        # don't want to fire on generic structural titles like "Background"
+        # or "Methodology".
+        proper_count = 0
+        for sub in subs:
+            title = str(sub.get("title", ""))
+            if not title:
+                continue
+            # CJK detection — every Chinese title is "proper-noun-like" for our purposes
+            if any("一" <= c <= "鿿" for c in title):
+                proper_count += 1
+                continue
+            # English: at least one Title-Case token that's not a common stopword
+            import re as _re
+
+            tokens = _re.findall(r"\b[A-Z][a-zA-Z]+\b", title)
+            stopwords = {"The", "And", "Of", "For", "In", "To", "A", "An", "Is", "Are"}
+            content_tokens = [t for t in tokens if t not in stopwords]
+            if content_tokens:
+                proper_count += 1
+        if proper_count >= 3:
+            return True
+    return False
 
 
 def _normalize(plan: dict, *, archetype: str | None = None) -> None:
@@ -590,11 +713,13 @@ def _normalize(plan: dict, *, archetype: str | None = None) -> None:
                 audit["shortfalls"].append(f"{sub.get('id')}.seeds={len(seeds)}>{b['seed_max']}")
 
     # P2-Option-A-#7 (2026-05-23): entity_matrix audit + backfill for
-    # list-all and compare archetypes. The matrix is the article's spine
-    # (rendered as a table near the article start) and the writer uses it
-    # to ensure equal-depth treatment per entity.
+    # list-all and compare archetypes. P3-W1 (2026-05-27): extended to
+    # optional-archetype auto-promotion + per-archetype entity cap +
+    # dimensions object-form normalization + instantiation_mode contract.
     em = plan.get("entity_matrix")
-    if archetype in {"list-all", "compare"}:
+    is_required = archetype in _ENTITY_MATRIX_REQUIRED_ARCHETYPES
+    should_promote = (not is_required) and _should_promote_entity_matrix(plan, archetype)
+    if is_required or should_promote:
         # Greptile PR #25 follow-up round 2 (2026-05-25): track whether the
         # matrix was entirely absent vs present-but-underpopulated. A
         # missing matrix necessarily has zero entities and zero dimensions,
@@ -607,7 +732,12 @@ def _normalize(plan: dict, *, archetype: str | None = None) -> None:
             # Backfill so writer never crashes on `entity_matrix["entities"]`.
             em = {"entities": [], "dimensions": []}
             plan["entity_matrix"] = em
-            audit["shortfalls"].append("entity_matrix=missing(required-for-archetype)")
+            # Only flag as a shortfall when REQUIRED. Optional-archetype
+            # auto-promotion path treats missing matrix as "architect didn't
+            # populate it" without shortfall — the writer still benefits
+            # from the empty-matrix passthrough.
+            if is_required:
+                audit["shortfalls"].append("entity_matrix=missing(required-for-archetype)")
         ents = em.get("entities") if isinstance(em.get("entities"), list) else None
         dims = em.get("dimensions") if isinstance(em.get("dimensions"), list) else None
         if ents is None:
@@ -616,21 +746,85 @@ def _normalize(plan: dict, *, archetype: str | None = None) -> None:
         if dims is None:
             em["dimensions"] = []
             dims = em["dimensions"]
+
+        # P3-W1: normalize legacy string-form dimensions to object form.
+        # Pre-W1 plans had `dimensions: [str, ...]`; new plans should emit
+        # `[{"axis_name": str, "render_order": int, "content_template": str}, ...]`.
+        # Auto-wrap so the writer sees one canonical form.
+        em["dimensions"] = _normalize_dimensions(dims)
+        dims = em["dimensions"]
+
+        # P3-W1: instantiation_mode + min_axes_per_entity defaults.
+        em.setdefault("instantiation_mode", "prose_subheaders")
+        em.setdefault("min_axes_per_entity", 3)
+
         audit["entity_matrix_entities"] = len(ents)
         audit["entity_matrix_dimensions"] = len(dims)
+        audit["entity_matrix_instantiation_mode"] = em["instantiation_mode"]
+        audit["entity_matrix_min_axes_per_entity"] = em["min_axes_per_entity"]
+        audit["entity_matrix_auto_promoted"] = bool(should_promote)
         # Only emit count shortfalls when the matrix was actually present —
         # the "missing" shortfall already captures the entire failure mode
         # when the LLM omitted the field. (Upper-bound count shortfalls
         # remain gated the same way: if the matrix was missing we backfilled
         # to {entities: [], dimensions: []} which can't trip the >MAX path.)
         if not matrix_was_missing:
+            entity_max = _max_entities_for_archetype(archetype)
             if len(ents) < _ENTITY_MATRIX_ENTITIES_MIN:
                 audit["shortfalls"].append(f"entity_matrix.entities={len(ents)}<{_ENTITY_MATRIX_ENTITIES_MIN}")
-            if len(ents) > _ENTITY_MATRIX_ENTITIES_MAX:
-                audit["shortfalls"].append(f"entity_matrix.entities={len(ents)}>{_ENTITY_MATRIX_ENTITIES_MAX}")
+            if len(ents) > entity_max:
+                audit["shortfalls"].append(f"entity_matrix.entities={len(ents)}>{entity_max}")
             if len(dims) < _ENTITY_MATRIX_DIMENSIONS_MIN:
                 audit["shortfalls"].append(f"entity_matrix.dimensions={len(dims)}<{_ENTITY_MATRIX_DIMENSIONS_MIN}")
             if len(dims) > _ENTITY_MATRIX_DIMENSIONS_MAX:
                 audit["shortfalls"].append(f"entity_matrix.dimensions={len(dims)}>{_ENTITY_MATRIX_DIMENSIONS_MAX}")
 
     plan["_outline_audit"] = audit
+
+
+def _normalize_dimensions(dims: list) -> list:
+    """Coerce dimensions to canonical object form.
+
+    P3-W1 (2026-05-27): the entity_matrix schema now uses ordered objects
+    `{axis_name, render_order, content_template}` so the writer can
+    mechanically instantiate each entity with byte-identical sub-headers
+    in declared order (Qianfan's verified corpus-wide pattern). Legacy
+    string-form `[str, ...]` is auto-wrapped here for backward compat.
+
+    - List-of-strings → wrap each in {axis_name, render_order, content_template}
+      with render_order = 1-indexed position and a generic content_template.
+    - List-of-objects → preserved; missing fields filled with defaults.
+    - Empty / non-list → returned as [].
+    """
+    if not isinstance(dims, list):
+        return []
+    out: list = []
+    for i, raw in enumerate(dims):
+        if isinstance(raw, str):
+            name = raw.strip()
+            if not name:
+                continue
+            out.append(
+                {
+                    "axis_name": name,
+                    "render_order": i + 1,
+                    "content_template": "facts + analysis (3-6 sentences)",
+                }
+            )
+        elif isinstance(raw, dict):
+            name = str(raw.get("axis_name", "")).strip()
+            if not name:
+                # Skip object-form dimensions without an axis_name (writer
+                # would render an empty sub-header otherwise).
+                continue
+            out.append(
+                {
+                    "axis_name": name,
+                    "render_order": int(raw.get("render_order", i + 1)),
+                    "content_template": str(raw.get("content_template", "facts + analysis (3-6 sentences)")),
+                }
+            )
+        # Other types (int, None, list) silently dropped — malformed
+        # entries shouldn't crash the writer; the dimensions-count audit
+        # will reflect the reduced count if any were dropped.
+    return out

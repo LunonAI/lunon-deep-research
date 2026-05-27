@@ -189,6 +189,24 @@ def run(inp: ValidationInput) -> ValidationOutput:
                 }
             )
 
+    # 8. P3-W1 MICRO-TEMPLATE COMPLIANCE (advisory, like INSIGHT). When the
+    # plan has a non-empty entity_matrix in prose_subheaders mode, every
+    # entity-bearing chapter should instantiate the same bolded sub-headers
+    # in render_order. We don't hard-fail (writer is not yet retried for
+    # this specifically) but we log compliance ratios into counts for
+    # drift telemetry. Implementation deliberately lightweight (no regex
+    # parsing of section trees here) — full per-entity compliance lives
+    # in `_validate_micro_template` below for offline analysis. The check
+    # surfaces a single ratio so dev-run readers can spot regressions.
+    em = (inp.plan or {}).get("entity_matrix") if inp.plan else None
+    mt_result = _validate_micro_template(inp.article, em)
+    if mt_result is not None:
+        counts["micro_template_article_compliance"] = mt_result["article_compliance"]
+        counts["micro_template_min_axes"] = mt_result["min_axes_per_entity"]
+        counts["micro_template_entities_below_floor"] = len(mt_result["below_threshold_entities"])
+        # Advisory only — no failure appended. Drift telemetry surfaces
+        # the per-entity below-threshold list for post-hoc analysis.
+
     ok = not failures
 
     # Build structured feedback for the refiner (NOT free-text)
@@ -203,6 +221,103 @@ def run(inp: ValidationInput) -> ValidationOutput:
         fb = "VALIDATION FAILURES — fix these in place; preserve correct content; do not shorten:\n" + "\n".join(lines)
 
     return ValidationOutput(ok=ok, failures=failures, feedback_text=fb, counts=counts)
+
+
+def _validate_micro_template(article: str, entity_matrix) -> dict | None:
+    """P3-W1 (2026-05-27): compute per-entity micro-template compliance ratio.
+
+    Returns:
+      None — when no entity_matrix is active (skip the check)
+      dict {
+        "article_compliance": float (0.0-1.0; mean across entities),
+        "per_entity_compliance": {entity_name: float},
+        "below_threshold_entities": [entity_name, ...],
+        "min_axes_per_entity": int,
+      }
+
+    Compliance per entity = (axes_found_as_bolded_subheader) / (len(dimensions)).
+    Below-threshold = ratio < (min_axes_per_entity / len(dimensions)).
+    """
+    if not isinstance(entity_matrix, dict):
+        return None
+    entities = entity_matrix.get("entities") or []
+    dims = entity_matrix.get("dimensions") or []
+    mode = entity_matrix.get("instantiation_mode", "prose_subheaders")
+    if not entities or not dims or mode != "prose_subheaders":
+        return None
+    # Extract axis_name strings (dimensions may be objects post-normalize
+    # or strings pre-normalize). Defensive coercion mirrors writer.write_section.
+    axis_names: list[str] = []
+    for d in dims:
+        if isinstance(d, dict):
+            n = str(d.get("axis_name", "")).strip()
+            if n:
+                axis_names.append(n)
+        elif isinstance(d, str):
+            n = d.strip()
+            if n:
+                axis_names.append(n)
+    if not axis_names:
+        return None
+    min_axes = int(entity_matrix.get("min_axes_per_entity", 3))
+    n_dims = len(axis_names)
+    threshold_ratio = min(1.0, min_axes / n_dims) if n_dims > 0 else 1.0
+
+    per_entity: dict[str, float] = {}
+    below: list[str] = []
+    # For each entity, find its first mention and slice a window that
+    # extends until the NEXT entity's first mention (or a 3000-char cap,
+    # whichever is shorter). Without the next-entity boundary, the window
+    # would overlap with later entities' sections and inflate the axis
+    # count — Greptile pre-scan caught this in the partial-compliance test.
+    # Build a sorted list of (entity, first_idx) tuples so we know each
+    # entity's natural body slice.
+    article_lower = article.lower()
+    entity_positions: list[tuple[str, int]] = []
+    for ent_raw in entities:
+        ent = str(ent_raw).strip()
+        if not ent:
+            continue
+        idx = article.find(ent)
+        if idx < 0:
+            idx = article_lower.find(ent.lower())
+        entity_positions.append((ent, idx))
+    # Sort by position; -1 (not found) sorted last but treated specially.
+    found = sorted(((e, i) for e, i in entity_positions if i >= 0), key=lambda p: p[1])
+    not_found = [e for e, i in entity_positions if i < 0]
+
+    for k, (ent, start) in enumerate(found):
+        # End of this entity's body slice = start of NEXT found entity,
+        # capped at +3000 chars from its own start.
+        next_start = found[k + 1][1] if k + 1 < len(found) else len(article)
+        end = min(next_start, start + 3000, len(article))
+        window = article[start:end]
+        n_axes_found = 0
+        for ax in axis_names:
+            # The micro-template directive emits `**{axis_name}:**` (EN)
+            # or `**{axis_name}：**` (ZH). Accept both colon forms.
+            patterns = [f"**{ax}:**", f"**{ax}：**", f"**{ax}:", f"**{ax}："]
+            if any(p in window for p in patterns):
+                n_axes_found += 1
+        ratio = n_axes_found / n_dims
+        per_entity[ent] = round(ratio, 3)
+        if ratio < threshold_ratio:
+            below.append(ent)
+
+    for ent in not_found:
+        per_entity[ent] = 0.0
+        below.append(ent)
+
+    if per_entity:
+        article_compliance = round(sum(per_entity.values()) / len(per_entity), 3)
+    else:
+        article_compliance = 0.0
+    return {
+        "article_compliance": article_compliance,
+        "per_entity_compliance": per_entity,
+        "below_threshold_entities": below,
+        "min_axes_per_entity": min_axes,
+    }
 
 
 def log_failures(task_id: str, vout: ValidationOutput) -> None:
