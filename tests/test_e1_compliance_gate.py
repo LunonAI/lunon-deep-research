@@ -14,10 +14,19 @@ History:
   article opener. The gate now grades sections[0] too. The meta-subject
   regex's verb slot was opened from a closed list to `\w+` so common
   synonyms (explores / focuses / investigates / ...) no longer slip past.
+- v4 (2026-05-26, post-PR-32-merge full-archetype retro): v3's blanket ban
+  on §N / 第N章 references in openings was OVERCORRECTION. Fresh-corpus
+  data on 14 reference tasks across all 6 archetypes showed 75-89% of
+  chapters reference an earlier chapter ("Chapter N" / "第N章") in the
+  opening sentence — paired with a substantive recap. v4 removed the
+  §N / "section N's framework" / 第N章 patterns from the gate's regex;
+  the gate now passes Chapter-N openings paired with substantive recap.
+  All other v3 bans (Building-on / Applied-to / Under-the-rubric
+  templates, meta-subject, prose-before-table) survive v4 unchanged.
 
-These tests pin the v3 inversion AND the v3 §1-grading behaviour so any
-future regression to v2 logic (reward-vocab or skip-§1) fails loud before
-the script ships against post-v3 smoke output.
+These tests pin the v3 inversion AND the v4 §N-allow amendment so any
+future regression to v2 logic (reward vocab) or v3 logic (blanket §N
+ban) fails loud before the script ships against post-merge smoke output.
 """
 
 from __future__ import annotations
@@ -134,10 +143,14 @@ def test_v3_meta_subject_regex_does_not_match_possessive():
     assert out["n_compliant"] == 2, out
 
 
-def test_v3_forbidden_section_n_ref_in_opener_fails_semantic_gate():
-    """Any §N reference in the OPENING sentence is v3-forbidden, even
-    when paired with a named artefact. Body §N refs remain allowed —
-    that's why the semantic check is windowed to the opener only."""
+def test_v4_under_the_rubric_opener_still_fails_semantic_gate():
+    """v4 retains the 'Under the rubric from §N...' antipattern (the
+    formulaic recap template the reference doesn't use). The §N portion alone
+    no longer triggers the gate (re-allowed in v4), but the 'under the
+    rubric' template stem catches this. Pre-v4 (v3) the test was
+    test_v3_forbidden_section_n_ref_in_opener_fails_semantic_gate; the
+    §N-only case is now COMPLIANT (see test_v4_chapter_n_ref_with_recap_
+    is_compliant below)."""
     out = e1_section_opening_recap(
         _article(
             "Under the rubric from §3, the speed taxonomy resolves into "
@@ -148,11 +161,78 @@ def test_v3_forbidden_section_n_ref_in_opener_fails_semantic_gate():
     assert out["n_only_structural_ok"] == 1, out
 
 
-def test_v3_body_text_section_n_ref_does_not_taint_compliant_opener():
-    """A v3-correct opener followed by a body §N reference must still
-    pass — the v3 rule bans §N refs in openings, not in body text.
+def test_v4_chapter_n_ref_with_substantive_recap_is_compliant():
+    """v4 amendment: Chapter-N references in opening sentences are
+    ALLOWED when paired with a substantive recap of what the prior
+    chapter established (the reference idiom, 75-89% rate, EN form verified
+    at task id=91 ch 2).
+
+    Note on coverage scope: v3's EN regex targeted the literal `§` symbol
+    (`§\\s*\\d+(?:\\.\\d+)?`), not the English word "Chapter" — so this
+    specific fixture would have passed v3 silently too. The behavioral
+    pin against re-adding `§\\s*\\d+` lives in
+    `test_v4_section_symbol_ref_in_opener_is_compliant` below; this
+    test documents the writer-facing the reference idiom and confirms it is
+    not snared by other v4-forbidden patterns ("building on" /
+    "applied to the framework" / etc.)."""
+    out = e1_section_opening_recap(
+        _article(
+            "The framework constructed in Chapter 1 — the four-tier Cloth "
+            "hierarchy and the Cosmo doctrine — finds its first application "
+            "in the Bronze rank, where Kurumada formalised the tier system.\n"
+        )
+    )
+    # §1 (fixture opener, also clean prose lead with no forbidden vocab)
+    # + §2 (the Chapter-N opener under test) should both pass.
+    assert out["n_compliant"] == 2, out
+
+
+def test_v4_section_symbol_ref_in_opener_is_compliant():
+    """v4 amendment: directly pins removal of `§\\s*\\d+(?:\\.\\d+)?`
+    from `_V4_FORBIDDEN_OPENING_TOKENS`. The sister Chapter-N tests
+    use the English word "Chapter" — v3's EN regex targeted the §
+    symbol specifically, not the word, so a future regression that
+    re-added the `§\\d+` pattern would silently pass those fixtures.
+    This test uses the literal § symbol so it would fail loudly."""
+    out = e1_section_opening_recap(
+        _article(
+            "§1's four-pillar framework — the Cloth hierarchy's tier "
+            "boundaries and the Cosmo doctrine — finds its first "
+            "application in the Bronze rank, where Kurumada formalised "
+            "the tier system.\n"
+        )
+    )
+    # §1 (fixture opener) + §2 (the §-symbol opener under test) both pass.
+    assert out["n_compliant"] == 2, out
+
+
+def test_v4_zh_chapter_n_ref_with_substantive_recap_is_compliant():
+    """ZH parallel: '第1章已论证：...。本章承接...，系统梳理...' is the reference ZH idiom verified at task id=8. v4 must NOT flag this as
+    forbidden.
+
+    Note: 承接 and 系统梳理 are intentionally absent from the
+    `本(?:节|章|报告)` verb list in `_V4_FORBIDDEN_OPENING_TOKENS`, so
+    the full the reference idiom passes the gate verbatim. The fixture
+    therefore uses the literal the reference phrasing rather than a
+    rephrased variant."""
+    out = e1_section_opening_recap(
+        _article(
+            "第1章已论证：机器学习方法的能力上限受制于数据采集环节。"
+            "本章承接上述结论，系统梳理数据基础设施在规模与可访问性上"
+            "的演化路径。\n"
+        )
+    )
+    assert out["n_compliant"] == 2, out
+
+
+def test_v4_body_text_section_n_ref_does_not_taint_compliant_opener():
+    """A v4-correct opener followed by a body §N reference must still
+    pass — the v4 rule (and the v3 rule it amends) bans certain opener
+    templates in openings only. Body §N refs remain allowed.
+
     This is the test that would have failed under a naive 'search the
-    whole body' implementation."""
+    whole body' implementation. Retained from v3 since v4 preserved the
+    opener-windowing behaviour."""
     out = e1_section_opening_recap(
         _article(
             "Kurumada repeatedly grounded his metaphysics in concrete "
@@ -213,21 +293,53 @@ def test_v3_grades_section_zero_meta_subject_opener_as_non_compliant():
     assert out["n_only_structural_ok"] == 1, out
 
 
-def test_v3_grades_section_zero_section_n_opener_as_non_compliant():
-    """§1 can't legitimately contain §N refs anyway (no earlier section
-    to reference), but the gate must still catch them — a writer that
-    emits '§1 introduces the framework' as the literal opener should
-    fail loud, not pass by skip."""
+def test_v4_grades_section_zero_chapter_n_opener_as_compliant():
+    """v4 amendment in the §1-grading context: this test pairs the reference EN Chapter-N idiom with the §1 grading path (introduced in
+    PR #32 round-3) — the §1 opener is now graded rather than skipped,
+    and the EN "Chapter 1 establishes..." form passes the gate.
+
+    Note on coverage scope: v3's EN regex targeted the literal `§`
+    symbol, not the English word "Chapter", so a §1 opener saying
+    "Chapter 1 establishes..." would also have passed v3 silently —
+    this fixture does NOT pin regression against re-adding `§\\s*\\d+`.
+    The §1-grading regression pin uses the §-symbol form in
+    `test_v4_grades_section_zero_section_symbol_opener_as_compliant`
+    below; this test focuses on documenting that the EN Chapter-N
+    idiom survives §1 grading."""
     article = (
         "## 1 Article opener\n\n"
-        "§1 introduces the four-pillar framework that anchors the rest "
-        "of the analysis.\n\n"
+        "Chapter 1 establishes the four-pillar framework that anchors the "
+        "rest of the analysis across all subsequent chapters.\n\n"
         "## 2 Second section\n\n"
         "The Bronze rank originated in the Sanctuary arc.\n"
     )
     out = e1_section_opening_recap(article)
-    assert out["n_compliant"] == 1, out
-    assert out["n_only_structural_ok"] == 1, out
+    # Both sections should pass: Chapter-N ref in §1 is allowed under v4,
+    # §2 has clean prose with no v4-forbidden vocab.
+    assert out["n_compliant"] == 2, out
+
+
+def test_v4_grades_section_zero_section_symbol_opener_as_compliant():
+    """v4-amendment regression pin in the §1-grading context: directly
+    inverts the v3 predecessor `test_v3_grades_section_zero_section_n_
+    opener_as_non_compliant`, whose fixture was the literal "§1
+    introduces the four-pillar framework...". Under v3, that opener
+    failed the semantic gate via `§\\s*\\d+`. Under v4, the pattern is
+    removed and the same §-symbol opener in §1 must now pass.
+
+    This is the load-bearing regression pin for the v4 amendment in
+    the §1 path — a future regression that re-added `§\\s*\\d+` to
+    `_V4_FORBIDDEN_OPENING_TOKENS` would fail this test loudly."""
+    article = (
+        "## 1 Article opener\n\n"
+        "§1's four-pillar framework anchors the rest of the analysis "
+        "across all subsequent chapters.\n\n"
+        "## 2 Second section\n\n"
+        "The Bronze rank originated in the Sanctuary arc.\n"
+    )
+    out = e1_section_opening_recap(article)
+    # Both sections should pass: §-symbol ref in §1 is allowed under v4.
+    assert out["n_compliant"] == 2, out
 
 
 def test_v3_grades_section_zero_clean_opener_as_compliant():
