@@ -23,13 +23,18 @@ def test_stakeholder_rule_string_present():
 
 
 def test_stakeholder_rule_names_non_overlap_discipline():
-    """The non-overlap rule (Jaccard 4-gram < 0.20) is the W6 distinctive
-    signal — pin the keywords."""
+    """The non-overlap rule (Jaccard 4-gram < threshold) is the W6
+    distinctive signal — pin the live-rendered threshold value so a
+    future change to `_STAKEHOLDER_JACCARD_MAX` automatically updates
+    this assertion without test churn (Greptile PR #46 round-2 pattern)."""
     rule = wr._STAKEHOLDER_RULE
     assert "non-overlap" in rule.lower() or "disjoint" in rule.lower(), (
         f"_STAKEHOLDER_RULE missing non-overlap signal; got: {rule[:600]}"
     )
-    assert "0.20" in rule, f"_STAKEHOLDER_RULE missing 0.20 Jaccard threshold value; got: {rule[:800]}"
+    expected_threshold = f"{wr._STAKEHOLDER_JACCARD_MAX:.2f}"
+    assert expected_threshold in rule, (
+        f"_STAKEHOLDER_RULE missing live-rendered Jaccard threshold ({expected_threshold}); got: {rule[:800]}"
+    )
 
 
 def test_stakeholder_rule_names_addressee_forms_en_and_zh():
@@ -89,20 +94,31 @@ def test_stakeholder_jaccard_max_is_single_source_of_truth():
     )
 
 
-def test_stakeholder_jaccard_max_drift_test_via_monkeypatch(monkeypatch):
-    """Defence-in-depth: monkeypatch the constant DOWN to 0.10 and
-    verify the validator now flags pairs above 0.10 (which it wouldn't
-    have if the threshold were hardcoded to 0.20). Confirms the source-
-    of-truth link is live, not just structurally present."""
-    monkeypatch.setattr(wr, "_STAKEHOLDER_JACCARD_MAX", 0.10)
+def test_stakeholder_jaccard_max_drift_test_via_monkeypatch_above_one(monkeypatch):
+    """Greptile PR #46 round-2 issue #2: the prior version of this test
+    used a `if max_pair_overlap > 0.10` guard which trivially passes
+    when the synthetic bodies have ~0 overlap (the engineered domain
+    difference between semiconductor-investing prose and quantum-
+    cryptography prose produced essentially no shared 4-grams).
+
+    Fix: use the impossibility direction. Set the threshold ABOVE 1.0
+    (no Jaccard can exceed 1.0) and feed identical stakeholder bodies
+    (max_pair_overlap ≈ 1.0). The validator MUST NOT flag because the
+    overlap can't exceed the live threshold — but if the validator had
+    a hardcoded `> 0.20` literal, identical bodies (overlap ≈ 1.0)
+    would still flag, since 1.0 > 0.20. This direction exercises the
+    live read unambiguously: failure of this test = stale literal."""
+    monkeypatch.setattr(wr, "_STAKEHOLDER_JACCARD_MAX", 1.5)
     article = (
         "## 7 Strategic Recommendations\n\n"
         "### 7.1 For Investors\n\n"
-        "Pursue ARR-positive Series-B picks in semiconductor manufacturing. "
-        "Track export controls. Diversify across analog and digital firms.\n\n"
+        "Pursue ARR-positive Series-B picks in semiconductor manufacturing "
+        "and avoid early-stage analog hardware. Diversify across at least "
+        "three architectures. Track the policy timeline for export controls.\n\n"
         "### 7.2 For Policymakers\n\n"
-        "Adopt PQC standards. Fund domestic foundries. Mandate disclosure "
-        "of cross-border supply-chain dependencies.\n"
+        "Pursue ARR-positive Series-B picks in semiconductor manufacturing "
+        "and avoid early-stage analog hardware. Diversify across at least "
+        "three architectures. Track the policy timeline for export controls.\n"
     )
     sc = {
         "title": "Strategic Recommendations",
@@ -113,18 +129,56 @@ def test_stakeholder_jaccard_max_drift_test_via_monkeypatch(monkeypatch):
     }
     audit = v._validate_stakeholder_overlap(article, sc)
     assert audit is not None
-    # With threshold dropped to 0.10, any incidental overlap (shared
-    # connector words across the two bodies) flags. With the prior
-    # 0.20 threshold this body pair would NOT have flagged. The
-    # specific outcome depends on shared-token count; the contract is
-    # just that the threshold is live-read.
-    # Recompute: if max_pair_overlap > 0.10 → must appear in overlap_pairs.
-    if audit["max_pair_overlap"] > 0.10:
-        assert len(audit["overlap_pairs"]) >= 1, (
-            f"threshold lowered to 0.10 but no pair flagged at "
-            f"max_overlap={audit['max_pair_overlap']}; validator may be "
-            f"reading a stale value"
-        )
+    # Identical bodies → max_pair_overlap should be > 0.20 (would have
+    # flagged under any sensible threshold ≤ 1.0). Pin this so the
+    # body-construction precondition is explicit.
+    assert audit["max_pair_overlap"] > 0.20, (
+        f"identical-body precondition violated: expected max_pair_overlap > 0.20 "
+        f"to make the threshold-comparison meaningful; got {audit['max_pair_overlap']}"
+    )
+    # The active assertion: with threshold raised to 1.5, identical
+    # bodies (overlap ≈ 1.0) MUST NOT flag. A hardcoded `> 0.20`
+    # would flag this — that's the regression this test catches.
+    assert audit["overlap_pairs"] == [], (
+        f"validator did not honor the monkeypatched threshold of 1.5 — pairs flagged: "
+        f"{audit['overlap_pairs']} (max_overlap={audit['max_pair_overlap']}). "
+        f"This means the validator is reading a stale literal, NOT "
+        f"`wr._STAKEHOLDER_JACCARD_MAX`."
+    )
+
+
+def test_stakeholder_jaccard_max_drift_test_via_monkeypatch_below_default(monkeypatch):
+    """Defence-in-depth in the OTHER direction: monkeypatch the
+    threshold DOWN to 0.50 (still well below identical-body overlap)
+    and verify identical bodies still flag. Pre-fix this would
+    trivially pass too — but combined with the >1.0 test above, the
+    pair pins live behavior in both directions."""
+    monkeypatch.setattr(wr, "_STAKEHOLDER_JACCARD_MAX", 0.50)
+    article = (
+        "## 7 Strategic Recommendations\n\n"
+        "### 7.1 For Investors\n\n"
+        "Pursue ARR-positive Series-B picks in semiconductor manufacturing "
+        "and avoid early-stage analog hardware. Diversify across at least "
+        "three architectures. Track the policy timeline for export controls.\n\n"
+        "### 7.2 For Policymakers\n\n"
+        "Pursue ARR-positive Series-B picks in semiconductor manufacturing "
+        "and avoid early-stage analog hardware. Diversify across at least "
+        "three architectures. Track the policy timeline for export controls.\n"
+    )
+    sc = {
+        "title": "Strategic Recommendations",
+        "stakeholders": [
+            {"id": "S7.1", "label": "For Investors", "content_directive": ""},
+            {"id": "S7.2", "label": "For Policymakers", "content_directive": ""},
+        ],
+    }
+    audit = v._validate_stakeholder_overlap(article, sc)
+    assert audit is not None
+    # Identical bodies → overlap ≈ 1.0 > 0.50 threshold → must flag.
+    assert len(audit["overlap_pairs"]) == 1, (
+        f"identical bodies should flag at threshold 0.50; got overlap_pairs={audit['overlap_pairs']}, "
+        f"max_overlap={audit['max_pair_overlap']}"
+    )
 
 
 def test_stakeholder_rule_installed_when_has_stakeholder_chapter_true():

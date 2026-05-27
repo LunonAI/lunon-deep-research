@@ -493,9 +493,19 @@ def write_section(
                 "'From the {stakeholder} perspective, three steps emerge…'.\n"
                 "    - Reference 1-2 specific entities from prior chapters "
                 "where relevant.\n"
+                # Greptile PR #46 round-2 issue #1 (2026-05-27): user-
+                # prompt directive must source the threshold from
+                # `wr._STAKEHOLDER_JACCARD_MAX` so a future tightening
+                # (e.g., to 0.15) propagates to ALL three surfaces:
+                # validator literal, system-prompt rule, AND user-prompt
+                # directive. Pre-fix the user-prompt block still had a
+                # hardcoded `0.20` literal — the writer LLM would have
+                # been steered toward a stale target after a threshold
+                # change.
                 "  NON-OVERLAP DISCIPLINE (CRITICAL — the post-write validator "
                 "`_validate_stakeholder_overlap` enforces pairwise Jaccard "
-                "4-gram overlap < 0.20 between every pair of sub-sections):\n"
+                f"4-gram overlap < {wr._STAKEHOLDER_JACCARD_MAX:.2f} between "
+                "every pair of sub-sections):\n"
                 "    - Each block's recommendations MUST address content "
                 "DISJOINT from the other blocks.\n"
                 "    - Do NOT re-state advice that applies to multiple "
