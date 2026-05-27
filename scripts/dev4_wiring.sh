@@ -62,6 +62,20 @@ for var in OPENAI_API_KEY ANTHROPIC_API_KEY; do
     fi
 done
 
+# Python interpreter. Honor an explicit PY override if exported; otherwise
+# default to the Lunon repo's .venv (where openai, anthropic, and the rest
+# of the Lunon deps live). macOS 12+ ships no `python` binary and only a
+# bare system `python3` with no third-party packages, so bare `python3` /
+# `python` cannot run this pipeline on most user machines — the venv path
+# is the portable choice. Use an absolute path because we `cd` to $DRB_REPO
+# before the grading step; a relative path would break there.
+PY="${PY:-$LUNON_REPO/.venv/bin/python}"
+if [ ! -x "$PY" ]; then
+    echo "[dev4-wiring] ERROR: python interpreter not executable: $PY" >&2
+    echo "[dev4-wiring]        export PY=/path/to/python to override (must have openai + lunon deps installed)." >&2
+    exit 1
+fi
+
 # Phase tag for cost/ledger attribution.
 export DRB_PHASE=P3
 
@@ -96,7 +110,7 @@ echo "[dev4-wiring] ids=8,14,37,91 workers=4" | tee -a "$LOG"
 
 # Generation. Lunon clients auto-load .env via deep_research._env.get(),
 # so no shell export needed for ANTHROPIC_API_KEY here.
-python3 -m deep_research.adapter \
+"$PY" -m deep_research.adapter \
   --query-file "$DRB_REPO/data/prompt_data/query.jsonl" \
   --out "$OUT_JSONL" \
   --ids 8,14,37,91 \
@@ -115,7 +129,7 @@ echo "[dev4-wiring] staged → $HARNESS_RAW" | tee -a "$LOG"
 EVAL_LOG="p3b_artifacts/dev4_wiring_eval.log"
 cd "$DRB_REPO"
 echo "[dev4-wiring] starting RACE eval at $(date -Iseconds)" | tee "$LUNON_REPO/$EVAL_LOG"
-python -u deepresearch_bench_race.py "$RUN_TAG" \
+"$PY" -u deepresearch_bench_race.py "$RUN_TAG" \
   --raw_data_dir data/test_data/raw_data \
   --max_workers 4 \
   --query_file data/prompt_data/query.jsonl \
