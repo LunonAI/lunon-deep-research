@@ -91,6 +91,16 @@ def _persist_drift(s, language: str, query: str) -> None:
             # under the _MERMAID_DIRECTIVE and (b) which of the 4 failure
             # modes the writer most often hits.
             "mermaid_validate": dict(getattr(s, "mermaid_validate_stats", {}) or {}),
+            # P3-W3.b (2026-05-27): xref_repair safety-net post-pass
+            # stats {templates_repaired, dangling_refs_rewritten,
+            # sentences_deleted}. The writer's in-prompt
+            # _MID_PARAGRAPH_XREF_RULE is the primary force producing
+            # clean cross-refs; non-zero stats here quantify how often
+            # the safety net actually fires. All-zero stats across a
+            # dev4 batch = writer directive is doing the work; > 0 =
+            # writer occasionally regresses to "Building on §X"
+            # templates or hallucinates dangling forward-refs.
+            "xref_repair": dict(getattr(s, "xref_repair_stats", {}) or {}),
         }
         _DRIFT_PATH.parent.mkdir(parents=True, exist_ok=True)
         with _DRIFT_LOCK, _DRIFT_PATH.open("a", encoding="utf-8") as fh:
@@ -120,6 +130,7 @@ from .pipeline import (
     scout,
     validation,
     writer,
+    xref_repair,
     zh_writer_pass,
 )
 from .retrieval import domain_routed
@@ -287,6 +298,23 @@ def from_plan(ctx: dict, query: str, language: str, task_id: int | None = None) 
     if language == "zh":
         zp = _phase("zh_writer_pass", zh_writer_pass.zh_pass, s.article, query)
         s.article = zp["article"]
+
+    # P3-W3.b (2026-05-27): xref_repair safety-net post-pass. The
+    # writer's in-prompt `_MID_PARAGRAPH_XREF_RULE` (writing_rules.py) is
+    # the primary force producing clean mid-paragraph cross-references;
+    # this post-pass repairs the residual two failure modes the
+    # directive can't fully suppress: (1) chapter-opening "Building on
+    # §X established in §Y" templates that occasionally leak through
+    # despite the §12.A.v4 amendment, and (2) dangling forward-refs
+    # (§N where N isn't in the article's heading set). Placed BEFORE
+    # mermaid_validate so any sentence deletions that happen here don't
+    # leave orphan mermaid fence tokens for the next pass to mishandle;
+    # placed BEFORE footnote_normalize so any `[^N]` markers inside a
+    # deleted sentence are pulled out of the article before global
+    # renumbering, preventing phantom def-line slots in References.
+    repaired_x, xr_stats = _phase("xref_repair", xref_repair.repair, s.article)
+    s.article = repaired_x
+    s.xref_repair_stats = xr_stats
 
     # P3-W4 (2026-05-27): mermaid post-pass repair. The writer's
     # `_MERMAID_DIRECTIVE` (writing_rules.py) opts the model into emitting
