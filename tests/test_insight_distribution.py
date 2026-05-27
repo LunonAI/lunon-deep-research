@@ -64,51 +64,107 @@ def test_insight_min_rule_documents_per_archetype_bias():
 
 
 def test_insight_distribution_default_keys_complete():
-    """The default distribution dict must carry all four element keys
+    """The default distribution dict must carry all SIX element keys
     so callers (writer-prompt mirror + compliance scorer) can always
-    look up every element without KeyError fallback noise."""
+    look up every element without KeyError fallback noise.
+
+    Wave 3 PR 2: extended from 4 keys to 6 (added causal_chain_min +
+    problem_tradeoff_min) to cover RACE Insight criteria 2 + 3."""
     expected_keys = {
         "forward_looking_min",
         "contrarian_min",
         "quant_min",
         "alternative_min",
+        "causal_chain_min",
+        "problem_tradeoff_min",
     }
     assert set(_INSIGHT_DISTRIBUTION_DEFAULT.keys()) == expected_keys
 
 
 def test_insight_distribution_for_predict_biases_forward_looking_up():
-    """predict / trend / recommend are forward-looking-by-mission. The
-    (a) target must be UP to ≥40% (Wave 2 PR #30 calibration against
-    Qianfan trend id=38 weighted mean of 58% forward-looking)."""
-    for archetype in ("predict", "trend", "recommend"):
-        d = insight_distribution(archetype)
-        assert d["forward_looking_min"] >= 40, f"{archetype}: forward_looking_min should be ≥40%"
+    """predict is forward-by-mission. Wave 3 PR-0 fresh-corpus
+    recalibration (id=3 observed 76%) raised the target from 45 to 70.
+    recommend was over-targeting in Wave 2 (40 vs observed 30) and was
+    walked back to 25. trend stayed close (Wave 2 had 45; Wave 3 set
+    35 per observed 40). The test enforces predict's UP move; the
+    weaker forward-targets for trend/recommend are pinned in their
+    own per-archetype tests."""
+    d_predict = insight_distribution("predict")
+    assert d_predict["forward_looking_min"] >= 60, (
+        f"predict: forward_looking_min should be ≥60% (Wave 3 PR-0 calibration target ≥70); got {d_predict['forward_looking_min']}"
+    )
 
 
 def test_insight_distribution_for_list_all_biases_alternative_up():
     """list-all / compare are entity-enumerated archetypes — most
-    leaves are inherently comparisons across the matrix. Wave 2 PR
-    #30 calibration against Qianfan list-all weighted mean
-    (alt 59%) bumps target to ≥45%. Forward-looking also bumped to
-    ≥50% per Qianfan's 69% observed rate."""
-    for archetype in ("list-all", "compare"):
-        d = insight_distribution(archetype)
-        assert d["alternative_min"] >= 45, f"{archetype}: alternative_min should be ≥45% (corpus-calibrated)"
-        assert d["forward_looking_min"] >= 50, f"{archetype}: forward_looking_min should be ≥50% (corpus-calibrated)"
+    leaves are inherently comparisons across the matrix. Wave 3 PR-0
+    fresh-corpus recalibration: list-all observed alt 76% (target
+    raised to 60), compare observed alt 22% (target DROPPED from 47
+    to 15 — was way over-targeting). The test pins list-all's
+    high-alternative bias; compare's lower bias is pinned in its own
+    per-archetype test."""
+    d = insight_distribution("list-all")
+    assert d["alternative_min"] >= 55, (
+        f"list-all: alternative_min should be ≥55% (Q observed 76); got {d['alternative_min']}"
+    )
+    assert d["forward_looking_min"] >= 45, (
+        f"list-all: forward_looking_min should be ≥45% (Q observed 62); got {d['forward_looking_min']}"
+    )
 
 
 def test_insight_distribution_for_explain_mechanism_corpus_calibrated():
-    """explain-mechanism uses Qianfan-calibrated targets (Wave 2 PR
-    #30): fwd 28 / contr 8 / quant 1 / alt 42 — derived from Qianfan
-    corpus weighted mean (35 / 10 / 2 / 53). Notably LOW on quant
-    and contrarian — Qianfan explains with alternatives + forward-
-    looking projection, not contrarian framing."""
+    """explain-mechanism uses Wave 3 PR-0 fresh-corpus targets:
+    fwd 15 / contr 3 / quant 3 / alt 25 / causal 25 / problem 4.
+    Derived from 4-task Qianfan mean (19 / 4 / 6 / 32 / 31 / 5).
+    Notably LOW on contrarian/quant — Qianfan explains with
+    alternatives + causal chains, not contrarian framing or heavy
+    quantification."""
     d = insight_distribution("explain-mechanism")
-    # Alternative is the dominant element for explain-mech per Qianfan.
-    assert d["alternative_min"] >= 40
-    # Contrarian/quant are minimal in Qianfan — keep targets low.
+    # Alternative remains the dominant of the original 4 for explain-mech.
+    assert d["alternative_min"] >= 20, (
+        f"alt_min should be ≥20% (Wave 3 calibration target 25); got {d['alternative_min']}"
+    )
+    # Contrarian/quant remain minimal.
     assert d["contrarian_min"] <= 15
     assert d["quant_min"] <= 10
+    # Wave 3 PR 2: causal_chain is central to this archetype (the
+    # explain-mech archetype IS multi-step causal explanation).
+    assert d["causal_chain_min"] >= 20, (
+        f"causal_chain_min should be ≥20% (Wave 3 target 25); got {d['causal_chain_min']}"
+    )
+
+
+def test_insight_distribution_for_predict_has_high_causal_chain_target():
+    """Wave 3 PR 2: predict is causal-chain-by-mission (multi-step
+    forecasting), so causal_chain_min is the highest of any archetype.
+    Qianfan predict (id=3) observed 57%; target set to 45 (5-15%
+    below observed)."""
+    d = insight_distribution("predict")
+    assert d["causal_chain_min"] >= 40, (
+        f"predict: causal_chain_min should be ≥40% (Wave 3 target 45); got {d['causal_chain_min']}"
+    )
+
+
+def test_insight_distribution_for_compare_was_recalibrated_down_on_alternative():
+    """Wave 3 PR-0 fresh-corpus calibration corrected a major Wave 2
+    miscalibration: compare's alternative_min was 47 (extrapolated
+    from list-all) but Qianfan compare observed only 22%. Target
+    walked back to 15 to avoid forcing Lunon to over-fire on the
+    alternative element."""
+    d = insight_distribution("compare")
+    assert d["alternative_min"] <= 25, (
+        f"compare: alternative_min should be ≤25% post-Wave-3 (Q observed 22; was over-targeted at 47 in Wave 2); got {d['alternative_min']}"
+    )
+
+
+def test_insight_distribution_for_recommend_biases_alternative_up():
+    """Wave 3 PR 2 calibration: recommend is the only archetype where
+    Qianfan systematically compares options across explicit alternatives
+    (observed 48%). Target raised from Wave 2's 15 to 40."""
+    d = insight_distribution("recommend")
+    assert d["alternative_min"] >= 35, (
+        f"recommend: alternative_min should be ≥35% (Wave 3 target 40); got {d['alternative_min']}"
+    )
 
 
 def test_insight_distribution_unknown_archetype_falls_back_to_default():
@@ -196,19 +252,27 @@ def test_insight_min_system_prompt_carries_no_hardcoded_percentages():
 def test_insight_distribution_writer_prompt_mirrors_targets():
     """The writer.write_section user prompt must include the per-
     archetype distribution targets so the writer sees the numbers
-    upfront (where its attention lands, not just in the system prompt)."""
+    upfront (where its attention lands, not just in the system prompt).
+
+    Wave 3 PR 2: writer block now lists all SIX elements (added
+    causal_chain + problem_tradeoff). Targets updated per PR-0 fresh-
+    corpus recalibration (predict's forward target jumped 45 → 70)."""
     from deep_research.pipeline.writer import _insight_distribution_block
 
-    # predict archetype: forward-looking aim ≥45% (Wave 2 PR #30
-    # corpus-calibrated against Qianfan trend's 58% observed rate).
+    # predict archetype: Wave 3 calibration set forward_looking_min=70
+    # (Q observed 76% on id=3) and causal_chain_min=45 (Q observed 57%).
     block = _insight_distribution_block("predict")
     assert "INSIGHT DISTRIBUTION" in block
-    assert "≥45%" in block
-    # list-all archetype: alternative aim ≥47% (Wave 2 PR #30
-    # corpus-calibrated against Qianfan list-all's 59% observed rate).
+    assert "≥70%" in block, "predict's recalibrated forward_looking target should appear"
+    assert "≥45%" in block, "predict's recalibrated causal_chain target should appear"
+    # list-all archetype: Wave 3 set alternative_min=60 (Q observed 76%).
     block_la = _insight_distribution_block("list-all")
     assert "INSIGHT DISTRIBUTION" in block_la
-    assert "≥47%" in block_la or "≥45%" in block_la
+    assert "≥60%" in block_la, "list-all's recalibrated alternative target should appear"
+    # The 6-element naming must include the 2 new elements verbatim so
+    # the writer sees what (e) and (f) are.
+    assert "(e) CAUSAL CHAIN" in block
+    assert "(f) PROBLEM-TRADEOFF" in block
     # The compliance scorer reference must be there so the writer
     # knows the targets are MEASURED downstream.
     assert "p2_writer_compliance.py" in block

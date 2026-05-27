@@ -63,7 +63,10 @@ def test_footnote_density_below_qianfan_floor_flagged():
 
 
 def test_classify_leaf_elements_detects_each_element():
-    """Each element regex must fire on a representative example."""
+    """Each element regex must fire on a representative example.
+
+    Wave 3 PR 2: extended from 4 elements to 6 (added causal_chain +
+    problem_tradeoff targeting RACE Insight criteria 2 + 3)."""
     # Forward-looking: date anchor + "by 20XX" phrasing.
     fl = _classify_leaf_elements("By 2027, the cohort will likely expand.")
     assert fl["forward_looking"] is True
@@ -76,6 +79,67 @@ def test_classify_leaf_elements_detects_each_element():
     # Alternative: "Whereas X, Y"
     al = _classify_leaf_elements("Whereas Mu's wall absorbs radially, Aiolia's propagates directionally.")
     assert al["alternative"] is True
+    # Wave 3 PR 2: NEW (e) causal_chain — multi-link "leads to / in turn"
+    cc = _classify_leaf_elements(
+        "The blood-marker activates the cosmo channel, which in turn enables "
+        "the Seventh-Sense awakening that leads to the cloth's full bond."
+    )
+    assert cc["causal_chain"] is True
+    # Wave 3 PR 2: NEW (f) problem_tradeoff — "apparent paradox" + resolution
+    pt = _classify_leaf_elements(
+        "The apparent paradox — Bronze defeating Gold — resolves via the Cosmo-depth doctrine."
+    )
+    assert pt["problem_tradeoff"] is True
+
+
+def test_classify_causal_chain_avoids_false_positives_on_common_verbs():
+    """Wave 3 PR 2: causal_chain must NOT fire on 'drives the project /
+    team / process / system / effort' (common business prose, not chain
+    construction) — the negative lookahead in _CAUSAL_CHAIN_RE handles
+    this. Similarly 'causes for X' is not causal-chain ('causes for
+    celebration', 'causes for concern')."""
+    false_positives = [
+        "Leadership drives the project to completion every quarter.",
+        "The CEO drives the company strategy toward sustainability.",
+        "She drives the process forward with clear deadlines.",
+        "There are several causes for concern in the latest report.",
+        "Public causes for celebration filled the streets.",
+    ]
+    for s in false_positives:
+        assert not _classify_leaf_elements(s)["causal_chain"], f"false positive: {s!r}"
+    # Genuine multi-link causation still fires.
+    real_chains = [
+        "The release in 2023 led to a wave of adoption that produced new market entrants.",
+        "Higher temperatures drive vapor saturation, which subsequently triggers convection.",
+        "The amendment gives rise to a procedural cascade that ultimately resolves the deadlock.",
+    ]
+    for s in real_chains:
+        assert _classify_leaf_elements(s)["causal_chain"], f"missed: {s!r}"
+
+
+def test_classify_problem_tradeoff_orthogonal_to_alternative():
+    """Wave 3 PR 2: problem_tradeoff and alternative are designed to
+    be orthogonal. The bare word "tradeoff" already fires alternative
+    (existing _ALTERNATIVE_RE pattern); problem_tradeoff fires on
+    EXPLICIT problem/paradox/tension framing. Per-element rates remain
+    independent (a leaf can match both, neither, or just one)."""
+    # Sentence that fires problem_tradeoff but NOT alternative — no
+    # "tradeoff" / "alternative" / "whereas" wording.
+    pt_only = _classify_leaf_elements(
+        "The challenge of reconciling the manga continuity with the anime "
+        "fork is the central issue scholars have wrestled with for decades."
+    )
+    assert pt_only["problem_tradeoff"] is True
+    assert pt_only["alternative"] is False
+    # Sentence that fires problem_tradeoff because it explicitly names
+    # the paradox + resolution. Alternative ALSO fires because of
+    # "whereas" — that's expected (both rates count this leaf).
+    both = _classify_leaf_elements(
+        "Whereas the Sanctuary arc presents Saori as untrained, the "
+        "Hades arc resolves this apparent paradox via the bloodline reveal."
+    )
+    assert both["problem_tradeoff"] is True
+    assert both["alternative"] is True
 
 
 # ---- Wave 2 PR #30 self-review (gap #4): expanded regex coverage ----
@@ -343,21 +407,29 @@ def test_split_into_leaves_deep_archetype_uses_h4():
 
 def test_insight_distribution_per_archetype_target_applied():
     """The distribution scorer must pull per-archetype targets from
-    `writing_rules.insight_distribution`. predict archetype expects
-    ≥50% forward-looking; list-all expects ≥30% alternative."""
+    `writing_rules.insight_distribution`. Wave 3 PR-0 fresh-corpus
+    recalibration: predict forward_looking 45 → 70 (Q observed 76% on
+    id=3); list-all alternative 47 → 60 (Q observed 76%). Wave 3 PR 2
+    also added 2 new keys (causal_chain / problem_tradeoff)."""
     article = (
         "# Title\n\n"
         "## 1 A\n#### 1.1.1 L1\nBy 2027 things change. Whereas X, Y.\n\n"
         "## 2 B\n#### 2.1.1 L2\nBy 2028 more change.\n"
     )
-    # predict archetype — forward-looking target = 45 (Wave 2 PR #30
-    # corpus calibration).
+    # predict archetype — Wave 3 PR-0: forward_looking_min = 70.
     p = _score_insight_distribution(article, "predict")
-    assert p["per_element_target_pct"]["forward_looking"] == 45
-    # list-all archetype — alternative target = 47 (Wave 2 PR #30
-    # corpus calibration).
+    assert p["per_element_target_pct"]["forward_looking"] == 70
+    # Wave 3 PR 2: causal_chain target is highest on predict (45%).
+    assert p["per_element_target_pct"]["causal_chain"] == 45
+    # list-all archetype — Wave 3 PR-0: alternative_min = 60.
     la = _score_insight_distribution(article, "list-all")
-    assert la["per_element_target_pct"]["alternative"] == 47
+    assert la["per_element_target_pct"]["alternative"] == 60
+    # Both archetypes must surface all 6 element targets so the scorer
+    # gives the writer per-element feedback on each. A missing key here
+    # would silently break downstream gap-computation.
+    expected_keys = {"forward_looking", "contrarian", "quant", "alternative", "causal_chain", "problem_tradeoff"}
+    assert set(p["per_element_target_pct"].keys()) == expected_keys
+    assert set(la["per_element_target_pct"].keys()) == expected_keys
 
 
 def test_outline_shape_flags_out_of_bounds_h2_for_list_all():
