@@ -1174,20 +1174,59 @@ def check_xref_quality(text: str) -> dict:
         return any(s <= pos < e for s, e in paren_spans)
 
     raw_refs: list[str] = []
+    raw_ref_spans: list[tuple[int, int]] = []
     for m in generic_pattern.finditer(text):
         if _in_paren(m.start()):
             continue
         raw_refs.append(m.group(1))
-    zh_refs = zh_pattern.findall(text)
+        raw_ref_spans.append((m.start(), m.end()))
+    zh_ref_matches = list(zh_pattern.finditer(text))
+    zh_refs = [m.group(1) for m in zh_ref_matches]
+    zh_ref_spans = [(m.start(), m.end()) for m in zh_ref_matches]
     all_refs = list(paren_refs) + raw_refs + zh_refs
 
-    # Forward-defer detection: "will" / "below" / "下文" / "下面" / "后续" near the ref.
+    # Forward-defer detection: count XREFS that appear in a forward-defer
+    # CONTEXT, not raw phrase occurrences. The intent from
+    # `_MID_PARAGRAPH_XREF_RULE` is "≤30% of *xrefs* are forward-defer
+    # style"; Greptile PR #39 round-2 noted that the prior implementation
+    # divided raw phrase count (which fires on any "below" / "will return"
+    # in the document, including non-xref contexts) by xref count —
+    # numerator and denominator had incompatible units, and a document
+    # using "below" 6 times around 5 xrefs would score `forward_ratio =
+    # 1.2 > 0.30` and spuriously fail.
+    #
+    # New implementation: for each xref span, check whether a forward-
+    # defer phrase appears within an ±80-char window around it (a
+    # sentence-level proximity bound — captures "will return below
+    # (Section 5)" but rejects "below" 200 chars away from any xref).
     forward_defer_pattern = re.compile(
         r"(?:will\s+(?:return|cover|detail|address|examine)|below|下文|下面|后续|"
         r"第\s*\d+\s*[节章]\s*将|see\s+(?:Section|§|Chapter)\s+\d[\d\.]*\s*(?:below|later))",
         re.I,
     )
-    n_forward_defer = sum(1 for _ in forward_defer_pattern.finditer(text))
+    all_xref_spans = list(paren_spans) + raw_ref_spans + zh_ref_spans
+    _XREF_DEFER_WINDOW = 80  # chars on each side — ~1 sentence of context
+    n_forward_defer = 0
+    for xstart, xend in all_xref_spans:
+        wstart = max(0, xstart - _XREF_DEFER_WINDOW)
+        wend = min(len(text), xend + _XREF_DEFER_WINDOW)
+        # Clamp at paragraph / heading boundaries. A "below" or "will
+        # return" in a prior paragraph (or chapter) is not semantically
+        # tied to this xref — readers parse sentences within paragraphs,
+        # not across them. Without this clamp, an isolated "below" 50
+        # chars away in the prior chapter would falsely fire.
+        pre = text[wstart:xstart]
+        for sep in ("\n\n", "\n## ", "\n### ", "\n#### "):
+            idx = pre.rfind(sep)
+            if idx >= 0:
+                wstart = max(wstart, wstart + idx + len(sep))
+        post = text[xend:wend]
+        for sep in ("\n\n", "\n## ", "\n### ", "\n#### "):
+            idx = post.find(sep)
+            if idx >= 0:
+                wend = min(wend, xend + idx)
+        if forward_defer_pattern.search(text, wstart, wend):
+            n_forward_defer += 1
 
     # Opening-template antipattern (P3-W3 regression detector for §12.A.v4).
     opening_template_pattern = re.compile(r"(?m)^#{2}\s+[\d\.]*\s*\S.*\n+\s*Building on\b", re.I)

@@ -23,7 +23,17 @@ with empty stats. Never raises.
 
 import re
 
-_OPENING_TEMPLATE_PATTERN = re.compile(r"(?m)(^#{2}\s+[^\n]+\n+)(\s*Building on\b[^.]*\.\s*)")
+# Greptile PR #39 round-2: prior pattern `[^.]*\.` stopped at the FIRST dot,
+# which inside "Building on §1.2 established in §3, this section…" matched the
+# embedded decimal dot in "§1.2" and left ".2 established in §3, this section…"
+# stranded as an orphan fragment. The corrected pattern uses non-greedy
+# `[^\n]*?` plus a sentence-end lookahead `\.(?=\s|$)` — a period followed by
+# whitespace or end-of-string, which is what a sentence-terminating period
+# actually looks like. Dotted sub-section numbers (e.g. §1.2, §3.4.5) have a
+# digit immediately after the dot, so the lookahead skips them.
+_OPENING_TEMPLATE_PATTERN = re.compile(
+    r"(?m)(^#{2}\s+[^\n]+\n+)(\s*Building on\b[^\n]*?\.(?=\s|$))[ \t]*"
+)
 
 
 def _heading_ids(text: str) -> set[str]:
@@ -97,10 +107,25 @@ def repair(text: str) -> tuple[str, dict]:
     # Sentence-aware repair: split on sentence boundaries, examine each
     # sentence; rewrite dangling refs inside sentences with other content,
     # delete the sentence if the dangling ref is its only meaningful clause.
-    # Greedy sentence split: end-of-sentence marker followed by space.
-    parts = re.split(r"(?<=[.!?])\s+", text)
-    out_parts: list[str] = []
-    for sentence in parts:
+    #
+    # Greptile PR #39 round-2: the split MUST capture the inter-sentence
+    # whitespace so we can rejoin with the verbatim separator. The prior
+    # `re.split(r"(?<=[.!?])\s+", text)` consumed `\n\n` as part of the
+    # match and the `" ".join(...)` collapse pushed the following `##`
+    # heading inline with the preceding sentence — silently breaking
+    # markdown rendering for every paragraph that happened to end in
+    # `.\n\n## `. The capture group `(...)` makes `re.split` emit
+    # separators as interleaved entries: [sent, sep, sent, sep, ..., sent].
+    tokens = re.split(r"((?<=[.!?])\s+)", text)
+    out_tokens: list[str] = []
+    # `tokens` alternates: even indices are sentences, odd indices are
+    # the inter-sentence whitespace (which may include `\n\n`).
+    for i in range(0, len(tokens), 2):
+        sentence = tokens[i]
+        # Separator that FOLLOWED this sentence in the input (empty for
+        # the final sentence). We carry the separator through verbatim.
+        sep = tokens[i + 1] if i + 1 < len(tokens) else ""
+
         # Find all dangling refs in this sentence
         dangling_in_sentence = []
         for m in ref_pattern.finditer(sentence):
@@ -108,19 +133,22 @@ def repair(text: str) -> tuple[str, dict]:
             if num and _looks_dangling(num):
                 dangling_in_sentence.append((m.start(), m.end(), num))
         if not dangling_in_sentence:
-            out_parts.append(sentence)
+            out_tokens.append(sentence)
+            out_tokens.append(sep)
             continue
         # Compute remaining content after stripping the dangling refs.
-        # If <30 chars or only punctuation remains, drop the sentence.
+        # If <15 chars or only punctuation remains, drop the sentence.
         stripped = sentence
         for start, end, _ in reversed(dangling_in_sentence):
             stripped = stripped[:start] + stripped[end:]
         residual = re.sub(r"[\s\.,;:!?\(\)\[\]]+", "", stripped)
         if len(residual) < 15:
             # Sentence has no meaningful content after removing the
-            # dangling ref — delete it entirely. (15 chars is the heuristic
-            # bar; tighter and we'd preserve dangler-only sentences,
-            # looser and we'd over-delete legitimate prose.)
+            # dangling ref — delete it entirely (and its separator, so
+            # we don't leave a dangling `\n\n` or `  ` in the output).
+            # 15 chars is the heuristic bar; tighter and we'd preserve
+            # dangler-only sentences, looser and we'd over-delete
+            # legitimate prose.
             stats["sentences_deleted"] += 1
             continue
 
@@ -136,7 +164,8 @@ def repair(text: str) -> tuple[str, dict]:
                 return "a later section"
             return m.group(0)
 
-        out_parts.append(ref_pattern.sub(_rewrite, sentence))
-    text = " ".join(out_parts)
+        out_tokens.append(ref_pattern.sub(_rewrite, sentence))
+        out_tokens.append(sep)
+    text = "".join(out_tokens)
 
     return text, stats
