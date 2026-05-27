@@ -912,6 +912,7 @@ def writer_system(
     suppress_dedup: bool = False,
     outline_shape: dict | None = None,
     has_stakeholder_chapter: bool = False,
+    has_limitations_chapter: bool = False,
 ) -> str:
     """Assemble the writer system prompt.
 
@@ -941,6 +942,19 @@ def writer_system(
     Defaults False (back-compat with any caller that doesn't thread
     the flag) — the rule's textual self-guard ("applies when
     stakeholder_chapter is in the plan...") still kicks in if a future
+    caller forgets to set the flag, so silent breakage is impossible.
+
+    Greptile PR #45 round-6 issue #2 (2026-05-27):
+    `has_limitations_chapter` gates `_LIMITATIONS_RULE` inclusion,
+    mirroring the stakeholder precedent. The architect only emits
+    `limitations_chapter` for predict / compare / explain-mechanism /
+    list-all archetypes; trend / recommend tasks never carry the
+    chapter and the ~1300-char rule is pure prompt noise for them.
+    Callers in writer.py pass
+    `has_limitations_chapter=bool(plan.get("limitations_chapter"))`.
+    Defaults False — the rule's textual self-guard ("required for
+    predict / compare / explain-mechanism / list-all archetypes when
+    `limitations_chapter` is in the plan") still kicks in if a future
     caller forgets to set the flag, so silent breakage is impossible.
     """
     ceil = length_ceiling(domain)
@@ -974,9 +988,16 @@ def writer_system(
             _SECTION_OPENING_PROSE_LEAD_RULE,
             _MID_PARAGRAPH_XREF_RULE,
             _MERMAID_DIRECTIVE,
-            _LIMITATIONS_RULE,
         ]
     )
+    # Greptile PR #45 round-6 issue #2: gate `_LIMITATIONS_RULE` on
+    # `has_limitations_chapter`. The architect only emits
+    # `plan["limitations_chapter"]` for predict / compare /
+    # explain-mechanism / list-all archetypes; for trend / recommend
+    # the ~1300-char rule is pure prompt noise. Mirrors the
+    # `has_stakeholder_chapter` precedent below.
+    if has_limitations_chapter:
+        middle_rules.append(_LIMITATIONS_RULE)
     # Greptile PR #46 round-1 issue #2: gate `_STAKEHOLDER_RULE` on
     # `has_stakeholder_chapter`. The architect only emits
     # `plan["stakeholder_chapter"]` for plural-audience prompts; for
