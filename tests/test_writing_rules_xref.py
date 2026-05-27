@@ -173,6 +173,81 @@ def test_forward_defer_ratio_zero_when_no_xrefs():
     assert not any("forward_defer_ratio" in f for f in out["fail"])
 
 
+def test_dangling_forward_refs_deduplicated_by_unique_section():
+    """Greptile PR #39 round-7 issue #1: `dangling_forward_refs`
+    previously accumulated one entry per occurrence — citing
+    `(Section 47)` five times in the document produced
+    `["47","47","47","47","47"]` and the `fail` entry read
+    `dangling_forward_refs=5`. A caller would reasonably interpret
+    that as five distinct missing sections when there's only one.
+    Dedup by unique ref-id makes the list and the fail count
+    semantically honest.
+    """
+    text = (
+        "## 1 Intro\n\n"
+        # Same dangling §47 cited 5 times across multiple chapters.
+        "Cite (Section 47) once. Cite (Section 47) twice. "
+        "Cite (Section 47) thrice.\n\n"
+        "## 2 Body\n\n"
+        "Cite (Section 47) four. Cite (Section 47) five.\n\n"
+        "## 3 More\n\nFiller.\n"
+    )
+    out = wr.check_xref_quality(text)
+    # The list must contain "47" exactly once, not 5 times.
+    assert out["dangling_forward_refs"] == ["47"], f"expected unique ['47'], got {out['dangling_forward_refs']}"
+    # And the fail entry reports `=1`, not `=5`.
+    danglers_fail = [f for f in out["fail"] if "dangling_forward_refs" in f]
+    assert danglers_fail == ["dangling_forward_refs=1"], (
+        f"fail entry count should reflect unique sections, got {danglers_fail}"
+    )
+
+
+def test_dangling_forward_refs_preserves_distinct_sections_in_order():
+    """Symmetric: multiple distinct dangling sections all surface, in
+    first-occurrence order. Dedup must not collapse the list to a
+    single entry when there ARE multiple distinct misses."""
+    text = (
+        "## 1 Intro\n\n"
+        # Three distinct danglers; §99 cited twice to also exercise
+        # the dedup path while preserving §47/§99/§55 order.
+        "(Section 47) and (Section 99) and (Section 99) and (Section 55).\n\n"
+        "## 2 Body\n\nFiller.\n"
+    )
+    out = wr.check_xref_quality(text)
+    # First-occurrence ordering preserved; each unique ref appears once.
+    assert out["dangling_forward_refs"] == ["47", "99", "55"], (
+        f"expected order-preserved unique list, got {out['dangling_forward_refs']}"
+    )
+
+
+def test_h5_h6_heading_titles_not_treated_as_dangling_xref():
+    """Greptile PR #39 round-7 issue #2: the round-5 `masked_text`
+    fix only covered H2-H4 (`#{2,4}`). H5 (`#####`) and H6 (`######`)
+    title lines were left unmasked, so a sub-sub-heading like
+    `##### 5.1 Section 99 Subtopic` would have "Section 99" picked up
+    by `generic_pattern` and "99" flagged as dangling — same bug,
+    just at deeper nesting. The `heading_ids` collection also stopped
+    at `#{2,4}` so a legitimate H5 with id "99" wouldn't have been
+    recognized as a target either. Widening both regexes to `#{2,6}`
+    aligns masking with heading-line recognition.
+
+    Fixture: H5 title containing "Section 99" — the article has no
+    real navigational xref to §99, only the title text. Post-fix, 99
+    must NOT appear in dangling_forward_refs.
+    """
+    text = (
+        "## 1 Overview\n\n"
+        "##### 1.1.1 Section 99 Subtopic\n\n"
+        "Body content here with no inline xrefs.\n\n"
+        "###### 1.1.1.1 Chapter 47 Deep Subtopic\n\n"
+        "More body content.\n"
+    )
+    out = wr.check_xref_quality(text)
+    # Neither "99" nor "47" should be flagged — both are H5/H6 title text.
+    assert "99" not in out["dangling_forward_refs"], f"H5 title `Section 99` leaked into dangling: {out}"
+    assert "47" not in out["dangling_forward_refs"], f"H6 title `Chapter 47` leaked into dangling: {out}"
+
+
 def test_forward_defer_window_ignores_heading_title_phrases():
     """Greptile PR #39 round-6: the forward-defer proximity search
     previously ran against the unmasked `text`. After the pre-window
