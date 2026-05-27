@@ -117,7 +117,7 @@ def _is_valid_diagram_type(content: str) -> bool:
     return False
 
 
-def repair(text: str) -> tuple[str, dict]:
+def repair(text: str | None) -> tuple[str | None, dict]:
     """Validate + repair every mermaid block in `text`.
 
     Returns (repaired_text, stats):
@@ -128,6 +128,10 @@ def repair(text: str) -> tuple[str, dict]:
         "n_blocks_fence_repaired": int,
         "n_blocks_stripped_invalid_type": int,
       }
+
+    Passthrough for `None` / non-`str` / empty input — `(text, zero_stats)` —
+    so the post-pass can be wired into the orchestrator unconditionally
+    without a `None` guard at the call site.
     """
     stats = {
         "n_blocks_found": 0,

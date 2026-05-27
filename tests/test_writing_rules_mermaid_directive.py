@@ -31,3 +31,18 @@ def test_mermaid_directive_enumerates_valid_diagram_types():
     # Pin the 5 most common types the writer is likely to use.
     for kw in ("timeline", "graph", "flowchart", "sequenceDiagram", "stateDiagram"):
         assert kw in rule, f"{kw} missing from valid-types list in directive"
+
+
+def test_mermaid_directive_allowed_types_match_validator():
+    """Greptile PR #40 round-1 follow-up: the FORBIDDEN-forms 'stripped'
+    list in `_MERMAID_DIRECTIVE` must enumerate EVERY type the post-pass
+    validator (`_VALID_DIAGRAM_TYPES`) actually accepts. Pre-fix the
+    directive listed 7 types while the validator accepted 15 — the
+    writer would unnecessarily avoid valid types like `classDiagram`
+    / `erDiagram` / `mindmap` thinking the post-pass would strip them.
+    """
+    from deep_research.pipeline.mermaid_validate import _VALID_DIAGRAM_TYPES
+
+    rule = wr._MERMAID_DIRECTIVE
+    for kw in _VALID_DIAGRAM_TYPES:
+        assert kw in rule, f"validator accepts `{kw}` but directive doesn't list it — writer will avoid this valid type"
