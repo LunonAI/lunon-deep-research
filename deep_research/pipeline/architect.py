@@ -968,7 +968,15 @@ def _normalize(plan: dict, *, archetype: str | None = None) -> None:
             tr["weights"] = {}
         if not isinstance(tr.get("tiers"), list):
             tr["tiers"] = []
-        weights_sum = sum(float(v) for v in tr["weights"].values() if isinstance(v, (int, float)))
+        # Greptile PR #43 round-3: `bool` is a subclass of `int` in Python, so
+        # the prior `isinstance(v, (int, float))` filter silently admitted
+        # boolean weights — a dict like `{"R-1": True}` would compute
+        # weights_sum=1.0 and pass the ±0.05 tolerance check, masking an LLM
+        # type error. The perturbation_pp guard below already excludes bool
+        # explicitly; this restores consistency by doing the same here.
+        weights_sum = sum(
+            float(v) for v in tr["weights"].values() if isinstance(v, (int, float)) and not isinstance(v, bool)
+        )
         n_tiers = len(tr["tiers"])
         audit["tier_ranking_weights_sum"] = round(weights_sum, 4)
         audit["tier_ranking_n_tiers"] = n_tiers

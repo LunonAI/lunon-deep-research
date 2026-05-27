@@ -170,6 +170,39 @@ def test_normalize_handles_malformed_tiers_field():
     assert tr["tiers"] == []
 
 
+def test_normalize_boolean_weights_excluded_from_sum():
+    """Greptile PR #43 round-3: `bool` is a subclass of `int` in Python, so
+    a naive `isinstance(v, (int, float))` filter silently admits boolean
+    weights. A dict like `{"R-1": True}` would compute weights_sum=1.0,
+    pass the ±0.05 tolerance check, and mask an LLM type error.
+
+    The fix excludes bool the same way the perturbation_pp guard does
+    (`not isinstance(v, bool)`). Verified by feeding the auditor a weights
+    dict of all-True values — the audit must record weights_sum=0.0 and
+    emit a `weights_sum=0.000!=1.0±0.05` shortfall."""
+    plan = _bare_plan_with_tr(weights={"R-1": True, "R-2": True, "R-3": True, "R-4": True})
+    architect._normalize(plan, archetype="predict")
+    audit = plan["_outline_audit"]
+    assert audit["tier_ranking_weights_sum"] == 0.0, (
+        f"booleans should be filtered from weights_sum; got {audit['tier_ranking_weights_sum']}"
+    )
+    assert any("weights_sum" in s for s in audit["shortfalls"]), (
+        f"weights_sum tolerance shortfall must fire when every weight is bool; got {audit['shortfalls']}"
+    )
+
+
+def test_normalize_mixed_numeric_and_bool_weights_excludes_only_bool():
+    """A mix of valid floats and a stray bool: the floats are summed; the
+    bool is ignored. Confirms the filter doesn't drop legitimate numeric
+    weights as collateral damage of the bool exclusion."""
+    plan = _bare_plan_with_tr(weights={"R-1": 0.5, "R-2": 0.5, "R-3": True})
+    architect._normalize(plan, archetype="predict")
+    audit = plan["_outline_audit"]
+    # 0.5 + 0.5 = 1.0; True ignored. Within ±0.05 tolerance → no shortfall.
+    assert abs(audit["tier_ranking_weights_sum"] - 1.0) < 0.01
+    assert not any("weights_sum" in s for s in audit["shortfalls"])
+
+
 # --------------------------------------------------------------------------
 # Greptile PR #43 round-2 — non-list entity_matrix.entities must not falsely
 # trigger tier_ranking requirement, and the perturbation_pp constant must
