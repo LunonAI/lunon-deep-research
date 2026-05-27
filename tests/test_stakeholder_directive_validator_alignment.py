@@ -1,9 +1,10 @@
 """P3-W6.b (2026-05-27): writer-directive ↔ validator alignment check.
 
 The W6.b directive's non-overlap discipline must produce output that
-PASSES the validator's pairwise Jaccard < 0.20 audit (which has been
-ACTIVE since PR #42). Pre-W6.b the validator was alone; this test
-proves the directive + validator form a closed loop.
+PASSES the validator's pairwise Jaccard < `wr._STAKEHOLDER_JACCARD_MAX`
+audit (which has been ACTIVE since PR #42, currently 0.20). Pre-W6.b
+the validator was alone; this test proves the directive + validator
+form a closed loop.
 
 We can't actually run the writer LLM in unit tests, so we exercise
 the loop with synthetic article output that follows the directive's
@@ -12,6 +13,7 @@ content-directive specificity) and assert the validator scores it
 ok=True.
 """
 
+from deep_research import writing_rules as wr
 from deep_research.pipeline import validation
 
 
@@ -79,7 +81,14 @@ def _sc(stakeholders: list[tuple[str, str]]):
 def test_directive_compliant_article_passes_validator():
     """An article that follows the W6.b directive's non-overlap contract
     (disjoint per-stakeholder bodies) passes `_validate_stakeholder_overlap`
-    with zero pairs above the 0.20 Jaccard threshold."""
+    with zero pairs above the live `wr._STAKEHOLDER_JACCARD_MAX` Jaccard
+    threshold.
+
+    Greptile PR #46 round-3 issue #1 (2026-05-27): both threshold
+    comparisons reference `wr._STAKEHOLDER_JACCARD_MAX` rather than a
+    hardcoded `0.20` literal. If the threshold is tightened to e.g.
+    `0.15`, this test continues to assert the correct contract instead
+    of silently passing on a stale value."""
     stakeholders = [
         ("S7.1", "For Investors"),
         ("S7.2", "For Policymakers"),
@@ -93,8 +102,9 @@ def test_directive_compliant_article_passes_validator():
     assert audit["overlap_pairs"] == [], (
         f"directive-compliant article should produce zero overlap_pairs; got: {audit['overlap_pairs']}"
     )
-    assert audit["max_pair_overlap"] < 0.20, (
-        f"directive-compliant article max overlap should be < 0.20; got: {audit['max_pair_overlap']}"
+    assert audit["max_pair_overlap"] < wr._STAKEHOLDER_JACCARD_MAX, (
+        f"directive-compliant article max overlap should be < "
+        f"{wr._STAKEHOLDER_JACCARD_MAX:.2f}; got: {audit['max_pair_overlap']}"
     )
 
 
@@ -102,7 +112,13 @@ def test_directive_violating_article_flagged_by_validator():
     """A counter-test: an article that VIOLATES the non-overlap rule
     (identical bodies across stakeholders) is flagged. Proves the
     validator is actually firing — otherwise the alignment test above
-    would be trivially passing on a no-op validator."""
+    would be trivially passing on a no-op validator.
+
+    Greptile PR #46 round-3 issue #2 (2026-05-27): the precondition
+    assertion uses `wr._STAKEHOLDER_JACCARD_MAX` so a future raise of
+    the threshold above 1.0 (as the monkeypatch test does in
+    test_writing_rules_stakeholder.py) doesn't silently pass — the
+    test is locked to the LIVE threshold value."""
     stakeholders = [
         ("S7.1", "For Investors"),
         ("S7.2", "For Policymakers"),
@@ -112,7 +128,10 @@ def test_directive_violating_article_flagged_by_validator():
     audit = validation._validate_stakeholder_overlap(article, _sc(stakeholders))
     assert audit is not None
     assert len(audit["overlap_pairs"]) >= 1, f"identical-body article must produce ≥1 flagged pair; got: {audit}"
-    assert audit["max_pair_overlap"] > 0.20
+    assert audit["max_pair_overlap"] > wr._STAKEHOLDER_JACCARD_MAX, (
+        f"identical-body article max overlap should exceed the live threshold "
+        f"({wr._STAKEHOLDER_JACCARD_MAX:.2f}); got: {audit['max_pair_overlap']}"
+    )
 
 
 def test_directive_compliant_3_stakeholders_passes():
