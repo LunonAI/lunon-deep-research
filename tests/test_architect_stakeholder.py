@@ -111,3 +111,104 @@ def test_prompt_signals_plural_audience_negative_cases():
     assert not architect._prompt_signals_plural_audience("分析最新的科技趋势")
     assert not architect._prompt_signals_plural_audience("")
     assert not architect._prompt_signals_plural_audience(None)
+
+
+# --------------------------------------------------------------------------
+# Greptile PR #42 round-2 — issue #2 wiring: `_prompt_signals_plural_audience`
+# must be invoked from `build()` (the production code path) and its result
+# must be reflected in the architect's user prompt as a `PLURAL_AUDIENCE_
+# DETECTED: true/false` line. Previously the function was unreachable from
+# production — only invoked by tests.
+# --------------------------------------------------------------------------
+
+
+def _capture_call_json(monkeypatch):
+    """Intercept `llm.call_json` and return the captured kwargs/positional
+    args so tests can inspect the user prompt."""
+    captured: list[dict] = []
+
+    def fake_call_json(role, user, *, system, max_tokens, effort=None, think=None, note=""):
+        captured.append({"role": role, "user": user, "note": note})
+        # Return a minimal valid plan so build() can normalize without crashing.
+        return {
+            "task_analysis": "x",
+            "report_title": "T",
+            "report_toc": [
+                {
+                    "id": f"S{i}",
+                    "title": f"S{i}",
+                    "subsections": [
+                        {"id": f"S{i}.{j}", "title": f"S{i}.{j}", "depth_seeds": ["a", "b"]} for j in range(1, 4)
+                    ],
+                }
+                for i in range(1, 10)
+            ],
+            "queries": [{"id": f"Q{i}", "text": "q", "type": "factual"} for i in range(1, 50)],
+            "acceptance_criteria": [],
+        }
+
+    monkeypatch.setattr(architect.llm, "call_json", fake_call_json)
+    return captured
+
+
+def test_build_injects_plural_audience_true_into_user_prompt(monkeypatch):
+    """When the prompt signals plural audience, `build()` must inject
+    `PLURAL_AUDIENCE_DETECTED: true — populate stakeholder_chapter ...`
+    into the architect's user prompt before the strict-JSON instruction.
+    This is the production wiring of `_prompt_signals_plural_audience`."""
+    captured = _capture_call_json(monkeypatch)
+    architect.build(
+        "Provide recommendations for investors and policymakers on clean energy.",
+        "en",
+        "predict",
+        [],
+        {},
+        [],
+    )
+    assert captured, "architect.build did not invoke llm.call_json"
+    user_prompt = captured[0]["user"]
+    assert "PLURAL_AUDIENCE_DETECTED: true" in user_prompt, (
+        f"plural-audience hint missing: {user_prompt[-1500:]}"
+    )
+    assert "populate `stakeholder_chapter`" in user_prompt, (
+        f"populate directive missing: {user_prompt[-1500:]}"
+    )
+    # Sanity: the hint precedes the strict-JSON marker (so the LLM reads it
+    # before deciding the chapter field).
+    assert user_prompt.index("PLURAL_AUDIENCE_DETECTED") < user_prompt.index("Produce the STRICT JSON plan now"), (
+        "plural-audience hint must precede the strict-JSON instruction"
+    )
+
+
+def test_build_injects_plural_audience_false_into_user_prompt(monkeypatch):
+    """When the prompt has a single audience, the hint must be FALSE
+    and direct the architect to set the chapter to null. This is the
+    conservative path — prevents the chapter from bloating articles
+    on prompts that don't ask for stakeholder-segmented advice."""
+    captured = _capture_call_json(monkeypatch)
+    architect.build(
+        "Provide an overview of recent advances in quantum computing.",
+        "en",
+        "predict",
+        [],
+        {},
+        [],
+    )
+    user_prompt = captured[0]["user"]
+    assert "PLURAL_AUDIENCE_DETECTED: false" in user_prompt, (
+        f"plural-audience=false hint missing: {user_prompt[-1500:]}"
+    )
+    assert "set `stakeholder_chapter` to null" in user_prompt, (
+        f"null directive missing: {user_prompt[-1500:]}"
+    )
+
+
+def test_build_plural_audience_hint_works_for_zh_prompts(monkeypatch):
+    """ZH plural-audience prompts must also be detected — the regex
+    patterns include CJK variants. This pins the cross-lingual coverage."""
+    captured = _capture_call_json(monkeypatch)
+    architect.build("为投资者和决策者提供清洁能源建议", "zh", "predict", [], {}, [])
+    user_prompt = captured[0]["user"]
+    assert "PLURAL_AUDIENCE_DETECTED: true" in user_prompt, (
+        f"ZH plural-audience hint missing: {user_prompt[-1500:]}"
+    )

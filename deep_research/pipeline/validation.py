@@ -189,6 +189,28 @@ def run(inp: ValidationInput) -> ValidationOutput:
                 }
             )
 
+    # 8. STAKEHOLDER CHAPTER OVERLAP (P3-W6; Greptile PR #42 round-2 wiring).
+    # When the architect populated `plan["stakeholder_chapter"]` because the
+    # prompt signaled plural audience, each stakeholder sub-section must
+    # carry NON-OVERLAPPING content. Pairwise Jaccard on n-grams; pairs
+    # above 0.20 fail. Returns None when no chapter is present (single-
+    # audience prompts), so the check is silent in that case.
+    sc_audit = _validate_stakeholder_overlap(inp.article, inp.plan.get("stakeholder_chapter"))
+    if sc_audit is not None:
+        counts["stakeholder_chapter"] = sc_audit
+        if sc_audit["overlap_pairs"]:
+            failures.append(
+                {
+                    "check": "stakeholder_overlap",
+                    "severity": "medium",
+                    "detail": (
+                        f"{len(sc_audit['overlap_pairs'])} stakeholder pair(s) above 0.20 "
+                        f"Jaccard (max={sc_audit['max_pair_overlap']}); each block must address "
+                        f"its audience with disjoint advice: {sc_audit['overlap_pairs']}"
+                    ),
+                }
+            )
+
     ok = not failures
 
     # Build structured feedback for the refiner (NOT free-text)
@@ -212,14 +234,21 @@ def _validate_stakeholder_overlap(article: str, stakeholder_chapter) -> dict | N
       {
         "n_stakeholders": int,
         "max_pair_overlap": float,
-        "overlap_pairs": [(stakeholder_id_a, stakeholder_id_b, jaccard_4gram)],
+        "overlap_pairs": [(stakeholder_id_a, stakeholder_id_b, jaccard)],
+        "short_pairs": [(stakeholder_id_a, stakeholder_id_b, n_used)],
       }
 
     For each pair of stakeholder sub-sections, compute Jaccard similarity
     on 4-gram tokens (word 4-grams for EN; char 4-grams for ZH). Pairs
-    with overlap > 0.20 are flagged. the reference's stakeholder sub-sections
-    in q23/q3/q14 are nearly content-disjoint (each addresses a distinct
-    role with non-overlapping advice).
+    with similarity > 0.20 are flagged in `overlap_pairs`. the reference's
+    stakeholder sub-sections in q23/q3/q14 are nearly content-disjoint.
+
+    Greptile PR #42 round-2: short bodies (EN <4 words or ZH <4 chars)
+    previously produced empty 4-gram sets and were silently skipped,
+    creating false-negatives. Now the function falls back to 3-grams
+    then 2-grams when 4-grams are empty for either side of the pair —
+    the `n_used` value in `short_pairs` records when fallback fired so
+    short stakeholder bodies remain observable in the audit output.
     """
     if not isinstance(stakeholder_chapter, dict):
         return None
@@ -244,22 +273,40 @@ def _validate_stakeholder_overlap(article: str, stakeholder_chapter) -> dict | N
         end = start + (next_heading.start() if next_heading else 5000)
         bodies[sid] = article[start : min(end, len(article))]
 
-    def _ngrams(text: str) -> set:
+    def _ngrams(text: str, n: int) -> set:
         text = text.strip()
-        if not text:
+        if not text or n < 1:
             return set()
         if any("一" <= c <= "鿿" for c in text[:200]):
-            return {text[i : i + 4] for i in range(len(text) - 3)}
+            if len(text) < n:
+                return set()
+            return {text[i : i + n] for i in range(len(text) - n + 1)}
         words = [w.lower() for w in re.findall(r"[a-zA-Z0-9]+", text)]
-        return {" ".join(words[i : i + 4]) for i in range(len(words) - 3)}
+        if len(words) < n:
+            return set()
+        return {" ".join(words[i : i + n]) for i in range(len(words) - n + 1)}
 
-    ngrams_by_id = {sid: _ngrams(body) for sid, body in bodies.items()}
     overlap_pairs: list[tuple] = []
+    short_pairs: list[tuple] = []
     max_overlap = 0.0
-    ids = list(ngrams_by_id.keys())
+    ids = list(bodies.keys())
     for i, a in enumerate(ids):
         for b in ids[i + 1 :]:
-            sa, sb = ngrams_by_id[a], ngrams_by_id[b]
+            # Progressive n-gram fallback: try 4-grams first (the canonical
+            # threshold-calibrated bound), then 3-grams, then 2-grams. The
+            # first n where BOTH bodies produce a non-empty set wins; if
+            # all three are empty for either side, skip with no false
+            # signal. Smaller n inflates accidental overlap, so we track
+            # the n used in `short_pairs` for diagnostic visibility.
+            sa: set = set()
+            sb: set = set()
+            n_used = 0
+            for n in (4, 3, 2):
+                sa = _ngrams(bodies[a], n)
+                sb = _ngrams(bodies[b], n)
+                if sa and sb:
+                    n_used = n
+                    break
             if not sa or not sb:
                 continue
             inter = len(sa & sb)
@@ -268,11 +315,14 @@ def _validate_stakeholder_overlap(article: str, stakeholder_chapter) -> dict | N
             max_overlap = max(max_overlap, jaccard)
             if jaccard > 0.20:
                 overlap_pairs.append((a, b, round(jaccard, 3)))
+            if n_used < 4:
+                short_pairs.append((a, b, n_used))
 
     return {
-        "n_stakeholders": len(ngrams_by_id),
+        "n_stakeholders": len(bodies),
         "max_pair_overlap": round(max_overlap, 3),
         "overlap_pairs": overlap_pairs,
+        "short_pairs": short_pairs,
     }
 
 

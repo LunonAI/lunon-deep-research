@@ -9,6 +9,7 @@ obligation, and per-section depth targets. Archetype-aware (item 16).
 """
 
 import json
+import re
 
 from .. import llm
 
@@ -368,6 +369,22 @@ def build(
         f"loop. A plan outside these bounds for this archetype will be "
         f"rejected and you'll be asked to regenerate.\n"
     )
+    # P3-W6 Greptile PR #42 round-2: explicit Python-side audience detection
+    # injected into the prompt as a binary hint. Previously the LLM was left
+    # to self-determine plural audience from the prompt; now `_prompt_signals_
+    # plural_audience` runs first and tells the architect EXPLICITLY whether
+    # to populate `stakeholder_chapter` (3-5 blocks) or leave it null. The
+    # regex detector is conservative (precision over recall), so the hint
+    # errs toward "single audience → null" rather than spurious chapters.
+    plural_audience = _prompt_signals_plural_audience(prompt)
+    audience_directive = (
+        "populate `stakeholder_chapter` with 3-5 addressee-distinct blocks "
+        "(each `content_directive` MUST be non-overlapping; the closing "
+        "chapter must address ALL named audiences with disjoint advice)"
+        if plural_audience
+        else "set `stakeholder_chapter` to null — this prompt has a single "
+        "audience and a stakeholder-segmented closing would bloat the article"
+    )
     user = (
         f"PROMPT ({language}):\n{prompt}\n\n"
         f"ARCHETYPE: {archetype}\nARCHETYPE EMPHASIS: {emphasis}\n\n"
@@ -378,6 +395,7 @@ def build(
         f"criterion with a verification method):\n"
         f"{json.dumps(coverage_obligations, ensure_ascii=False)[:24000]}\n\n"
         f"SCOUT LANDSCAPE:\n{json.dumps(landscape, ensure_ascii=False)[:20000]}\n\n"
+        f"PLURAL_AUDIENCE_DETECTED: {str(plural_audience).lower()} — {audience_directive}.\n\n"
         f"Produce the STRICT JSON plan now."
     )
     # Adaptive thinking on, effort=low: the structured prompt does the heavy
@@ -534,16 +552,19 @@ _PLURAL_AUDIENCE_PATTERNS = (
 def _prompt_signals_plural_audience(prompt: str) -> bool:
     """Return True when the prompt signals advice for multiple audiences.
 
-    Used by `_normalize` to decide whether stakeholder_chapter should be
-    populated. Conservative — false-negative is acceptable (chapter
-    becomes generic single-audience), false-positive bloats the article.
+    Called from `plan()` (Greptile PR #42 round-2 wiring) to inject a
+    `PLURAL_AUDIENCE_DETECTED: true/false` hint into the architect's
+    user prompt right before the strict-JSON instruction. The hint
+    tells the LLM whether to populate `stakeholder_chapter` (3-5
+    addressee-distinct blocks) or leave it null. Conservative — a
+    false-negative leaves the closing generic (acceptable), while a
+    false-positive bloats the article (the explicit regex patterns
+    above are the precision/recall calibration knob).
     """
-    import re as _re
-
     if not prompt or not isinstance(prompt, str):
         return False
     for pat in _PLURAL_AUDIENCE_PATTERNS:
-        if _re.search(pat, prompt, _re.I):
+        if re.search(pat, prompt, re.I):
             return True
     return False
 
