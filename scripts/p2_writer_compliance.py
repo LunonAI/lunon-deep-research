@@ -210,6 +210,97 @@ _ALTERNATIVE_RE = re.compile(
     r"取舍|不如|优于|劣于|胜过)",
     re.IGNORECASE,
 )
+# Wave 3 PR 2: NEW element (e) detector — multi-link causal chains targeting
+# RACE 2 (Logical Reasoning and Causal Relationships).
+#
+# Greptile PR #34 round-1 follow-up (2026-05-26): tightened the regex to
+# remove single-step / non-causal markers that fired on common non-chain
+# prose:
+#   - REMOVED bare `produces?|produced|producing` (fires on "this chapter
+#     produces an overview", "the team produced a report")
+#   - REMOVED bare `enables?|enabled|enabling` (fires on "the SDK enables
+#     rapid deployment" — extremely common in tech text)
+#   - REMOVED bare `due to` (single-step backward attribution)
+#   - REMOVED bare `subsequently` (pure temporal sequencing, not causation)
+#   - REMOVED `drives?|drove|driving` with the narrow 6-noun blocklist
+#     ("drives the market / adoption / narrative / change" still fired)
+#   - REMOVED bare `causes?|caused|causing` (single-step causation)
+#   - REMOVED ZH 带来 / 促使 / 因而 (less chain-specific than the kept set)
+# What survives are SPECIFIC chain construction markers:
+#   - Directional causation verbs that introduce a named effect:
+#     `leads?|led|leading to` / `results?|resulted in` / `gives?|gave|
+#     giving rise to`
+#   - Explicit chain connectors that REQUIRE a prior cause to make sense:
+#     `in turn` / `which (produces|enables|drives|leads|causes|results in)`
+#   - ZH causation markers retained for their chain-shape semantics:
+#     导致 / 引发 / 进而 / 从而
+# Element definition requires "2+ links" (per `_INSIGHT_MIN` rule body in
+# `deep_research/writing_rules.py`). The `_classify_leaf_elements` function
+# enforces this by requiring `>=2` matches per leaf, not `bool(search)`.
+# A single causal step is not a chain — two markers anywhere in the leaf
+# indicates multi-step causation.
+_CAUSAL_CHAIN_RE = re.compile(
+    # Directional causation verbs (verb + preposition combinations that
+    # specifically introduce a causal relationship between named entities).
+    r"\b(?:leads?|led|leading) to\b|"
+    r"\b(?:results?|resulted) in\b|"
+    r"\b(?:gives?|gave|giving) rise to\b|"
+    # Chain connectors with "in turn" — narrowed to chain-context only.
+    # Greptile PR #34 round-3 follow-up (2026-05-26): bare `\bin turn\b`
+    # fired equally on ordinal enumeration ("each scenario reviewed in
+    # turn") and the chain connector ("which in turn..."). When an
+    # analytical leaf contained ordinal `in turn` PLUS one causal verb
+    # — e.g. "The team assessed each scenario in turn, which led to a
+    # consensus" — findall returned 2 matches and the ≥2 threshold
+    # classified the leaf as causal_chain=True despite containing only
+    # one actual causal link. Tightened to require explicit chain syntax:
+    #   - "which in turn" / "that in turn"  — relative-clause chain
+    #   - ", in turn," / ", in turn."        — parenthetical chain
+    #     (comma BEFORE in turn is what disambiguates from ordinal use)
+    #   - sentence-initial "In turn,"        — chain after a period or
+    #     at string start
+    r"\b(?:which|that) in turn\b|"
+    r",\s+in turn[,\.]|"
+    r"(?:^|\.\s+)in turn,|"
+    # "Which X" where X is a causation verb — explicit second-link syntax.
+    r"\bwhich (?:produces|produced|enables|enabled|drives|drove|leads|led|"
+    r"causes|caused|results in|resulted in)\b|"
+    # ZH causation markers (chain-shape in usage).
+    r"导致|引发|进而|从而",
+    re.IGNORECASE,
+)
+# Wave 3 PR 2: NEW element (f) detector — problem/tradeoff/tension framing
+# targeting RACE 3 (Problem Insight and Solutions).
+#
+# Greptile PR #34 round-1 follow-up (2026-05-26): removed two markers that
+# fired without problem/paradox framing:
+#   - REMOVED bare `\bto resolve\b` — matches "to resolve a DNS query",
+#     "steps taken to resolve a merge conflict" (non-problem prose).
+#   - REMOVED bare `\breconcile\b` — matches "reconcile accounts", "reconcile
+#     data discrepancies" (financial / data prose, not problem-tradeoff).
+# Both markers required problem-context preceding them to be meaningful;
+# the remaining patterns ("the paradox" / "the tension" / "the challenge
+# of" / "the problem of" / "to address this" / "the resolution lies" /
+# "resolves this" with anaphoric `this`) all encode the problem framing
+# explicitly in their own match.
+_PROBLEM_TRADEOFF_RE = re.compile(
+    # Greptile PR #34 round-2 follow-up (2026-05-26): `the resolution
+    # of` was REMOVED — same class of over-broad match as bare
+    # `to resolve` and `reconcile` removed in round-1. It fires on
+    # "the resolution of parliament", "the resolution of the UN
+    # Security Council", "the resolution of the board", and "the
+    # resolution of the image" (screen/print specs) — none of which
+    # frame a tension/paradox/challenge. Only `the resolution lies`
+    # (the anaphoric / directed form, "the resolution lies in X")
+    # survives — it requires a problem antecedent to make grammatical
+    # sense.
+    r"(\bthe (?:apparent )?paradox\b|\bthe tension\b|\bthe challenge of\b|"
+    r"\bthe problem of\b|\bthe central issue\b|\bthe key obstacle\b|"
+    r"\bto address this\b|\bthe resolution lies\b|"
+    r"\bresolves this\b|"
+    r"悖论|矛盾|挑战在于|关键问题|核心难题|应对.{0,8}方法|解决.{0,8}途径)",
+    re.IGNORECASE,
+)
 
 
 def _split_into_leaves(article: str, archetype: str) -> list[str]:
@@ -326,6 +417,16 @@ def _classify_leaf_elements(leaf_body: str) -> dict[str, bool]:
         "contrarian": bool(_CONTRARIAN_RE.search(leaf_body)),
         "quant": bool(_QUANT_RE.search(leaf_body)),
         "alternative": bool(_ALTERNATIVE_RE.search(leaf_body)),
+        # Wave 3 PR 2: 2 new elements targeting RACE Insight criteria 2 + 3.
+        # Greptile PR #34 round-1 follow-up: causal_chain requires `>=2`
+        # markers per leaf, not `bool(search)`. The element definition in
+        # `_INSIGHT_MIN` explicitly says "A SINGLE causal step is NOT a
+        # chain" — chains need 2+ links. The earlier bool-based check
+        # would fire on a single "leads to" / "results in" occurrence
+        # (single-step causation), inflating the compliance rate and
+        # masking real chain-construction deficits.
+        "causal_chain": len(_CAUSAL_CHAIN_RE.findall(leaf_body)) >= 2,
+        "problem_tradeoff": bool(_PROBLEM_TRADEOFF_RE.search(leaf_body)),
     }
 
 
@@ -354,10 +455,25 @@ def _score_footnotes(article: str) -> dict:
 
 
 def _score_insight_distribution(article: str, archetype: str) -> dict:
-    """`_INSIGHT_MIN` element distribution (§3.2) per archetype."""
+    """`_INSIGHT_MIN` element distribution (§3.2 + Wave 3 PR 2 extension)
+    per archetype.
+
+    Wave 3 PR 2 (2026-05-26): scoring extended from 4 to 6 elements
+    (added `causal_chain` + `problem_tradeoff` targeting RACE Insight
+    criteria 2 + 3). Per-element gap is computed against the per-
+    archetype targets in `_INSIGHT_DISTRIBUTION_BY_ARCHETYPE`, recali-
+    brated from fresh Qianfan corpus measurements (PR-0)."""
     leaves = _split_into_leaves(article, archetype)
     n_leaves = len(leaves)
-    counts = {"forward_looking": 0, "contrarian": 0, "quant": 0, "alternative": 0}
+    counts = {
+        "forward_looking": 0,
+        "contrarian": 0,
+        "quant": 0,
+        "alternative": 0,
+        # Wave 3 PR 2: 2 new elements scored alongside the original 4.
+        "causal_chain": 0,
+        "problem_tradeoff": 0,
+    }
     for leaf in leaves:
         elems = _classify_leaf_elements(leaf)
         for k, v in elems.items():
@@ -374,6 +490,8 @@ def _score_insight_distribution(article: str, archetype: str) -> dict:
         "contrarian": round(rates["contrarian"] - targets["contrarian_min"], 1),
         "quant": round(rates["quant"] - targets["quant_min"], 1),
         "alternative": round(rates["alternative"] - targets["alternative_min"], 1),
+        "causal_chain": round(rates["causal_chain"] - targets["causal_chain_min"], 1),
+        "problem_tradeoff": round(rates["problem_tradeoff"] - targets["problem_tradeoff_min"], 1),
     }
     return {
         "archetype": archetype,
@@ -385,6 +503,8 @@ def _score_insight_distribution(article: str, archetype: str) -> dict:
             "contrarian": targets["contrarian_min"],
             "quant": targets["quant_min"],
             "alternative": targets["alternative_min"],
+            "causal_chain": targets["causal_chain_min"],
+            "problem_tradeoff": targets["problem_tradeoff_min"],
         },
         "per_element_gap_pct": gaps,
         "elements_below_target": [k for k, g in gaps.items() if g < 0],
