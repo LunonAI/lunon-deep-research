@@ -30,15 +30,16 @@ def test_validate_returns_none_for_empty_vocab_and_rubric():
 
 
 def test_validate_counts_vocab_reuse_in_body():
-    """Each vocabulary term: count occurrences after the §1 region (first
-    ~8000 chars). Body text repeats some terms; reuse rate = fraction
-    with ≥1 body reuse."""
+    """Each vocabulary term: count occurrences after the §1 region
+    (first `max(8000, 0.09 × len(article))` chars). Body text repeats
+    some terms; reuse rate = fraction with ≥1 body reuse."""
     fc = {
         "published_vocabulary": ["axiom1", "axiom2", "axiom3"],
         "published_rubric_items": [],
     }
-    # Article must exceed the skip-chars threshold for the validator to
-    # have a meaningful body region. Padding ensures skip_chars=min(8000, len/7).
+    # Article must exceed the 8k skip-chars floor for the validator to
+    # have a meaningful body region. At ~10k chars, skip_chars =
+    # max(8000, 0.09×10000) = 8000, so body = article[8000:] (~2k chars).
     article = "x" * 10000 + " ... axiom1 ... and axiom1 again ... but axiom2 only once. and axiom3 once too."
     out = _validate_framing_chapter(article, fc)
     assert out is not None
@@ -63,8 +64,9 @@ def test_validate_flags_missing_vocab_reuse():
 
 
 def test_validate_excludes_s1_region():
-    """The first 8000 chars (or article-length/7) are excluded as §1.
-    A vocab term mentioned ONLY in §1 should not count as downstream reuse."""
+    """The first `max(8000, 0.09 × len(article))` chars are excluded as
+    §1. A vocab term mentioned ONLY in §1 should not count as downstream
+    reuse."""
     fc = {
         "published_vocabulary": ["axiom1"],
         "published_rubric_items": [],
