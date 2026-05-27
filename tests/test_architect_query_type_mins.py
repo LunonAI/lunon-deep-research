@@ -64,6 +64,49 @@ def test_per_archetype_mins_sum_to_at_most_one():
         assert total <= 1.0 + 1e-9, f"{archetype} floors sum to {total:.4f} > 1.0"
 
 
+def test_default_query_type_mins_sum_to_at_most_one():
+    """Greptile PR #35 round-2 follow-up: `_DEFAULT_QUERY_TYPE_MIN_PCT` is
+    parallel to `_ARCHETYPE_QUERY_TYPE_MIN_PCT` entries and must obey the
+    same sum-≤-1.0 invariant. Pre-fix the default summed to exactly 1.0,
+    which made advisory shortfalls structurally guaranteed for common
+    query counts (integer-rounded ceilings push the achievable total
+    above 100%). Floor invariant: leave ≥5% headroom so the architect
+    can satisfy every floor for any query count in the 48-64 band."""
+    total = sum(architect._DEFAULT_QUERY_TYPE_MIN_PCT.values())
+    assert total <= 1.0 + 1e-9, f"_DEFAULT_QUERY_TYPE_MIN_PCT sums to {total:.4f} > 1.0"
+    # Stricter pin: enforce ≥5% headroom (matches named-archetype convention).
+    # A future tweak that raises the default above 0.95 will fail this test
+    # and force the author to re-justify why the unknown-archetype fallback
+    # should have less headroom than any named archetype.
+    assert total <= 0.95 + 1e-9, (
+        f"_DEFAULT_QUERY_TYPE_MIN_PCT sums to {total:.4f}; expected ≤0.95 "
+        "(every named archetype leaves ≥5% headroom — the default should too)"
+    )
+
+
+def test_default_query_type_mins_satisfiable_at_lower_spec_boundary():
+    """Greptile PR #35 round-2 follow-up: at N=48 (lower bound of the
+    architect's 48-64 query spec — the case Greptile explicitly cited),
+    the default floors must be satisfiable via integer ceiling rounding.
+
+    Pre-fix at sum=1.0 this was false (ceil-sum 12+10+10+8+10 = 50 > 48),
+    causing advisory shortfalls on every unknown-archetype plan at the
+    minimum query count. Post-fix at sum=0.95 the lower boundary is
+    satisfiable. Some interior N values (e.g., N=51, N=61) still have
+    ceiling-rounding overruns — that's an inherent cost of any integer
+    partition and matches the behavior of named archetypes."""
+    import math
+
+    floors = architect._DEFAULT_QUERY_TYPE_MIN_PCT
+    n_queries = 48  # lower bound of the architect's HARD RULE spec band
+    required = sum(math.ceil(floor * n_queries) for floor in floors.values())
+    assert required <= n_queries, (
+        f"N={n_queries}: ceil-sum={required} exceeds query budget — "
+        f"the spec-boundary case Greptile cited still fails "
+        f"(sum_floors={sum(floors.values()):.4f}). Lower one floor by 0.05."
+    )
+
+
 def test_per_archetype_mins_use_only_known_query_types():
     """Every key in each archetype's mins must be a valid query.type
     (one of factual/causal/comparative/critical/trend, matching the

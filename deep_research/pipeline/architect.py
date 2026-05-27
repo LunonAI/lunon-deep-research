@@ -184,15 +184,19 @@ _ARCHETYPE_QUERY_TYPE_MIN_PCT: dict[str, dict[str, float]] = {
 }
 
 # Default for unknown archetype: a balanced floor that doesn't starve any
-# specialist. Sum = 1.0 (no headroom — unknown-archetype plans get the full
-# distribution prescribed). Matches the spirit of pre-P3 "distribute to cover
-# all needed analytical functions" but quantifies it so the audit can surface
-# shortfalls.
+# specialist. Sum = 0.95 — matches the ~5-10% headroom every named archetype
+# leaves so the integer query-count rounding (48-64 queries → 2-3 free) can
+# satisfy every floor simultaneously. Greptile PR #35 round-2 follow-up: the
+# previous sum=1.0 default fired advisory shortfalls on every unknown-archetype
+# run because integer rounding pushes ceilings above 100% (e.g., 48 queries:
+# 0.20 → ceil(9.6)=10, 4 types × 10 + 1 type × 12 = 52 > 48). Lowering
+# `critical` 0.15 → 0.10 (matches list-all / explain-mech / recommend floors)
+# preserves balance while creating a satisfiable distribution.
 _DEFAULT_QUERY_TYPE_MIN_PCT: dict[str, float] = {
     "factual": 0.25,
     "comparative": 0.20,
     "causal": 0.20,
-    "critical": 0.15,
+    "critical": 0.10,
     "trend": 0.20,
 }
 
