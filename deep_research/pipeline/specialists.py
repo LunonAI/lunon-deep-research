@@ -49,10 +49,47 @@ _EXTRACT_SYSTEM = (
     '{{"findings": [ {{"statement": str (one specific self-contained claim '
     'with concrete numbers/names/dates), "source_name": str (publication/'
     "institution, e.g. 'IEA 2025' — never a bare number), \"url\": str, "
-    '"quote": str (verbatim support <=125 chars), "query_ids": [str]}} '
+    '"quote": str (verbatim support <=125 chars), "query_ids": [str], '
+    '"chain": [str, ...] (OPTIONAL — use ONLY when this finding describes a '
+    'multi-step causal mechanism: 2-6 ordered short clauses like "X results '
+    'in Y", "Y enables Z" naming the intervening links. OMIT this field '
+    "entirely if the finding is not multi-step causal. mechanism_explorer "
+    "specialist should populate this whenever possible; other specialists "
+    "leave it absent.)}} "
     "...14-24 findings ]}}. Only findings grounded in the results; reconcile "
     "conflicts in the statement; match the brief's language."
 )
+
+
+# P3-W0b (2026-05-27): sanitize specialist-emitted `chain` field. The LLM
+# extraction schema accepts an optional `chain` list of strings for multi-
+# step causal findings; without sanitation a malformed value (single string,
+# dict, list-of-dicts, 50-item hallucination) would propagate through
+# memory_bank and into the writer's evidence pack as JSON-serialized noise.
+# Returns a clean list[str] or empty list — never None, never a non-list.
+def _sanitize_chain(value) -> list:
+    """Normalize an LLM-emitted `chain` value to a clean list-of-strings.
+
+    Accepts: a list of non-empty strings (trimmed, each link capped at
+    240 chars, full chain capped at 6 links to bound the prompt budget
+    a single hallucinated finding can consume).
+    Rejects (returns []): anything else — non-list types, mixed-type
+    lists, lists of dicts. Greptile pre-scan item: optional fields
+    with loose contracts attract malformed inputs, so we reject the
+    whole field on the first non-string element rather than partial-
+    accept (which would create silent data corruption downstream).
+    """
+    if not isinstance(value, list):
+        return []
+    out: list = []
+    for link in value[:6]:  # cap chain length — a 50-link hallucination is noise
+        if not isinstance(link, str):
+            return []  # mixed-type chain: reject whole field; no partial-accept
+        s = link.strip()
+        if s:
+            out.append(s[:240])
+    return out
+
 
 # P2-Option-A-#4: per-specialist max search calls and per-search result count.
 # Pre-#4: 5 searches × 5 results × 5 specialists = 125 raw hits → ~40-70
@@ -239,6 +276,14 @@ def research(role: str, queries: list, *, language: str, domain: str, exa_mode: 
             )
         findings = fobj.get("findings") if isinstance(fobj, dict) else fobj
         findings = [f for f in (findings or []) if isinstance(f, dict) and f.get("statement")]
+        # P3-W0b (2026-05-27): sanitize the optional `chain` field on
+        # every finding. Findings without `chain` are unaffected; findings
+        # with a malformed `chain` get it dropped (sanitized to []). A
+        # field that survives sanitization is guaranteed to be list[str]
+        # downstream — no type-checks needed in orchestrator.ingest or
+        # writer.ev_view construction.
+        for f in findings:
+            f["chain"] = _sanitize_chain(f.get("chain"))
         if not findings:
             findings = _snippet_fallback(results, qids)
     except Exception:  # noqa: BLE001  reasoning model JSON failure → degrade

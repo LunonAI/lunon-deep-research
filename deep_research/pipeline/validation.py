@@ -189,6 +189,17 @@ def run(inp: ValidationInput) -> ValidationOutput:
                 }
             )
 
+    # 8. P3-W2 (2026-05-27): framing-chapter downstream-reuse — telemetry
+    # only. Measures whether §2+ chapters re-engage with §1's published
+    # vocabulary + rubric items (the reference corpus-wide pattern of
+    # analytical continuity). No fail/pass — surfaced in counts for drift
+    # logging; the corrective-feedback loop is via the post-write
+    # compliance scorer, not the validation gate. Returns None (skipped)
+    # when the plan has no framing_chapter or it is empty.
+    fc_reuse = _validate_framing_chapter(inp.article, inp.plan.get("framing_chapter"))
+    if fc_reuse is not None:
+        counts["framing_chapter_reuse"] = fc_reuse
+
     ok = not failures
 
     # Build structured feedback for the refiner (NOT free-text)
@@ -203,6 +214,66 @@ def run(inp: ValidationInput) -> ValidationOutput:
         fb = "VALIDATION FAILURES — fix these in place; preserve correct content; do not shorten:\n" + "\n".join(lines)
 
     return ValidationOutput(ok=ok, failures=failures, feedback_text=fb, counts=counts)
+
+
+def _validate_framing_chapter(article: str, framing_chapter) -> dict | None:
+    """P3-W2 (2026-05-27): compute framing-chapter downstream-reuse compliance.
+
+    Returns None when no framing_chapter is active (skip the check).
+    Otherwise returns:
+      {
+        "vocabulary_terms_reused": {term: count_in_body},
+        "vocabulary_reuse_rate": float (fraction of terms with >=1 body reuse),
+        "rubric_items_referenced": {id: count_in_body},
+        "rubric_reference_rate": float (fraction of items referenced),
+      }
+
+    "Body" = article after the first `max(8000, 0.09 * len)` chars
+    (the reference-verified 5-9% upper bound on §1 length, floored at 8k
+    to maintain margin on short/mid-length articles). Reuse measures
+    whether DOWNSTREAM chapters re-engage with §1 vocabulary + rubric
+    items — the reference-verified corpus-wide pattern of analytical
+    continuity.
+    """
+    if not isinstance(framing_chapter, dict):
+        return None
+    vocab = [str(t) for t in (framing_chapter.get("published_vocabulary") or []) if t]
+    rubric = [r for r in (framing_chapter.get("published_rubric_items") or []) if isinstance(r, dict) and r.get("id")]
+    if not vocab and not rubric:
+        return None
+    # Skip §1 region — heuristic upper bound on the framing chapter's
+    # extent. the reference §1 is 5-9% of article length, so the proportional
+    # skip is `0.09 * len(article)`. Floor at 8000 chars to maintain
+    # margin on short/mid-length articles where 9% would otherwise leave
+    # too little buffer past §1's actual close (e.g. on a 50k article,
+    # 9% is 4.5k while §1 routinely runs 3-4.5k). Clamp to len(article)
+    # so a stub article slices to an empty body rather than past-the-end.
+    # Greptile PR #38 round-1: the prior `min(8000, len//7)` capped long
+    # articles at 8k (under-skipping when §1 grows to 45k on a 500k-char
+    # article) AND under-skipped short articles by falling to the //7
+    # branch — both directions of the bound were inverted.
+    skip_chars = min(len(article), max(8000, int(0.09 * len(article))))
+    body = article[skip_chars:]
+    vocab_counts: dict[str, int] = {}
+    for term in vocab:
+        if any("一" <= c <= "鿿" for c in term):
+            # CJK: case is meaningless; count verbatim.
+            vocab_counts[term] = body.count(term)
+        else:
+            # EN: case-insensitive (writers may de-capitalize mid-sentence).
+            vocab_counts[term] = body.lower().count(term.lower())
+    rubric_counts: dict[str, int] = {}
+    for item in rubric:
+        rid = str(item["id"])
+        rubric_counts[rid] = body.count(rid)
+    vocab_reused = sum(1 for v in vocab_counts.values() if v >= 1)
+    rubric_referenced = sum(1 for v in rubric_counts.values() if v >= 1)
+    return {
+        "vocabulary_terms_reused": vocab_counts,
+        "vocabulary_reuse_rate": round(vocab_reused / len(vocab), 3) if vocab else 0.0,
+        "rubric_items_referenced": rubric_counts,
+        "rubric_reference_rate": round(rubric_referenced / len(rubric), 3) if rubric else 0.0,
+    }
 
 
 def log_failures(task_id: str, vout: ValidationOutput) -> None:
