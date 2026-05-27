@@ -205,6 +205,77 @@ def run(inp: ValidationInput) -> ValidationOutput:
     return ValidationOutput(ok=ok, failures=failures, feedback_text=fb, counts=counts)
 
 
+def _validate_stakeholder_overlap(article: str, stakeholder_chapter) -> dict | None:
+    """P3-W6 (2026-05-27): pairwise content-overlap audit on stakeholder chapter.
+
+    Returns None when no stakeholder_chapter is active. Otherwise:
+      {
+        "n_stakeholders": int,
+        "max_pair_overlap": float,
+        "overlap_pairs": [(stakeholder_id_a, stakeholder_id_b, jaccard_4gram)],
+      }
+
+    For each pair of stakeholder sub-sections, compute Jaccard similarity
+    on 4-gram tokens (word 4-grams for EN; char 4-grams for ZH). Pairs
+    with overlap > 0.20 are flagged. the reference's stakeholder sub-sections
+    in q23/q3/q14 are nearly content-disjoint (each addresses a distinct
+    role with non-overlapping advice).
+    """
+    if not isinstance(stakeholder_chapter, dict):
+        return None
+    stakeholders = stakeholder_chapter.get("stakeholders") or []
+    if len(stakeholders) < 2:
+        return None
+    bodies: dict[str, str] = {}
+    for s in stakeholders:
+        if not isinstance(s, dict):
+            continue
+        sid = str(s.get("id", "")).strip()
+        label = str(s.get("label", "")).strip()
+        if not sid or not label:
+            continue
+        idx = article.find(label)
+        if idx < 0:
+            bodies[sid] = ""
+            continue
+        nl = article.find("\n", idx)
+        start = nl + 1 if nl >= 0 else idx + len(label)
+        next_heading = re.search(r"\n#{2,4}\s+", article[start:])
+        end = start + (next_heading.start() if next_heading else 5000)
+        bodies[sid] = article[start : min(end, len(article))]
+
+    def _ngrams(text: str) -> set:
+        text = text.strip()
+        if not text:
+            return set()
+        if any("一" <= c <= "鿿" for c in text[:200]):
+            return {text[i : i + 4] for i in range(len(text) - 3)}
+        words = [w.lower() for w in re.findall(r"[a-zA-Z0-9]+", text)]
+        return {" ".join(words[i : i + 4]) for i in range(len(words) - 3)}
+
+    ngrams_by_id = {sid: _ngrams(body) for sid, body in bodies.items()}
+    overlap_pairs: list[tuple] = []
+    max_overlap = 0.0
+    ids = list(ngrams_by_id.keys())
+    for i, a in enumerate(ids):
+        for b in ids[i + 1 :]:
+            sa, sb = ngrams_by_id[a], ngrams_by_id[b]
+            if not sa or not sb:
+                continue
+            inter = len(sa & sb)
+            union = len(sa | sb)
+            jaccard = inter / union if union else 0.0
+            max_overlap = max(max_overlap, jaccard)
+            if jaccard > 0.20:
+                overlap_pairs.append((a, b, round(jaccard, 3)))
+
+    return {
+        "n_stakeholders": len(ngrams_by_id),
+        "max_pair_overlap": round(max_overlap, 3),
+        "overlap_pairs": overlap_pairs,
+    }
+
+
 def log_failures(task_id: str, vout: ValidationOutput) -> None:
     """Persist a final-cap failure to validation_failures.jsonl."""
     try:

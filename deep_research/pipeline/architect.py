@@ -89,7 +89,19 @@ criteria into a STRICT JSON research plan. Output ONLY this JSON object:
     "target_sections": ["S1", ...]} ... 24-32 ],
  "queries": [ {"id": "Q1", "text": str,
     "type": "factual"|"causal"|"comparative"|"critical"|"trend",
-    "target_sections": ["S1", ...], "rationale": str } ... 48-64 ]
+    "target_sections": ["S1", ...], "rationale": str } ... 48-64 ],
+ "stakeholder_chapter": {          /* P3-W6 (2026-05-27): closing chapter
+                                      that splits recommendations into
+                                      3-5 stakeholder addressee blocks
+                                      with NON-OVERLAPPING content.
+                                      Populate when prompt signals
+                                      plural audience; null otherwise. */
+   "title": str,                    /* e.g. "Strategic Recommendations
+                                       by Stakeholder" */
+   "stakeholders": [
+     {"id": str, "label": str, "content_directive": str}, ...
+   ]
+ } | null
 }
 
 HARD RULES:
@@ -490,6 +502,51 @@ _ENTITY_MATRIX_ENTITIES_MAX = 20
 _ENTITY_MATRIX_DIMENSIONS_MIN = 4
 _ENTITY_MATRIX_DIMENSIONS_MAX = 8
 
+# P3-W6 (2026-05-27): stakeholder chapter bounds. the reference corpus pattern
+# (6/11 articles): closing chapter splits recommendations into 3-5
+# addressee blocks (q23 §8.4-§8.10 has 7 sub-blocks; q3 §8.7 has 4;
+# q14 §9.6-§9.9 has 4). We require ≥3 and cap at 5 to prevent the
+# closing chapter from becoming a long enumeration of overlapping
+# advice (the Comprehensiveness signal is in CONTENT, not COUNT).
+_STAKEHOLDER_COUNT_MIN = 3
+_STAKEHOLDER_COUNT_MAX = 5
+
+# Plural-audience detection: regex patterns that signal "the prompt is
+# asking for advice addressed to multiple parties." When at least ONE
+# fires, the architect should populate stakeholder_chapter. The regex
+# is intentionally conservative (precision over recall) — false-positive
+# stakeholder chapters bloat the article for prompts that have a single
+# audience, while false-negatives mean the chapter is omitted and the
+# closing recommendations stay generic (acceptable; not a regression).
+_PLURAL_AUDIENCE_PATTERNS = (
+    r"\binvestors?\s+and\s+(?:policymakers?|regulators?|researchers?|consumers?|users?)\b",
+    r"\b(?:policymakers?|regulators?|researchers?|practitioners?|industry)\s+and\s+(?:investors?|practitioners?|industry|stakeholders?)\b",
+    r"\bfor\s+(?:both|each\s+of)\s+\w+\s+(?:and|&)\s+\w+",
+    r"\brecommendations?\s+(?:for|to|targeting|aimed\s+at)\s+(?:investors?|policymakers?|regulators?|researchers?|practitioners?|industry|stakeholders?)",
+    r"\bguidance\s+(?:for|to)\s+(?:investors?|policymakers?|practitioners?|industry|stakeholders?)",
+    # ZH patterns: "面向多元主体" / "为投资者和决策者" / "对不同利益相关方"
+    r"面向[多种各]+[元方主体]+",
+    r"为(?:投资者|决策者|监管者|研究人员|从业者|产业|消费者)[和与、](?:投资者|决策者|监管者|研究人员|从业者|产业|消费者|读者|用户)",
+    r"对(?:不同|各类|各个|多个)?(?:利益相关方|stakeholder|读者|受众)",
+)
+
+
+def _prompt_signals_plural_audience(prompt: str) -> bool:
+    """Return True when the prompt signals advice for multiple audiences.
+
+    Used by `_normalize` to decide whether stakeholder_chapter should be
+    populated. Conservative — false-negative is acceptable (chapter
+    becomes generic single-audience), false-positive bloats the article.
+    """
+    import re as _re
+
+    if not prompt or not isinstance(prompt, str):
+        return False
+    for pat in _PLURAL_AUDIENCE_PATTERNS:
+        if _re.search(pat, prompt, _re.I):
+            return True
+    return False
+
 
 def _normalize(plan: dict, *, archetype: str | None = None) -> None:
     """Attach specialist_role to every query; backfill depth_seeds default;
@@ -632,5 +689,27 @@ def _normalize(plan: dict, *, archetype: str | None = None) -> None:
                 audit["shortfalls"].append(f"entity_matrix.dimensions={len(dims)}<{_ENTITY_MATRIX_DIMENSIONS_MIN}")
             if len(dims) > _ENTITY_MATRIX_DIMENSIONS_MAX:
                 audit["shortfalls"].append(f"entity_matrix.dimensions={len(dims)}>{_ENTITY_MATRIX_DIMENSIONS_MAX}")
+
+    # P3-W6 (2026-05-27): stakeholder_chapter audit. Unlike other Phase 3
+    # artifacts, this one is OPTIONAL — only populated when the prompt
+    # signals a plural audience. The architect chooses to populate it
+    # based on the prompt; we audit COUNT bounds when present but never
+    # flag missing-chapter as a shortfall (avoids forcing single-audience
+    # prompts to have a useless 3-stakeholder section).
+    sc = plan.get("stakeholder_chapter")
+    if isinstance(sc, dict):
+        stakeholders = sc.get("stakeholders") if isinstance(sc.get("stakeholders"), list) else []
+        # Normalize to a clean list.
+        sc["stakeholders"] = [s for s in stakeholders if isinstance(s, dict) and s.get("id")]
+        audit["stakeholder_chapter_count"] = len(sc["stakeholders"])
+        if sc["stakeholders"]:
+            if len(sc["stakeholders"]) < _STAKEHOLDER_COUNT_MIN:
+                audit["shortfalls"].append(
+                    f"stakeholder_chapter.count={len(sc['stakeholders'])}<{_STAKEHOLDER_COUNT_MIN}"
+                )
+            if len(sc["stakeholders"]) > _STAKEHOLDER_COUNT_MAX:
+                audit["shortfalls"].append(
+                    f"stakeholder_chapter.count={len(sc['stakeholders'])}>{_STAKEHOLDER_COUNT_MAX}"
+                )
 
     plan["_outline_audit"] = audit
