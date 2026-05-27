@@ -45,6 +45,63 @@ _TOK = 4  # ~chars-per-token heuristic; cheap, scoring uses the harness cleaner
 # were truncated (parallel to the `short_pairs` fallback signal).
 _STAKEHOLDER_BODY_MAX_CHARS = 5000
 
+# P3-W5.b (2026-05-27): canonical 5 sub-section types for the
+# limitations chapter. Source of truth for `_validate_limitations_
+# chapter` — the architect emits these types verbatim per the schema at
+# architect.py:180-210, and the writer's `limitations_block` directive
+# references them in the rendering contract. Keeping the list here lets
+# a future addition (e.g., "model_assumptions" as a 6th type) require
+# one edit instead of grepping for the names across architect + writer
+# + validation. The order matches the rendering order Qianfan articles
+# favour (data → scope → time → sampling → falsifiers, broadest to
+# most specific).
+_LIMITATIONS_SUBSECTION_TYPES = (
+    "data_granularity",
+    "scope_cap",
+    "time_validity",
+    "sampling",
+    "falsifiers",
+)
+
+# P3-W5.b (2026-05-27): max chars scanned in a limitations sub-section
+# body when looking for a "specific anchor" (year / proper noun / R-N
+# rubric id). Mirrors `_STAKEHOLDER_BODY_MAX_CHARS` for the case where
+# a sub-section is the article-trailing block and has no subsequent
+# heading. 3000 is intentionally smaller than the stakeholder cap
+# because limitations sub-sections are bounded at 150-300 words by the
+# directive — 3000 chars is ~6× the upper bound, generous slack for
+# malformed-heading cases.
+_LIMITATIONS_BODY_MAX_CHARS = 3000
+
+# P3-W5.b (2026-05-27): regex that detects a "specific anchor" inside a
+# limitations sub-section body. A sub-section passes the anti-generic
+# bar when its body contains ≥1 of:
+#   - 4-digit year in the 1900-2099 range.
+#   - Acronym (2+ all-caps letters): "IBM", "EU", "NIST", "PQC".
+#   - Mid-sentence proper noun (capitalized 3+ letters preceded by a
+#     lowercase letter + whitespace — excludes sentence-initial words
+#     like "The", "Per", "Beyond" which are common leaders, not entity
+#     names).
+#   - Rubric identifier `R-\d+` (links to §1 framing-chapter items —
+#     verbatim by Qianfan corpus pattern).
+# The body is pre-stripped of citation markers (`[^...]`) and `§N.M` refs
+# in `_validate_limitations_chapter` before this regex runs, so a body
+# whose only "year" is `[^S5-2024]` or whose only "noun" is `§Section`
+# correctly fails the anchor check.
+_LIMITATIONS_SPECIFIC_ANCHOR_RE = re.compile(
+    r"\b(?:19|20)\d{2}\b"  # 4-digit year
+    r"|\b[A-Z]{2,}\b"  # acronym
+    r"|(?<=[a-z]\s)[A-Z][a-zA-Z]{2,}"  # mid-sentence proper noun
+    r"|\bR-\d+\b"  # rubric id
+)
+
+# Citation markers + § refs are pre-stripped so their internal digits
+# (e.g., `[^S5-2024]`) don't false-positive the year sub-pattern, and
+# so `§3.2` doesn't false-positive any of the alternations. The strip
+# is conservative — anything inside a `[^...]` or any `§N(.N)*` is
+# removed; the surrounding prose remains scannable for real anchors.
+_LIMITATIONS_CITATION_STRIP_RE = re.compile(r"\[\^[^\]]*\]|§\d+(?:\.\d+)*")
+
 # Greptile PR #42 round-8 issue #2: extended CJK character ranges. The
 # prior `"一" <= c <= "鿿"` heuristic covered ONLY CJK Unified Ideographs
 # (U+4E00-U+9FFF) and missed CJK Extension A (U+3400-U+4DBF), CJK
@@ -282,6 +339,20 @@ def run(inp: ValidationInput) -> ValidationOutput:
                     ),
                 }
             )
+
+    # 10. LIMITATIONS CHAPTER STRUCTURE (P3-W5.b). When the architect
+    # populated `plan["limitations_chapter"]` for predict / compare /
+    # explain-mechanism / list-all archetypes, the chapter MUST carry 5
+    # sub-sections (data_granularity / scope_cap / time_validity /
+    # sampling / falsifiers) each with a concrete anchor (year, proper
+    # noun, or rubric id) — Qianfan-grade falsification, not boilerplate.
+    # Returns None when no chapter is present (e.g., trend archetype),
+    # so the check is silent in that case. Advisory severity — surfaces
+    # in counts for drift telemetry but does NOT trigger refiner pass;
+    # the corrective signal is the (deferred) compliance scorer.
+    lim_audit = _validate_limitations_chapter(inp.article, inp.plan.get("limitations_chapter"))
+    if lim_audit is not None:
+        counts["limitations_chapter"] = lim_audit
 
     ok = not failures
 
@@ -712,6 +783,130 @@ def _validate_stakeholder_overlap(article: str, stakeholder_chapter) -> dict | N
         "overlap_pairs": overlap_pairs,
         "short_pairs": short_pairs,
         "missing_labels": missing_labels,
+        "truncated_bodies": truncated_bodies,
+    }
+
+
+def _validate_limitations_chapter(article: str, limitations_chapter) -> dict | None:
+    """P3-W5.b (2026-05-27): structural + anti-generic audit on the
+    limitations chapter.
+
+    Returns None when no `limitations_chapter` is active in the plan.
+    Otherwise:
+      {
+        "n_subsections_declared": int,    # entries the architect emitted
+        "n_subsections_present": int,     # heading found in article
+        "present_subsections": [type, ...],
+        "missing_subsections": [type, ...],
+        "generic_subsections": [type, ...],  # heading present but body
+                                              # had no specific anchor
+                                              # (year / proper noun /
+                                              # rubric id) — fails the
+                                              # anti-generic bar
+        "scenario_stress_test_present": bool,  # for predict archetype
+        "truncated_bodies": [type, ...],  # sub-sections whose body
+                                          # extraction hit the
+                                          # _LIMITATIONS_BODY_MAX_CHARS
+                                          # cap (no subsequent heading
+                                          # within range)
+      }
+
+    For each of the 5 declared sub-sections (data_granularity, scope_cap,
+    time_validity, sampling, falsifiers), this checks:
+      (a) Heading present in article — sub-section title text appears
+          on a markdown heading line `#{2,4}\\s+...title...`.
+      (b) Body carries ≥1 "specific anchor" matching
+          `_LIMITATIONS_SPECIFIC_ANCHOR_RE` (a year, proper noun, or
+          rubric id) — distinguishes Qianfan-grade falsification
+          (concrete, checkable) from Lunon's prior boilerplate
+          ("this report has limitations").
+
+    Advisory severity — surfaced in `counts["limitations_chapter"]` for
+    drift telemetry; does NOT block the validation gate. The
+    corrective-feedback signal is the compliance scorer (out of scope
+    for this PR; deferred per the plan).
+    """
+    if not isinstance(limitations_chapter, dict):
+        return None
+    sub_sections = limitations_chapter.get("sub_sections") or []
+    if not sub_sections:
+        return None
+    declared_types = [(idx, s) for idx, s in enumerate(sub_sections) if isinstance(s, dict) and s.get("type")]
+    if not declared_types:
+        return None
+
+    present_subsections: list[str] = []
+    missing_subsections: list[str] = []
+    generic_subsections: list[str] = []
+    truncated_bodies: list[str] = []
+
+    for _idx, sub in declared_types:
+        sub_type = str(sub.get("type", "")).strip()
+        sub_title = str(sub.get("title", "")).strip()
+        # Locate the heading. Prefer title match (rich heading text), fall
+        # back to type-name keyword search (e.g., "data granularity" /
+        # "数据" + "粒度" — but the type-name fallback is too noisy for ZH
+        # so we only fall back when title is empty). Greptile pre-scan:
+        # the heading regex follows the stakeholder-validator convention
+        # (#{2,4}, optional numbering prefix, case-insensitive label end-
+        # anchored to whitespace / colon / dash).
+        anchor_text = sub_title if sub_title else sub_type.replace("_", " ")
+        if not anchor_text:
+            missing_subsections.append(sub_type)
+            continue
+        m = re.search(
+            r"(?m)^#{2,4}\s+(?:\d+(?:\.\d+)*\s+)?" + re.escape(anchor_text) + r"(?=\s*(?:$|[:\-—–]))",
+            article,
+            re.IGNORECASE,
+        )
+        if m is None:
+            missing_subsections.append(sub_type)
+            continue
+        present_subsections.append(sub_type)
+        # Extract body for the anti-generic check.
+        nl = article.find("\n", m.end())
+        start = nl + 1 if nl >= 0 else m.end()
+        next_heading = re.search(r"\n#{1,4}\s+", article[start:])
+        if next_heading is not None:
+            end = start + next_heading.start()
+        else:
+            end = start + _LIMITATIONS_BODY_MAX_CHARS
+            if end < len(article):
+                truncated_bodies.append(sub_type)
+        body = article[start : min(end, len(article))]
+        # Pre-strip citation markers + § refs so their internal digits
+        # don't false-positive the year sub-pattern. See
+        # `_LIMITATIONS_CITATION_STRIP_RE` docstring.
+        scannable_body = _LIMITATIONS_CITATION_STRIP_RE.sub("", body)
+        if not _LIMITATIONS_SPECIFIC_ANCHOR_RE.search(scannable_body):
+            generic_subsections.append(sub_type)
+
+    # Scenario stress-test sub-section detection: only relevant when the
+    # plan's `scenario_stress_test` is a dict (predict archetype with
+    # tier_ranking present). Search the chapter region for an anchor like
+    # "scenario stress test" / "情景压力测试" / "stress test" on a heading
+    # line. We don't require a specific anchor format — the directive's
+    # required output is a markdown table, but a Lunon-degenerate render
+    # might emit just a heading; presence is a yes/no signal for drift.
+    sst = limitations_chapter.get("scenario_stress_test")
+    scenario_stress_test_present = False
+    if isinstance(sst, dict):
+        # Search the article for a stress-test heading anywhere (could
+        # be inside the chapter or, in a writer regression, elsewhere).
+        if re.search(
+            r"(?m)^#{2,4}\s+(?:\d+(?:\.\d+)*\s+)?(?:scenario\s+stress|stress\s+test|情景压力|情景敏感性|stress\s+scenario)",
+            article,
+            re.IGNORECASE,
+        ):
+            scenario_stress_test_present = True
+
+    return {
+        "n_subsections_declared": len(declared_types),
+        "n_subsections_present": len(present_subsections),
+        "present_subsections": present_subsections,
+        "missing_subsections": missing_subsections,
+        "generic_subsections": generic_subsections,
+        "scenario_stress_test_present": scenario_stress_test_present,
         "truncated_bodies": truncated_bodies,
     }
 
