@@ -141,3 +141,10 @@ class PipelineState:
     # per cite, no reuse" failure mode without computing the ratio every
     # time downstream.
     footnote_normalize_stats: dict = field(default_factory=dict)
+    # P3-W4 (2026-05-27): per-task mermaid_validate stats dict
+    # {n_blocks_found, n_blocks_valid, n_blocks_markdown_stripped,
+    # n_blocks_fence_repaired, n_blocks_stripped_invalid_type}.
+    # Populated from mermaid_validate.repair() in the post-pass chain;
+    # forwarded into inner_loop_drift.jsonl so dev4 / W13 analysers can
+    # track per-archetype mermaid emission rates and repair pressure.
+    mermaid_validate_stats: dict = field(default_factory=dict)

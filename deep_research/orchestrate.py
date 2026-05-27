@@ -74,6 +74,12 @@ def _persist_drift(s, language: str, query: str) -> None:
             # and never reached the dev-run telemetry. Wave 1 §7.2 added
             # the derived `inline_def_ratio` field above.
             "footnote_normalize": fn_stats,
+            # P3-W4 (2026-05-27): mermaid post-pass stats. Tracks
+            # per-task block emission + per-failure-mode repair counts
+            # so analysers can monitor (a) writer's mermaid emission rate
+            # under the _MERMAID_DIRECTIVE and (b) which of the 4 failure
+            # modes the writer most often hits.
+            "mermaid_validate": dict(getattr(s, "mermaid_validate_stats", {}) or {}),
         }
         _DRIFT_PATH.parent.mkdir(parents=True, exist_ok=True)
         with _DRIFT_LOCK, _DRIFT_PATH.open("a", encoding="utf-8") as fh:
@@ -94,6 +100,7 @@ from .pipeline import (
     init_format,
     inner_loop,
     intent,
+    mermaid_validate,
     numbering_fix,
     orchestrator,
     refiner,
@@ -269,6 +276,18 @@ def from_plan(ctx: dict, query: str, language: str, task_id: int | None = None) 
     if language == "zh":
         zp = _phase("zh_writer_pass", zh_writer_pass.zh_pass, s.article, query)
         s.article = zp["article"]
+
+    # P3-W4 (2026-05-27): mermaid post-pass repair. The writer's
+    # `_MERMAID_DIRECTIVE` (writing_rules.py) opts the model into emitting
+    # semantic diagrams on every section call; this runs the syntactic
+    # validator over the assembled article. Placed BEFORE footnote_normalize
+    # so any `[^N]` markers the writer accidentally embedded inside a
+    # mermaid node label are stripped before the global renumber pass —
+    # otherwise footnote_normalize would mis-count them as inline cites
+    # and assign global numbers to nonexistent diagram-internal references.
+    repaired, mv_stats = _phase("mermaid_validate", mermaid_validate.repair, s.article)
+    s.article = repaired
+    s.mermaid_validate_stats = mv_stats
 
     # P2-Option-A-#6 (2026-05-23): footnote_normalize runs BEFORE
     # numbering_fix so the renumber step sees the final article shape
