@@ -33,7 +33,14 @@ def _plan_with_em(entities, dimensions):
 
 def test_normalize_backfills_missing_entity_matrix_for_listall():
     """list-all archetype with NO entity_matrix field gets an empty backfilled
-    matrix + a shortfall record. Writer never crashes on `em["entities"]`."""
+    matrix + a shortfall record. Writer never crashes on `em["entities"]`.
+
+    P3-W1 (2026-05-27): the backfilled matrix now also includes the new
+    `instantiation_mode` and `min_axes_per_entity` defaults so the writer
+    sees a fully-shaped matrix regardless of whether the architect emitted
+    one. We assert the load-bearing fields rather than the full dict to
+    keep this test forward-compatible with future schema additions.
+    """
     plan = {
         "report_title": "T",
         "report_toc": [],
@@ -41,7 +48,11 @@ def test_normalize_backfills_missing_entity_matrix_for_listall():
         "acceptance_criteria": [],
     }
     architect._normalize(plan, archetype="list-all")
-    assert plan["entity_matrix"] == {"entities": [], "dimensions": []}
+    em = plan["entity_matrix"]
+    assert em["entities"] == []
+    assert em["dimensions"] == []
+    assert em["instantiation_mode"] == "prose_subheaders"
+    assert em["min_axes_per_entity"] == 3
     audit = plan["_outline_audit"]
     assert any("entity_matrix=missing" in s for s in audit["shortfalls"])
 

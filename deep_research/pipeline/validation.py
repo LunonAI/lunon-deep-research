@@ -189,7 +189,25 @@ def run(inp: ValidationInput) -> ValidationOutput:
                 }
             )
 
-    # 8. P3-W2 (2026-05-27): framing-chapter downstream-reuse — telemetry
+    # 8. P3-W1 MICRO-TEMPLATE COMPLIANCE (advisory, like INSIGHT). When the
+    # plan has a non-empty entity_matrix in prose_subheaders mode, every
+    # entity-bearing chapter should instantiate the same bolded sub-headers
+    # in render_order. We don't hard-fail (writer is not yet retried for
+    # this specifically) but we log compliance ratios into counts for
+    # drift telemetry. Implementation deliberately lightweight (no regex
+    # parsing of section trees here) — full per-entity compliance lives
+    # in `_validate_micro_template` below for offline analysis. The check
+    # surfaces a single ratio so dev-run readers can spot regressions.
+    em = (inp.plan or {}).get("entity_matrix") if inp.plan else None
+    mt_result = _validate_micro_template(inp.article, em)
+    if mt_result is not None:
+        counts["micro_template_article_compliance"] = mt_result["article_compliance"]
+        counts["micro_template_min_axes"] = mt_result["min_axes_per_entity"]
+        counts["micro_template_entities_below_floor"] = len(mt_result["below_threshold_entities"])
+        # Advisory only — no failure appended. Drift telemetry surfaces
+        # the per-entity below-threshold list for post-hoc analysis.
+
+    # 9. P3-W2 (2026-05-27): framing-chapter downstream-reuse — telemetry
     # only. Measures whether §2+ chapters re-engage with §1's published
     # vocabulary + rubric items (Qianfan corpus-wide pattern of
     # analytical continuity). No fail/pass — surfaced in counts for drift
@@ -214,6 +232,158 @@ def run(inp: ValidationInput) -> ValidationOutput:
         fb = "VALIDATION FAILURES — fix these in place; preserve correct content; do not shorten:\n" + "\n".join(lines)
 
     return ValidationOutput(ok=ok, failures=failures, feedback_text=fb, counts=counts)
+
+
+def _find_entity_body_anchor(article: str, ent: str) -> int:
+    """Locate the first occurrence of `ent` that is on a line which is
+    NOT a markdown table row, so the resulting window covers the
+    entity's body section rather than its row inside the §1 matrix.
+
+    The §1 entity matrix is rendered as a markdown table (writer.py
+    §1 wrapper). Entity names therefore first appear inside that
+    table — pipe-bounded rows, ~20-80 chars apart. Anchoring on the
+    bare first occurrence (`article.find(ent)`) lands inside the
+    table; the window extends only to the adjacent entity's row;
+    the window contains no `**Axis:**` patterns; and every entity
+    except the last scores 0.0 — systematically misleading telemetry
+    (Greptile PR #37 round-3 finding).
+
+    A table row's first non-whitespace char is `|`. We walk all
+    case-insensitive occurrences and return the first one whose
+    containing line does not start with `|`. Fall back to the bare
+    first occurrence if every match is table-bound — the function
+    stays total, and the (still 0.0) compliance signal for that
+    entity is correct: the writer never instantiated it outside the
+    table.
+
+    Returns the byte index of the anchor, or -1 if `ent` is absent.
+    """
+    first_any = -1
+    for m in re.finditer(re.escape(ent), article, re.IGNORECASE):
+        idx = m.start()
+        if first_any < 0:
+            first_any = idx
+        line_start = article.rfind("\n", 0, idx) + 1
+        if not article[line_start:idx].lstrip().startswith("|"):
+            return idx
+    return first_any
+
+
+def _validate_micro_template(article: str, entity_matrix) -> dict | None:
+    """P3-W1 (2026-05-27): compute per-entity micro-template compliance ratio.
+
+    Returns:
+      None — when no entity_matrix is active (skip the check)
+      dict {
+        "article_compliance": float (0.0-1.0; mean across entities),
+        "per_entity_compliance": {entity_name: float},
+        "below_threshold_entities": [entity_name, ...],
+        "min_axes_per_entity": int,
+      }
+
+    Compliance per entity = (axes_found_as_bolded_subheader) / (len(dimensions)).
+    Below-threshold = ratio < (min_axes_per_entity / len(dimensions)).
+    """
+    if not isinstance(entity_matrix, dict):
+        return None
+    entities = entity_matrix.get("entities") or []
+    dims = entity_matrix.get("dimensions") or []
+    mode = entity_matrix.get("instantiation_mode", "prose_subheaders")
+    if not entities or not dims or mode != "prose_subheaders":
+        return None
+    # Extract axis_name strings (dimensions may be objects post-normalize
+    # or strings pre-normalize). Defensive coercion mirrors writer.write_section.
+    axis_names: list[str] = []
+    for d in dims:
+        if isinstance(d, dict):
+            n = str(d.get("axis_name", "")).strip()
+            if n:
+                axis_names.append(n)
+        elif isinstance(d, str):
+            n = d.strip()
+            if n:
+                axis_names.append(n)
+    if not axis_names:
+        return None
+    # Defensive `or 3`: covers the case where the matrix reaches the
+    # validator without passing through architect._normalize. `dict.get`
+    # returns the stored None when the key is present-with-null;
+    # int(None) would raise TypeError. Matches the writer's coercion.
+    # Greptile PR #37 round-3 finding.
+    min_axes = int(entity_matrix.get("min_axes_per_entity") or 3)
+    # `axis_names` is non-empty here: the `if not axis_names: return None`
+    # guard above fires first. So n_dims > 0 always — no zero-division
+    # branch needed. Greptile PR #37 round-7.
+    n_dims = len(axis_names)
+    threshold_ratio = min(1.0, min_axes / n_dims)
+
+    per_entity: dict[str, float] = {}
+    below: list[str] = []
+    # For each entity, find its body-section anchor and slice a window
+    # that extends until the NEXT entity's body anchor (or a 3000-char
+    # cap, whichever is shorter). Without the next-entity boundary, the
+    # window would overlap with later entities' sections and inflate
+    # the axis count — Greptile pre-scan caught this in the partial-
+    # compliance test.
+    #
+    # Body-section anchor (Greptile PR #37 round-3): NOT a bare first
+    # occurrence — the §1 entity matrix is rendered as a markdown table
+    # where every entity name appears in compact pipe-bounded rows
+    # (~20-80 chars apart). A bare first-mention anchor would land
+    # inside that table, the window to the next entity would be tiny
+    # and table-bound, contain no `**Axis:**` patterns, and score every
+    # entity 0.0 — systematically misleading telemetry. `_find_entity_
+    # body_anchor` skips table-row matches.
+    entity_positions: list[tuple[str, int]] = []
+    for ent_raw in entities:
+        ent = str(ent_raw).strip()
+        if not ent:
+            continue
+        idx = _find_entity_body_anchor(article, ent)
+        entity_positions.append((ent, idx))
+    # Sort by position; -1 (not found) sorted last but treated specially.
+    found = sorted(((e, i) for e, i in entity_positions if i >= 0), key=lambda p: p[1])
+    not_found = [e for e, i in entity_positions if i < 0]
+
+    for k, (ent, start) in enumerate(found):
+        # End of this entity's body slice = start of NEXT found entity,
+        # capped at +3000 chars from its own start.
+        next_start = found[k + 1][1] if k + 1 < len(found) else len(article)
+        end = min(next_start, start + 3000, len(article))
+        window = article[start:end]
+        n_axes_found = 0
+        for ax in axis_names:
+            # The micro-template directive emits `**{axis_name}:**` (EN)
+            # or `**{axis_name}：**` (ZH). Accept both colon forms — but
+            # only the FULL `**...:**` shape. Earlier rounds also matched
+            # the open-only `**{ax}:` shape, but those partials are a
+            # superstring of the full pattern and never add a new match
+            # when the writer closed the bold correctly. They DID falsely
+            # match `**Axis: unclosed bold text` from a malformed writer
+            # output — silently inflating compliance on cases where the
+            # writer forgot to close the markers (Greptile PR #37 round-5).
+            patterns = (f"**{ax}:**", f"**{ax}：**")
+            if any(p in window for p in patterns):
+                n_axes_found += 1
+        ratio = n_axes_found / n_dims
+        per_entity[ent] = round(ratio, 3)
+        if ratio < threshold_ratio:
+            below.append(ent)
+
+    for ent in not_found:
+        per_entity[ent] = 0.0
+        below.append(ent)
+
+    if per_entity:
+        article_compliance = round(sum(per_entity.values()) / len(per_entity), 3)
+    else:
+        article_compliance = 0.0
+    return {
+        "article_compliance": article_compliance,
+        "per_entity_compliance": per_entity,
+        "below_threshold_entities": below,
+        "min_axes_per_entity": min_axes,
+    }
 
 
 def _validate_framing_chapter(article: str, framing_chapter) -> dict | None:

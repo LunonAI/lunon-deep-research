@@ -241,32 +241,129 @@ def write_section(
     # not reject) would otherwise still fire the S1 "render this as a
     # markdown table" directive with no column headers, forcing the LLM to
     # hallucinate dimensions or emit a degenerate single-column table.
+    # P3-W1 (2026-05-27): writer directive dispatches on entity_matrix
+    # `instantiation_mode` field. Two modes:
+    #   - "prose_subheaders" (default, P3-W1): writer instantiates each
+    #     entity as a sub-section whose body begins with the canonical
+    #     bolded sub-headers (one per dimension, in `render_order` with
+    #     EXACT lexical match) followed by 1-3 sentences of content
+    #     matching that dimension's `content_template`. This is the
+    #     Qianfan corpus-wide pattern verified across 11 of 11 articles.
+    #   - "table_columns_only" (legacy): pre-W1 behaviour — S1 renders
+    #     the matrix as a markdown table; other sections get equal-depth
+    #     reminder only.
+    #
+    # Optional-archetype matrices (predict/explain-mechanism/trend/recommend)
+    # are surfaced in the SAME way as required ones when the architect chose
+    # to populate them (auto-promote happens in architect._normalize).
     entity_matrix_block = ""
     em = plan.get("entity_matrix")
-    if archetype in {"list-all", "compare"} and isinstance(em, dict) and em.get("entities") and em.get("dimensions"):
-        if sid == "S1":
-            entity_matrix_block = (
-                f"\nENTITY MATRIX (article spine for this archetype) — "
-                f"render this as a markdown table at the top of THIS section "
-                f"(immediately under the §1 heading; the executive opening "
-                f"frame is written separately and must not duplicate the "
-                f"table) AND give EACH entity equal-depth treatment in the "
-                f"downstream sections (no entity dropped, no entity "
-                f"over-weighted vs siblings):\n"
-                f"{json.dumps(em, ensure_ascii=False)}\n"
+    em_present = isinstance(em, dict) and em.get("entities") and em.get("dimensions")
+    # Required archetypes (list-all/compare) always emit the matrix
+    # directive, regardless of instantiation_mode. Optional archetypes
+    # (predict/explain-mechanism/trend/recommend) only emit it when
+    # instantiation_mode is `prose_subheaders` — the per-entity
+    # micro-template path.
+    #
+    # INTENTIONAL silent-skip (Greptile PR #37 round-5): an optional
+    # archetype with `instantiation_mode = "table_columns_only"` falls
+    # through this gate and produces no matrix block. There is no
+    # legacy table-only writer directive for optional archetypes — the
+    # legacy directive was list-all/compare-specific. The audit field
+    # `entity_matrix_instantiation_mode = "table_columns_only"` records
+    # the state for telemetry, so the skip is observable post-hoc; the
+    # writer output alone shows no sign the matrix existed. If an
+    # optional-archetype caller wants matrix output, they should set
+    # `prose_subheaders` (the normalize default for any falsy value).
+    em_active = em_present and (
+        archetype in {"list-all", "compare"} or em.get("instantiation_mode") == "prose_subheaders"
+    )
+    if em_active:
+        mode = em.get("instantiation_mode") or "prose_subheaders"
+        zh = bool(language) and str(language).lower().startswith("zh")
+        colon = "：" if zh else ":"
+        # Dimensions are normalized to object form by
+        # architect._normalize_dimensions. Sort by render_order so every
+        # section instantiates axes in the same order — byte-stable header
+        # emission across entities is the contract.
+        raw_dims = em.get("dimensions") or []
+        dims_sorted = sorted(
+            (d for d in raw_dims if isinstance(d, dict) and d.get("axis_name")),
+            key=lambda d: d.get("render_order", 999),
+        )
+        axis_lines = "\n".join(
+            f"    **{d['axis_name']}{colon}** ({d.get('content_template', '')})" for d in dims_sorted
+        )
+        # Defensive `or 3`: covers the case where the plan reaches the
+        # writer without passing through architect._normalize (e.g. unit
+        # tests, future caller). `dict.get(key, default)` returns the
+        # stored None when the key is present-with-null, and int(None)
+        # raises TypeError. Greptile PR #37 round-3 finding.
+        min_axes = int(em.get("min_axes_per_entity") or 3)
+        if mode == "prose_subheaders" and dims_sorted:
+            template_block = (
+                f"PER-ENTITY MICRO-TEMPLATE — for every entity in the matrix that "
+                f"this section addresses, produce a sub-section whose body BEGINS "
+                f"with these bolded sub-headers (in render_order, EXACT lexical "
+                f"match including the terminal `{colon}`):\n"
+                f"{axis_lines}\n"
+                f"RULES:\n"
+                f"  • Every entity instantiates the SAME axes in the SAME order.\n"
+                f"  • At least {min_axes} of the {len(dims_sorted)} axes must be "
+                f"populated per entity; an axis with no content may be omitted "
+                f"ONLY if you write the sub-header anyway and a one-sentence "
+                f"note explaining the visibility gap with a `[^{sid}-N]` citation.\n"
+                f"  • Do NOT reorder axes per entity. Do NOT introduce ad-hoc "
+                f"sub-headers between axes. Do NOT collapse two axes into one bullet.\n"
+                f"  • Each axis: 1-3 sentences, max 80 words.\n"
             )
         else:
-            # Non-S1 sections: no render directive (S1 owns the canonical
-            # table). Just the equal-depth reminder so this section knows
-            # the entity roster it must treat fairly.
-            entity_matrix_block = (
-                f"\nENTITY MATRIX REMINDER — section §1 renders the "
-                f"canonical table for this list-all/compare article; THIS "
-                f"section must give EACH entity equal-depth treatment "
-                f"(no entity dropped, no entity over-weighted vs siblings) "
-                f"and MUST NOT re-render the matrix table:\n"
+            template_block = ""
+        # Mention "PER-ENTITY MICRO-TEMPLATE" by name in the wrapper only
+        # when the directive itself is fired. Legacy mode (template_block
+        # is empty) keeps the wrapper text generic so the substring doesn't
+        # leak into prompts where the directive doesn't actually appear.
+        if template_block:
+            s1_wrapper = (
+                "\nENTITY MATRIX (article spine for this archetype) — "
+                "render this as a markdown table at the top of THIS section "
+                "(immediately under the §1 heading; the executive opening "
+                "frame is written separately and must not duplicate the "
+                "table). Then apply the PER-ENTITY MICRO-TEMPLATE below to "
+                "every entity this section addresses:\n"
+                f"{json.dumps(em, ensure_ascii=False)}\n"
+                f"{template_block}"
+            )
+            non_s1_wrapper = (
+                "\nENTITY MATRIX REMINDER — section §1 renders the canonical "
+                "table; THIS section must give EACH entity equal-depth "
+                "treatment using the PER-ENTITY MICRO-TEMPLATE below, and "
+                "MUST NOT re-render the matrix table:\n"
+                f"{json.dumps(em, ensure_ascii=False)}\n"
+                f"{template_block}"
+            )
+        else:
+            # Legacy table_columns_only mode: wrapper text references the
+            # table only — no mention of the micro-template directive.
+            s1_wrapper = (
+                "\nENTITY MATRIX (article spine for this archetype) — "
+                "render this as a markdown table at the top of THIS section "
+                "(immediately under the §1 heading; the executive opening "
+                "frame is written separately and must not duplicate the "
+                "table) AND give EACH entity equal-depth treatment in the "
+                "downstream sections (no entity dropped, no entity "
+                "over-weighted vs siblings):\n"
                 f"{json.dumps(em, ensure_ascii=False)}\n"
             )
+            non_s1_wrapper = (
+                "\nENTITY MATRIX REMINDER — section §1 renders the canonical "
+                "table for this list-all/compare article; THIS section must "
+                "give EACH entity equal-depth treatment (no entity dropped, "
+                "no entity over-weighted vs siblings) and MUST NOT re-render "
+                "the matrix table:\n"
+                f"{json.dumps(em, ensure_ascii=False)}\n"
+            )
+        entity_matrix_block = s1_wrapper if sid == "S1" else non_s1_wrapper
 
     # P3-W2 (2026-05-27): framing-chapter dispatch.
     #   §1 (sid=="S1"): receives the FRAMING CONTRACT directive instructing
