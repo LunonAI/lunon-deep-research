@@ -145,16 +145,27 @@ def write_section(
     # the post-Wave-1 id=91 smoke (writer emitted 183 clean inline markers
     # but zero `[^X]: source` def lines → all 183 stripped as orphans →
     # no References block → distance score regressed to 1.966).
-    ev_view = [
-        {
+    ev_view = []
+    for i, e in enumerate(evidence):
+        atom = {
             "marker": f"[^{sid}-{i + 1}]",
             "eid": e["eid"],
             "source_name": e["source_name"],
             "url": e["url"],
             "text": e["text"],
         }
-        for i, e in enumerate(evidence)
-    ]
+        # P3-W0b (2026-05-27): surface specialist-extracted causal chain
+        # to the writer when the finding is multi-step (2+ links).
+        # Single-link "chains" are degenerate (= statement again) and
+        # add no information, so they're suppressed at render time. The
+        # writer is instructed (CITATION CONTRACT block below) to emit
+        # the chain prose as "X → Y → Z" when present rather than
+        # synthesizing chains from the flat `text` field — preserves
+        # source-grounded reasoning vs hallucinated chain construction.
+        chain = e.get("chain") or []
+        if len(chain) >= 2:
+            atom["causal_chain"] = list(chain)
+        ev_view.append(atom)
     # Wave 2 §1.2 follow-up (PR #30 self-review): thread per-archetype
     # outline bounds into writer_system so the system-prompt STRUCTURAL
     # CAPS block matches the user-prompt OUTLINE SHAPE block (no
@@ -338,6 +349,73 @@ def write_section(
             )
         entity_matrix_block = s1_wrapper if sid == "S1" else non_s1_wrapper
 
+    # P3-W2 (2026-05-27): framing-chapter dispatch.
+    #   §1 (sid=="S1"): receives the FRAMING CONTRACT directive instructing
+    #     the writer to emit the 4 sub-sections (scope / rubric / roadmap
+    #     / vocabulary) — the §1 chapter is the article's contract with
+    #     the reader.
+    #   Other sections: receive the NAMED TERM BANK (published_vocabulary
+    #     + published_rubric_items) and are instructed to reuse them
+    #     unmodified — the reference's verified corpus-wide pattern (10/11).
+    framing_block = ""
+    fc = plan.get("framing_chapter")
+    if isinstance(fc, dict):
+        if sid == "S1":
+            sub_sections = fc.get("sub_sections") or []
+            vocab = [str(t) for t in (fc.get("published_vocabulary") or []) if t]
+            rubric = [r for r in (fc.get("published_rubric_items") or []) if isinstance(r, dict) and r.get("id")]
+            if sub_sections or vocab or rubric:
+                parts = [
+                    "\nFRAMING CHAPTER CONTRACT (§1 — this section IS the framing chapter; "
+                    "write it as the article's contract with the reader):"
+                ]
+                if sub_sections:
+                    parts.append(f"  4 REQUIRED sub-sections: {json.dumps(sub_sections, ensure_ascii=False)}")
+                    parts.append(
+                        "  Each sub-section: 200-400 words. Use the type field to drive content "
+                        '("scope" defines what is in / out of the report; "rubric" lists the '
+                        'weighted evaluation dimensions used downstream; "roadmap" names what '
+                        'each downstream chapter §2-§N will address; "vocabulary" introduces '
+                        "the 5-10 named terms below as the article's analytical lexicon)."
+                    )
+                if vocab:
+                    parts.append(f"  Vocabulary to introduce: {json.dumps(vocab, ensure_ascii=False)}")
+                    parts.append(
+                        "  Each vocabulary term: define it once in §1.4 vocabulary sub-section; "
+                        "downstream chapters will reuse the term UNMODIFIED."
+                    )
+                if rubric:
+                    rubric_summary = "; ".join(f"{r['id']}: {r.get('label', '')}" for r in rubric)
+                    parts.append(f"  Rubric to publish: {rubric_summary}")
+                    parts.append(
+                        "  Render the rubric as a markdown table in §1.2 (columns: id, label, weight). "
+                        "Downstream chapters reference rubric items by `id`."
+                    )
+                framing_block = "\n".join(parts) + "\n"
+        else:
+            vocab = [str(t) for t in (fc.get("published_vocabulary") or []) if t]
+            rubric = [r for r in (fc.get("published_rubric_items") or []) if isinstance(r, dict) and r.get("id")]
+            if vocab or rubric:
+                parts = ["\nNAMED TERM BANK (from §1 framing chapter — use these terms UNMODIFIED when relevant):"]
+                if vocab:
+                    parts.append(f"  Vocabulary: {json.dumps(vocab, ensure_ascii=False)}")
+                    parts.append(
+                        "  Reuse each term in its declared form (preserve case, language, "
+                        "punctuation); do NOT synonymize or translate. Each vocabulary "
+                        "term should appear ≥1 time when contextually relevant — "
+                        "the reference's verified pattern is ~2-5 reuses per term across the article."
+                    )
+                if rubric:
+                    rubric_summary = "; ".join(f"{r['id']}: {r.get('label', '')}" for r in rubric)
+                    parts.append(f"  Rubric items: {rubric_summary}")
+                    parts.append(
+                        "  When evaluating an entity against a rubric item, cite the item "
+                        'by `id` form (e.g. "Per R-2 (market-size criterion), this sector '
+                        'scores high…"). At least one rubric reference per chapter that '
+                        "applies a rubric item is the minimum compliance bar."
+                    )
+                framing_block = "\n".join(parts) + "\n"
+
     user = (
         f"PROMPT ({language}):\n{prompt}\n\n"
         f"You are writing ONLY this section of the report (other sections are "
@@ -348,6 +426,7 @@ def write_section(
         f"DEPTH TARGET: {unit['depth']}\n"
         f"{depth_block}"
         f"{entity_matrix_block}"
+        f"{framing_block}"
         f"REPORT OUTLINE (titles only, for coherence): "
         f"{json.dumps(prior_titles, ensure_ascii=False)}\n\n"
         f"ACCEPTANCE CRITERIA THIS SECTION MUST SATISFY:\n"
@@ -408,7 +487,22 @@ def write_section(
         f"read complete if all `[^X]` markers are deleted. Footnotes "
         f"are SUPPLEMENTARY identifiers, not the substantive claim.\n"
         f"• Numeric `[n]` markers (without the `^`) are NOT used in this "
-        f"pipeline — only `[^{sid}-N]` form.\n\n"
+        f"pipeline — only `[^{sid}-N]` form.\n"
+        # P3-W0b (2026-05-27): when an evidence atom carries a
+        # `causal_chain` field (populated by the mechanism_explorer
+        # specialist for multi-step findings), prefer rendering the
+        # chain explicitly rather than synthesizing one from the flat
+        # statement. RACE Insight criterion 2 (causal reasoning) scores
+        # higher when chains are source-grounded vs writer-invented.
+        f"• CAUSAL CHAIN RENDER (when evidence atom has `causal_chain` field): "
+        f"some atoms carry a `causal_chain` array of 2-6 ordered clauses "
+        f"naming the intervening causal links (populated by the "
+        f"mechanism_explorer specialist). When you cite such an atom, "
+        f"prefer rendering the chain EXPLICITLY in prose — '<link1>, "
+        f"which leads to <link2>, in turn enabling <link3>[^{sid}-N]' — "
+        f"rather than collapsing to the flat `text` summary. This makes "
+        f"the causal mechanism visible and source-grounded; do NOT "
+        f"invent additional links beyond what the chain provides.\n\n"
         # Wave 2 §3.2 (2026-05-26): mirror the system-prompt `_INSIGHT_MIN`
         # distribution targets here in the user prompt with per-archetype
         # interpolation so the writer sees the explicit percentages for

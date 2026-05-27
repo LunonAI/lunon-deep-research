@@ -266,6 +266,69 @@ def test_normalize_coerces_explicit_null_to_default():
     assert audit["entity_matrix_instantiation_mode"] == "prose_subheaders"
 
 
+def test_normalize_optional_archetype_with_llm_populated_entities_still_normalizes():
+    """Greptile PR #37 round-4: optional-archetype path with LLM-populated
+    entities must still hit the normalize block.
+
+    `_should_promote_entity_matrix` early-exits with False when entities
+    are already non-empty (its job is auto-promotion, not re-promotion).
+    Pre-fix, the gate `if is_required or should_promote:` excluded the
+    "LLM populated it correctly but forgot instantiation_mode" case for
+    predict/explain-mechanism/trend/recommend — instantiation_mode stayed
+    unset, the writer's `em_active` check failed, and the entity matrix
+    block was silently dropped on every such plan.
+
+    The new third condition `em_optional_populated` lets that path
+    through so the normalize backstop applies. Audit's
+    `entity_matrix_auto_promoted` MUST stay False (the LLM populated it,
+    not auto-promotion — important for drift attribution).
+    """
+    for archetype in ("predict", "explain-mechanism", "trend", "recommend"):
+        plan = _bare_plan_with_matrix()
+        plan["entity_matrix"].pop("instantiation_mode", None)  # the LLM omission
+        plan["entity_matrix"].pop("min_axes_per_entity", None)  # also commonly omitted
+        architect._normalize(plan, archetype=archetype)
+        em = plan["entity_matrix"]
+        assert em["instantiation_mode"] == "prose_subheaders", (
+            f"archetype={archetype}: instantiation_mode never defaulted; got {em}"
+        )
+        assert em["min_axes_per_entity"] == 3, f"archetype={archetype}: min_axes_per_entity never defaulted; got {em}"
+        # Dimensions must also be normalized (legacy string-form coercion).
+        for d in em["dimensions"]:
+            assert isinstance(d, dict) and "axis_name" in d, (
+                f"archetype={archetype}: dimensions never normalized to object form; got {em}"
+            )
+        # Audit must distinguish LLM-populated from auto-promoted.
+        audit = plan["_outline_audit"]
+        assert audit["entity_matrix_instantiation_mode"] == "prose_subheaders"
+        assert audit["entity_matrix_min_axes_per_entity"] == 3
+        assert audit["entity_matrix_auto_promoted"] is False, (
+            f"archetype={archetype}: LLM-populated path should not be flagged auto_promoted; got {audit}"
+        )
+
+
+def test_normalize_optional_archetype_with_empty_entities_unaffected():
+    """Greptile PR #37 round-4 sanity-check: the new gate must NOT alter
+    the behavior of the pre-existing auto-promote path. An optional
+    archetype with an empty `entities` list should still flow through
+    `_should_promote_entity_matrix` (which may return True or False
+    based on outline shape) and NOT short-circuit on the new gate.
+
+    Specifically: when entities are empty AND the outline lacks the
+    sibling-sub-chapters shape, the matrix should NOT be normalized
+    (no instantiation_mode default written), matching pre-fix behavior.
+    """
+    plan = _bare_plan_with_matrix(entities=[])  # empty entities
+    plan["entity_matrix"].pop("instantiation_mode", None)
+    # Default _bare_plan_with_matrix has a single-section outline — not
+    # the ≥3-sibling-subchapter shape `_should_promote_entity_matrix`
+    # requires. So should_promote=False AND em_optional_populated=False
+    # → gate stays closed, no normalize.
+    architect._normalize(plan, archetype="predict")
+    em = plan["entity_matrix"]
+    assert "instantiation_mode" not in em, f"empty-entities + flat-outline path should not normalize; got {em}"
+
+
 def test_normalize_audit_records_new_fields():
     """The _outline_audit must surface instantiation_mode + min_axes +
     auto_promoted flag so drift telemetry can correlate them with
