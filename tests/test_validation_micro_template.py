@@ -269,3 +269,45 @@ def test_validate_handles_null_min_axes_per_entity_without_crash():
     # → not below threshold. Confirms the default flowed through.
     assert out["min_axes_per_entity"] == 3
     assert out["per_entity_compliance"]["E1"] == 1.0
+
+
+def test_validate_does_not_credit_unclosed_bold():
+    """Greptile PR #37 round-5: the compliance scorer must accept ONLY
+    the full `**axis:**` shape, not the open-only `**axis:` partial.
+    The partial pattern is a superstring of the full one — it adds no
+    new matches on correctly-closed writer output, but it DOES match
+    malformed `**Axis: unclosed bold text` and silently inflate
+    compliance. After dropping the partials, a writer that forgot to
+    close the bold markers must score 0.0 on the affected axis."""
+    entities = ["E1"]
+    dims = ["D1", "D2"]
+    # E1 has D1 closed correctly but D2 with unclosed bold:
+    #   `**D2: y.` (no closing `**`) — pre-fix this counted as compliant
+    #   because the partial pattern `**D2:` matched.
+    article = "\n## E1\n\n**D1:** x.\n**D2: y has unclosed bold and a fall-through line.\n"
+    em = _em(entities, dims, min_axes=2)
+    out = _validate_micro_template(article, em)
+    assert out is not None
+    # D1 fired (full pattern); D2 did NOT (partial pattern dropped).
+    # ratio = 1/2 = 0.5 (below the 2/2=1.0 threshold).
+    assert out["per_entity_compliance"]["E1"] == 0.5, (
+        f"unclosed-bold should not count as compliant; got {out['per_entity_compliance']}"
+    )
+    assert "E1" in out["below_threshold_entities"]
+
+
+def test_validate_does_not_credit_unclosed_bold_zh():
+    """Greptile PR #37 round-5 (ZH variant): the partial-pattern fix
+    must apply symmetrically to the full-width-colon form `**axis：**`
+    used in ZH articles. Pre-fix, partial `**axis：` would match
+    unclosed `**axis：内容` and inflate compliance the same way."""
+    entities = ["E1"]
+    dims = ["维度一", "维度二"]
+    # E1 has 维度一 closed correctly but 维度二 with unclosed bold.
+    article = "\n## E1\n\n**维度一：** 内容一。\n**维度二：内容二有未闭合的粗体。\n"
+    em = _em(entities, dims, min_axes=2)
+    out = _validate_micro_template(article, em)
+    assert out is not None
+    assert out["per_entity_compliance"]["E1"] == 0.5, (
+        f"unclosed ZH bold should not count as compliant; got {out['per_entity_compliance']}"
+    )

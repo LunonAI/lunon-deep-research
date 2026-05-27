@@ -259,6 +259,22 @@ def write_section(
     entity_matrix_block = ""
     em = plan.get("entity_matrix")
     em_present = isinstance(em, dict) and em.get("entities") and em.get("dimensions")
+    # Required archetypes (list-all/compare) always emit the matrix
+    # directive, regardless of instantiation_mode. Optional archetypes
+    # (predict/explain-mechanism/trend/recommend) only emit it when
+    # instantiation_mode is `prose_subheaders` — the per-entity
+    # micro-template path.
+    #
+    # INTENTIONAL silent-skip (Greptile PR #37 round-5): an optional
+    # archetype with `instantiation_mode = "table_columns_only"` falls
+    # through this gate and produces no matrix block. There is no
+    # legacy table-only writer directive for optional archetypes — the
+    # legacy directive was list-all/compare-specific. The audit field
+    # `entity_matrix_instantiation_mode = "table_columns_only"` records
+    # the state for telemetry, so the skip is observable post-hoc; the
+    # writer output alone shows no sign the matrix existed. If an
+    # optional-archetype caller wants matrix output, they should set
+    # `prose_subheaders` (the normalize default for any falsy value).
     em_active = em_present and (
         archetype in {"list-all", "compare"} or em.get("instantiation_mode") == "prose_subheaders"
     )
