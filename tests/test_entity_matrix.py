@@ -109,6 +109,20 @@ def test_normalize_records_no_shortfalls_when_matrix_meets_bounds():
     plan["queries"] = [
         {"id": f"Q{i + 1}", "text": f"q{i + 1}", "type": "factual"} for i in range(architect._QUERIES_MIN)
     ]
+    # P3-W5 merge follow-up (2026-05-27): list-all archetype requires
+    # limitations_chapter with 5 sub-sections. Minimal valid form to
+    # satisfy the new audit.
+    plan["limitations_chapter"] = {
+        "title": "Limitations",
+        "sub_sections": [
+            {"id": "SN.1", "type": "data_granularity", "title": "DG", "content_directive": "..."},
+            {"id": "SN.2", "type": "scope_cap", "title": "Scope", "content_directive": "..."},
+            {"id": "SN.3", "type": "time_validity", "title": "Time", "content_directive": "..."},
+            {"id": "SN.4", "type": "sampling", "title": "Sample", "content_directive": "..."},
+            {"id": "SN.5", "type": "falsifiers", "title": "Falsifiers", "content_directive": "..."},
+        ],
+        "scenario_stress_test": None,  # list-all not in stress-test required set
+    }
     architect._normalize(plan, archetype="list-all")
     audit = plan["_outline_audit"]
     assert audit["shortfalls"] == [], f"unexpected shortfalls: {audit['shortfalls']}"

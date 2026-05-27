@@ -365,6 +365,25 @@ def _build_good_plan_obj():
             "entities": [f"E{i + 1}" for i in range(architect._ENTITY_MATRIX_ENTITIES_MIN)],
             "dimensions": [f"D{i + 1}" for i in range(architect._ENTITY_MATRIX_DIMENSIONS_MIN)],
         },
+        # P3-W5 merge follow-up (2026-05-27): predict-archetype tests
+        # call this builder and predict requires limitations_chapter
+        # with all 5 sub-section types + scenario_stress_test populated.
+        # Minimal valid limitations chapter to satisfy the new audit.
+        "limitations_chapter": {
+            "title": "Limitations",
+            "sub_sections": [
+                {"id": "S9.1", "type": "data_granularity", "title": "DG", "content_directive": "..."},
+                {"id": "S9.2", "type": "scope_cap", "title": "Scope", "content_directive": "..."},
+                {"id": "S9.3", "type": "time_validity", "title": "Time", "content_directive": "..."},
+                {"id": "S9.4", "type": "sampling", "title": "Sample", "content_directive": "..."},
+                {"id": "S9.5", "type": "falsifiers", "title": "Falsifiers", "content_directive": "..."},
+            ],
+            "scenario_stress_test": {
+                "scenarios": ["base", "optimistic", "pessimistic"],
+                "recompute_target": "tier_ranking",
+                "directive": "...",
+            },
+        },
     }
 
 

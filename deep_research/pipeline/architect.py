@@ -89,7 +89,33 @@ criteria into a STRICT JSON research plan. Output ONLY this JSON object:
     "target_sections": ["S1", ...]} ... 24-32 ],
  "queries": [ {"id": "Q1", "text": str,
     "type": "factual"|"causal"|"comparative"|"critical"|"trend",
-    "target_sections": ["S1", ...], "rationale": str } ... 48-64 ]
+    "target_sections": ["S1", ...], "rationale": str } ... 48-64 ],
+ "limitations_chapter": {          /* P3-W5 (2026-05-27): penultimate
+                                      chapter for predict / compare /
+                                      explain-mechanism / list-all
+                                      archetypes. Omit / null for trend
+                                      and recommend. Engineering-grade
+                                      falsification — Qianfan-verified
+                                      pattern (6/11 articles). */
+   "title": str,                    /* e.g. "Limitations and Future
+                                       Research Directions" */
+   "sub_sections": [
+     {"id": "SN.1", "type": "data_granularity",
+      "title": str, "content_directive": str},
+     {"id": "SN.2", "type": "scope_cap",
+      "title": str, "content_directive": str},
+     {"id": "SN.3", "type": "time_validity",
+      "title": str, "content_directive": str},
+     {"id": "SN.4", "type": "sampling",
+      "title": str, "content_directive": str},
+     {"id": "SN.5", "type": "falsifiers",
+      "title": str, "content_directive": str}
+   ],
+   "scenario_stress_test": null     /* predict archetype ONLY: 3-scenario
+                                       (base/optimistic/pessimistic)
+                                       recompute of the article's main
+                                       ranking. Null for other archetypes. */
+ } | null
 }
 
 HARD RULES:
@@ -490,6 +516,22 @@ _ENTITY_MATRIX_ENTITIES_MAX = 20
 _ENTITY_MATRIX_DIMENSIONS_MIN = 4
 _ENTITY_MATRIX_DIMENSIONS_MAX = 8
 
+# P3-W5 (2026-05-27): limitations chapter sub-section types. Qianfan's
+# 6/11-article pattern (q14 §9.10 / q23 §8.11 / q56 §10.7.5 / q3 §8.4 /
+# q44 §6+ / q89 §close) all enumerate 5 limitation dimensions: data
+# granularity, scope cap, time validity, sampling, falsifiers. The
+# scenario_stress_test sub-node (predict archetype only) recomputes the
+# article's main ranking under 3 scenarios.
+_LIMITATIONS_SUBSECTION_TYPES: tuple[str, ...] = (
+    "data_granularity",
+    "scope_cap",
+    "time_validity",
+    "sampling",
+    "falsifiers",
+)
+_LIMITATIONS_REQUIRED_ARCHETYPES = frozenset({"predict", "compare", "explain-mechanism", "list-all"})
+_LIMITATIONS_STRESS_TEST_ARCHETYPES = frozenset({"predict"})
+
 
 def _normalize(plan: dict, *, archetype: str | None = None) -> None:
     """Attach specialist_role to every query; backfill depth_seeds default;
@@ -632,5 +674,33 @@ def _normalize(plan: dict, *, archetype: str | None = None) -> None:
                 audit["shortfalls"].append(f"entity_matrix.dimensions={len(dims)}<{_ENTITY_MATRIX_DIMENSIONS_MIN}")
             if len(dims) > _ENTITY_MATRIX_DIMENSIONS_MAX:
                 audit["shortfalls"].append(f"entity_matrix.dimensions={len(dims)}>{_ENTITY_MATRIX_DIMENSIONS_MAX}")
+
+    # P3-W5 (2026-05-27): limitations_chapter audit. For required
+    # archetypes, check the chapter exists with all 5 sub-section types
+    # and (for predict) a populated scenario_stress_test. Same advisory-
+    # only pattern as entity_matrix / framing_chapter.
+    lc = plan.get("limitations_chapter")
+    lc_is_required = archetype in _LIMITATIONS_REQUIRED_ARCHETYPES
+    if lc_is_required:
+        lc_was_missing = not isinstance(lc, dict)
+        if lc_was_missing:
+            lc = {"title": "", "sub_sections": [], "scenario_stress_test": None}
+            plan["limitations_chapter"] = lc
+            audit["shortfalls"].append("limitations_chapter=missing(required-for-archetype)")
+        if not isinstance(lc.get("sub_sections"), list):
+            lc["sub_sections"] = []
+        sub_types = [str(s.get("type", "")).strip().lower() for s in lc["sub_sections"] if isinstance(s, dict)]
+        missing_types = [t for t in _LIMITATIONS_SUBSECTION_TYPES if t not in sub_types]
+        audit["limitations_chapter_sub_section_types"] = sub_types
+        audit["limitations_chapter_missing_sub_section_types"] = missing_types
+        if not lc_was_missing and missing_types:
+            audit["shortfalls"].append(f"limitations_chapter.missing_sub_section_types={','.join(missing_types)}")
+        # Stress-test sub-node check (predict archetype only).
+        if archetype in _LIMITATIONS_STRESS_TEST_ARCHETYPES:
+            sst = lc.get("scenario_stress_test")
+            has_sst = isinstance(sst, dict) and bool(sst.get("scenarios"))
+            audit["limitations_chapter_has_stress_test"] = has_sst
+            if not lc_was_missing and not has_sst:
+                audit["shortfalls"].append("limitations_chapter.scenario_stress_test=missing(required-for-predict)")
 
     plan["_outline_audit"] = audit
