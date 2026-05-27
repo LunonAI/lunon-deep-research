@@ -1,0 +1,150 @@
+"""Unit tests for P3-W5 — limitations chapter architect contract.
+
+the reference corpus pattern (6/11 articles): predict / compare / explain-
+mechanism / list-all archetypes end with an engineering-grade limitations
+chapter enumerating 5 dimensions (data granularity, scope cap, time
+validity, sampling, falsifiers). q3 §8.5 (predict) adds a 3-scenario
+stress test that recomputes the article's main ranking.
+"""
+
+from deep_research.pipeline import architect
+
+
+def _bare_plan_with_limitations(archetype="predict", **lc_overrides):
+    lc = {
+        "title": "Limitations and Future Research",
+        "sub_sections": [
+            {"id": "S9.1", "type": "data_granularity", "title": "Data granularity", "content_directive": "..."},
+            {"id": "S9.2", "type": "scope_cap", "title": "Scope cap", "content_directive": "..."},
+            {"id": "S9.3", "type": "time_validity", "title": "Time validity", "content_directive": "..."},
+            {"id": "S9.4", "type": "sampling", "title": "Sampling", "content_directive": "..."},
+            {"id": "S9.5", "type": "falsifiers", "title": "Falsifiers", "content_directive": "..."},
+        ],
+        "scenario_stress_test": {
+            "scenarios": ["base", "optimistic", "pessimistic"],
+            "recompute_target": "tier_ranking",
+            "directive": "recompute the §8.1 ranking under each scenario; report rank stability.",
+        }
+        if archetype == "predict"
+        else None,
+    }
+    lc.update(lc_overrides)
+    return {
+        "report_title": "T",
+        "report_toc": [{"id": "S1", "title": "Sec", "subsections": [], "depth_target": "broad"}],
+        "queries": [{"id": f"Q{i}", "text": "q", "type": "factual"} for i in range(50)],
+        "acceptance_criteria": [],
+        "limitations_chapter": lc,
+    }
+
+
+def test_limitations_constants_pinned():
+    """Sub-section types + required-archetype set pinned (drift = contract drift)."""
+    assert architect._LIMITATIONS_SUBSECTION_TYPES == (
+        "data_granularity",
+        "scope_cap",
+        "time_validity",
+        "sampling",
+        "falsifiers",
+    )
+    assert architect._LIMITATIONS_REQUIRED_ARCHETYPES == frozenset(
+        {"predict", "compare", "explain-mechanism", "list-all"}
+    )
+    assert architect._LIMITATIONS_STRESS_TEST_ARCHETYPES == frozenset({"predict"})
+
+
+def test_normalize_predict_with_complete_limitations_no_shortfall():
+    plan = _bare_plan_with_limitations(archetype="predict")
+    architect._normalize(plan, archetype="predict")
+    audit = plan["_outline_audit"]
+    lc_shortfalls = [s for s in audit["shortfalls"] if "limitations" in s]
+    assert lc_shortfalls == [], f"got {lc_shortfalls}"
+
+
+def test_normalize_missing_limitations_for_required_archetype_emits_shortfall():
+    plan = _bare_plan_with_limitations()
+    plan.pop("limitations_chapter")
+    architect._normalize(plan, archetype="explain-mechanism")
+    audit = plan["_outline_audit"]
+    assert any("limitations_chapter=missing" in s for s in audit["shortfalls"])
+    lc = plan["limitations_chapter"]
+    assert isinstance(lc, dict)
+    assert lc["sub_sections"] == []
+
+
+def test_normalize_trend_no_limitations_no_shortfall():
+    """trend archetype is NOT in required set; missing limitations is fine."""
+    plan = _bare_plan_with_limitations()
+    plan.pop("limitations_chapter")
+    architect._normalize(plan, archetype="trend")
+    audit = plan["_outline_audit"]
+    lc_shortfalls = [s for s in audit["shortfalls"] if "limitations_chapter=missing" in s]
+    assert lc_shortfalls == []
+
+
+def test_normalize_recommend_no_limitations_no_shortfall():
+    """recommend archetype is NOT in required set."""
+    plan = _bare_plan_with_limitations()
+    plan.pop("limitations_chapter")
+    architect._normalize(plan, archetype="recommend")
+    audit = plan["_outline_audit"]
+    lc_shortfalls = [s for s in audit["shortfalls"] if "limitations_chapter=missing" in s]
+    assert lc_shortfalls == []
+
+
+def test_normalize_records_limitations_sub_section_types():
+    plan = _bare_plan_with_limitations()
+    architect._normalize(plan, archetype="predict")
+    audit = plan["_outline_audit"]
+    assert audit["limitations_chapter_sub_section_types"] == list(architect._LIMITATIONS_SUBSECTION_TYPES)
+    assert audit["limitations_chapter_missing_sub_section_types"] == []
+
+
+def test_normalize_flags_missing_limitations_sub_section_type():
+    """Drop one sub-section type → audit records the missing type."""
+    plan = _bare_plan_with_limitations()
+    # Drop the "falsifiers" sub-section
+    plan["limitations_chapter"]["sub_sections"] = plan["limitations_chapter"]["sub_sections"][:-1]
+    architect._normalize(plan, archetype="compare")
+    audit = plan["_outline_audit"]
+    assert "falsifiers" in audit["limitations_chapter_missing_sub_section_types"]
+    assert any("falsifiers" in s for s in audit["shortfalls"])
+
+
+def test_normalize_predict_with_missing_stress_test_emits_shortfall():
+    """predict archetype requires scenario_stress_test."""
+    plan = _bare_plan_with_limitations()
+    plan["limitations_chapter"]["scenario_stress_test"] = None
+    architect._normalize(plan, archetype="predict")
+    audit = plan["_outline_audit"]
+    assert audit["limitations_chapter_has_stress_test"] is False
+    assert any("scenario_stress_test=missing" in s for s in audit["shortfalls"])
+
+
+def test_normalize_compare_does_not_require_stress_test():
+    """compare archetype has limitations but NOT scenario_stress_test."""
+    plan = _bare_plan_with_limitations()
+    plan["limitations_chapter"]["scenario_stress_test"] = None
+    architect._normalize(plan, archetype="compare")
+    audit = plan["_outline_audit"]
+    # No stress-test field on audit (the check is gated on predict).
+    assert "limitations_chapter_has_stress_test" not in audit
+    stress_sf = [s for s in audit["shortfalls"] if "scenario_stress_test" in s]
+    assert stress_sf == []
+
+
+def test_normalize_handles_malformed_limitations_field_types():
+    """sub_sections as non-list → coerced to empty list."""
+    plan = _bare_plan_with_limitations()
+    plan["limitations_chapter"]["sub_sections"] = "not a list"
+    architect._normalize(plan, archetype="predict")
+    lc = plan["limitations_chapter"]
+    assert lc["sub_sections"] == []
+
+
+def test_normalize_unknown_archetype_no_limitations_audit():
+    plan = _bare_plan_with_limitations()
+    plan.pop("limitations_chapter")
+    architect._normalize(plan, archetype=None)
+    audit = plan["_outline_audit"]
+    assert "limitations_chapter_sub_section_types" not in audit
