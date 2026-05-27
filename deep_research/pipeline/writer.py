@@ -346,7 +346,7 @@ def write_section(
         # statement. RACE Insight criterion 2 (causal reasoning) scores
         # higher when chains are source-grounded vs writer-invented.
         f"• CAUSAL CHAIN RENDER (when evidence atom has `causal_chain` field): "
-        f"some atoms carry a `causal_chain` array of 2-4 ordered clauses "
+        f"some atoms carry a `causal_chain` array of 2-6 ordered clauses "
         f"naming the intervening causal links (populated by the "
         f"mechanism_explorer specialist). When you cite such an atom, "
         f"prefer rendering the chain EXPLICITLY in prose — '<link1>, "

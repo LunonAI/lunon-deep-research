@@ -221,6 +221,54 @@ def test_memory_bank_add_with_empty_chain():
     assert blocks[0]["chain"] == []
 
 
+def test_memory_bank_add_rejects_non_list_chain_defensively():
+    """Greptile PR #36 round-2: even though `_sanitize_chain` upstream
+    guarantees list[str], `MemoryBank.add` keeps a defensive
+    `isinstance(chain, list)` guard so a future caller that skips the
+    sanitizer can't silently corrupt the block by passing a truthy
+    non-list. Specifically, a raw string would otherwise be iterated
+    char-by-char by `list(...)` and produce a phantom chain like
+    `["A", " ", "→", " ", "B"]` — semantically broken, no error raised.
+
+    The guard converts any non-list (string, dict, int, tuple) to []
+    rather than partial-accept. This is symmetric with
+    `_sanitize_chain`'s whole-field-rejection design."""
+    bank = memory_bank.MemoryBank()
+    bank.add(
+        source_name="A",
+        url="",
+        title="",
+        text="t",
+        query_id="Q1",
+        section_ids=["S1"],
+        specialist="m",
+        language="en",
+        chain="A → B → C",  # WRONG type: bare string instead of list
+    )
+    blocks = bank.for_section("S1")
+    # Without the isinstance guard this would be ["A", " ", "→", " ", "B", " ", "→", " ", "C"].
+    assert blocks[0]["chain"] == [], f"non-list chain not rejected: {blocks[0]['chain']}"
+
+
+def test_memory_bank_add_rejects_dict_chain_defensively():
+    """Symmetric coverage: a dict (another truthy non-list) is also
+    rejected rather than being iterated for its keys."""
+    bank = memory_bank.MemoryBank()
+    bank.add(
+        source_name="A",
+        url="",
+        title="",
+        text="t",
+        query_id="Q1",
+        section_ids=["S1"],
+        specialist="m",
+        language="en",
+        chain={"step1": "X", "step2": "Y"},  # WRONG type: dict
+    )
+    blocks = bank.for_section("S1")
+    assert blocks[0]["chain"] == [], f"dict chain not rejected: {blocks[0]['chain']}"
+
+
 def test_memory_bank_add_stores_chain_as_independent_list():
     """Defensive: the block's `chain` must be an INDEPENDENT list so
     mutating the caller's original list doesn't reflect into bank state
