@@ -391,8 +391,30 @@ def _build_good_plan_obj():
                 {"id": "R-4", "label": "L4", "weight": 0.25},
             ],
         },
-        # Minimal valid limitations chapter: 5 sub-section types + a
-        # populated scenario_stress_test (required for predict archetype).
+        # P3-W7 merge follow-up (2026-05-27): predict + compare archetypes
+        # with ≥5 entity_matrix entities require tier_ranking. Minimal valid
+        # form so retry tests preserve the `shortfalls == []` invariant.
+        # Weights mirror framing_chapter.published_rubric_items above
+        # (R-1..R-4 each 0.25) per the schema's "should mirror" guidance —
+        # the §1 chapter publishes the rubric; the tier-ranking chapter
+        # consumes it.
+        "tier_ranking": {
+            "title": "Tier Ranking",
+            "scoring_formula": "S_final = Σ(w_i × d_i)",
+            "weights": {"R-1": 0.25, "R-2": 0.25, "R-3": 0.25, "R-4": 0.25},
+            "tiers": [
+                {"name": "Tier 1", "threshold": ">=8.0"},
+                {"name": "Tier 2", "threshold": "<8.0"},
+            ],
+            "sensitivity_check": {"perturbation_pp": 10, "report": "rank_stability"},
+        },
+        # P3-W5 merge follow-up (2026-05-27): predict / compare / explain-
+        # mechanism / list-all archetypes require a populated limitations_
+        # chapter (penultimate falsification chapter). Without this the
+        # "good plan" carries a `limitations_chapter=missing(required-for-
+        # archetype)` shortfall and breaks the `shortfalls == []` invariant.
+        # Minimal valid form: 5 sub-section types + scenario_stress_test
+        # (required only for predict; benign on other archetypes).
         "limitations_chapter": {
             "title": "Limitations",
             "sub_sections": [
