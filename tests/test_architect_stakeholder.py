@@ -226,3 +226,48 @@ def test_normalize_zero_valid_stakeholders_emits_shortfall():
     assert audit["stakeholder_chapter_count"] == 0
     sc_sf = [s for s in audit["shortfalls"] if "stakeholder_chapter.count=0<3" in s]
     assert sc_sf, f"zero-valid-stakeholders case must emit count<MIN shortfall; got {audit['shortfalls']}"
+
+
+def test_plural_audience_for_both_pattern_rejects_non_audience_terms():
+    """Greptile PR #42 round-6 issue #2: pre-fix the `\\bfor\\s+(?:both|
+    each\\s+of)\\s+\\w+\\s+(?:and|&)\\s+\\w+` regex matched ANY "for both
+    X and Y" construction, regardless of whether X and Y were audience
+    terms. Prompts like "for both short and long time horizons" or "for
+    both old and new architectures" would set PLURAL_AUDIENCE_DETECTED
+    to true and force a spurious stakeholder_chapter.
+
+    Post-fix the regex anchors both slots to the known audience
+    vocabulary (investors / policymakers / regulators / researchers /
+    practitioners / industry / stakeholders / consumers / users). The
+    false-positive cases below must NOT match."""
+    false_positives = [
+        "Analyze this for both short and long time horizons.",
+        "Compare for both old and new architectures.",
+        "Evaluate for both quantum and classical regimes.",
+        "Review the data for both Q1 and Q2 results.",
+        "Document the API for both REST and GraphQL endpoints.",
+        "Test for both happy and error paths thoroughly.",
+        "Plan for both base and stretch scenarios.",
+        "Optimize for both speed and memory usage.",
+    ]
+    for prompt in false_positives:
+        assert architect._prompt_signals_plural_audience(prompt) is False, (
+            f"false positive — prompt should NOT signal plural audience: {prompt!r}"
+        )
+
+
+def test_plural_audience_for_both_pattern_still_matches_audience_pairs():
+    """Symmetric regression guard: the `for both X and Y` pattern must
+    still fire for legitimate audience pairings (the post-fix vocabulary
+    is the full set used by the other patterns)."""
+    true_positives = [
+        "Provide guidance for both investors and policymakers.",
+        "Recommendations for both researchers and practitioners on AI.",
+        "Analysis for both regulators and industry on energy transition.",
+        "Advice for both consumers and users navigating the platform.",
+        "Brief for each of stakeholders and researchers in the field.",
+    ]
+    for prompt in true_positives:
+        assert architect._prompt_signals_plural_audience(prompt) is True, (
+            f"regression — audience pair must signal plural audience: {prompt!r}"
+        )
