@@ -107,8 +107,17 @@ def main() -> None:
 
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
 
-    client = Client(_SPACE)
-    disp_by_id, available_models = _build_task_disp_map(client)
+    # Wrap both the Client constructor and the preflight metadata load —
+    # both make network calls to the HF Space and share the same fatal
+    # failure mode (transient outage, schema drift, DNS hiccup). Without
+    # this, a Space blip surfaces as an uncaught traceback instead of a
+    # clean error consistent with the per-task /fetch handler below.
+    try:
+        client = Client(_SPACE)
+        disp_by_id, available_models = _build_task_disp_map(client)
+    except Exception as exc:
+        print(f"ERROR: failed to load Space metadata: {exc!r}", file=sys.stderr)
+        sys.exit(2)
     if args.model not in available_models:
         print(
             f"ERROR: model {args.model!r} not on leaderboard. Available: {sorted(available_models)}",
