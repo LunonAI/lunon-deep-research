@@ -121,18 +121,35 @@ def main() -> None:
         for tid in ids:
             disp = disp_by_id.get(tid)
             if disp is None:
+                # No network call made — skip the throttle sleep.
                 print(f"  WARN: task id {tid} not on leaderboard", file=sys.stderr)
                 continue
             try:
                 user_md, article_md, _html = client.predict(model=args.model, task_disp=disp, api_name="/fetch")
             except Exception as exc:
                 print(f"  WARN: fetch failed for id={tid}: {exc!r}", file=sys.stderr)
+                # Network call was made (and failed) — still throttle so
+                # bursty errors don't hammer the Space.
+                time.sleep(args.delay)
                 continue
             article = _strip_article_wrapper(article_md)
             if not article:
                 print(f"  WARN: empty article body for id={tid}", file=sys.stderr)
+                time.sleep(args.delay)
                 continue
             prompt = _extract_prompt(user_md)
+            if not prompt:
+                # Symmetric to the article guard above: a Space format drift
+                # or a task genuinely missing its **Description:** marker
+                # would otherwise produce a corrupt jsonl record (empty
+                # prompt + valid article) that p2_within_task_ab.py would
+                # judge against an empty task description.
+                print(
+                    f"  WARN: empty prompt for id={tid} (description marker missing?)",
+                    file=sys.stderr,
+                )
+                time.sleep(args.delay)
+                continue
             f.write(
                 json.dumps(
                     {"id": tid, "prompt": prompt, "article": article},
@@ -145,6 +162,13 @@ def main() -> None:
             time.sleep(args.delay)
 
     print(f"[reference-fetch] wrote {n_written}/{len(ids)} articles to {args.out}")
+    # Exit nonzero when any requested id failed to land in the output so a
+    # CI caller (or shell `set -e`) can distinguish partial-failure from
+    # the empty-`--ids` case rejected at the top of main(). Strict by
+    # default — the per-task WARN lines above already explain which ids
+    # are missing.
+    if n_written != len(ids):
+        sys.exit(1)
 
 
 if __name__ == "__main__":
