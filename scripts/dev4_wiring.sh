@@ -40,6 +40,28 @@ export DRB_REPO
 
 cd "$LUNON_REPO"
 
+# Precondition: validate .env upfront so a missing/malformed file fails
+# BEFORE the ~$40-80 generation step instead of after it. DRB uses raw
+# os.environ.get() with no dotenv loader, so the OpenAI key must be in the
+# process env when deepresearch_bench_race.py runs; source with auto-export
+# here once so both generation (which also reads via Lunon's _env loader)
+# and the DRB grader child process inherit the keys.
+if [ ! -f "$LUNON_REPO/.env" ]; then
+    echo "[dev4-wiring] ERROR: $LUNON_REPO/.env not found — required for both" >&2
+    echo "[dev4-wiring]        ANTHROPIC_API_KEY (generation) and OPENAI_API_KEY (RACE grading)." >&2
+    exit 1
+fi
+set -a
+# shellcheck disable=SC1091
+source "$LUNON_REPO/.env"
+set +a
+for var in OPENAI_API_KEY ANTHROPIC_API_KEY; do
+    if [ -z "${!var:-}" ]; then
+        echo "[dev4-wiring] ERROR: $var is empty after sourcing .env — fix before re-running." >&2
+        exit 1
+    fi
+done
+
 # Phase tag for cost/ledger attribution.
 export DRB_PHASE=P3
 
@@ -88,15 +110,9 @@ HARNESS_RAW="$DRB_REPO/data/test_data/raw_data/${RUN_TAG}.jsonl"
 cp "$OUT_JSONL" "$HARNESS_RAW"
 echo "[dev4-wiring] staged → $HARNESS_RAW" | tee -a "$LOG"
 
-# Hand off to DRB RACE eval (GPT-5.5 judge). DRB uses raw os.environ.get()
-# with NO dotenv loader, so the OpenAI key must be in the process env. Source
-# Lunon's .env with auto-export so the python3 child below inherits it.
+# Hand off to DRB RACE eval (GPT-5.5 judge). OPENAI_API_KEY was sourced and
+# validated at the top of the script, so the python child below inherits it.
 EVAL_LOG="p3b_artifacts/dev4_wiring_eval.log"
-set -a
-# shellcheck disable=SC1091
-source "$LUNON_REPO/.env"
-set +a
-
 cd "$DRB_REPO"
 echo "[dev4-wiring] starting RACE eval at $(date -Iseconds)" | tee "$LUNON_REPO/$EVAL_LOG"
 python -u deepresearch_bench_race.py "$RUN_TAG" \
