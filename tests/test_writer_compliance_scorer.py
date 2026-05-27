@@ -93,28 +93,116 @@ def test_classify_leaf_elements_detects_each_element():
 
 
 def test_classify_causal_chain_avoids_false_positives_on_common_verbs():
-    """Wave 3 PR 2: causal_chain must NOT fire on 'drives the project /
-    team / process / system / effort' (common business prose, not chain
-    construction) — the negative lookahead in _CAUSAL_CHAIN_RE handles
-    this. Similarly 'causes for X' is not causal-chain ('causes for
-    celebration', 'causes for concern')."""
+    """Wave 3 PR 2 + Greptile PR #34 round-1 follow-up: causal_chain must
+    NOT fire on single-step or non-causal prose. The element definition
+    requires 2+ chain markers per leaf (multi-link causation), and the
+    detector implements this via `len(_CAUSAL_CHAIN_RE.findall) >= 2`.
+
+    The pre-fix detector was over-broad — bare `enables` / `due to` /
+    `subsequently` / bare `produces` / narrow `drives` blocklist all
+    fired without indicating actual chain construction. Greptile PR #34
+    round-1 flagged these as false-positive sources that would inflate
+    the compliance scorer's causal_chain rate in production. The fix:
+    drop those markers from the regex AND require ≥2 strict markers per
+    leaf."""
+    # NONE of these contain ≥2 chain markers — they're single-step or
+    # non-causal constructions.
     false_positives = [
+        # Pre-fix `drives the X` blocklist (kept for regression).
         "Leadership drives the project to completion every quarter.",
         "The CEO drives the company strategy toward sustainability.",
         "She drives the process forward with clear deadlines.",
+        # `drives` outside the 6-noun blocklist — pre-fix these DID fire
+        # spuriously. Greptile PR #34 round-1: removed `drives?` from
+        # the regex entirely so all of these now correctly fail.
+        "Government regulation drives the market toward consolidation.",
+        "Demographic shift drives adoption of cloud services.",
+        "The narrative drives the brand reputation in this segment.",
+        "Investor pressure drives change across the industry.",
+        # `causes for X` (kept for regression).
         "There are several causes for concern in the latest report.",
         "Public causes for celebration filled the streets.",
+        # Bare `enables` — pre-fix this fired. Common in tech writing
+        # without any chain construction.
+        "The SDK enables rapid deployment across environments.",
+        "The new API enables faster integration.",
+        "This pattern enables thread-safe access.",
+        # Bare `due to` — single-step backward attribution. Pre-fix fired.
+        "Due to budget cuts, the project was delayed.",
+        "The drop was due to seasonality.",
+        # Bare `subsequently` — pure temporal sequencing, NO causation.
+        "Subsequently, the committee filed its report.",
+        "They met in March; subsequently the agreement was signed.",
+        # Bare `produces` / `produced` — pre-fix fired on non-chain prose.
+        "The team produces quarterly reports.",
+        "The author produced a definitive volume in 2019.",
+        # Single-step "leads to" without a second link — IS one causation
+        # step, NOT a chain.
+        "Stress leads to fatigue.",
+        # Single-step "results in" — same.
+        "The reform resulted in a 4% efficiency gain.",
+        # Single-step "gives rise to" — same.
+        "This rule gives rise to a familiar paradox.",
     ]
     for s in false_positives:
         assert not _classify_leaf_elements(s)["causal_chain"], f"false positive: {s!r}"
-    # Genuine multi-link causation still fires.
+
+    # Genuine multi-link causation (≥2 chain markers per sentence/leaf)
+    # still fires. Each example contains exactly the chain-marker
+    # combinations the detector targets.
     real_chains = [
-        "The release in 2023 led to a wave of adoption that produced new market entrants.",
-        "Higher temperatures drive vapor saturation, which subsequently triggers convection.",
-        "The amendment gives rise to a procedural cascade that ultimately resolves the deadlock.",
+        # "led to ... which in turn produces" — directional verb + "in
+        # turn" + "which X" all in one chain.
+        "The release in 2023 led to a wave of adoption, which in turn produced new market entrants.",
+        # "leads to ... which in turn triggers" — wait `triggers` isn't
+        # in the regex, but `in turn` IS a chain marker, and `leads to`
+        # is another. Count = 2.
+        "Higher temperatures lead to vapor saturation, which in turn triggers convection cells.",
+        # "gives rise to ... in turn" — both markers fire.
+        "The amendment gives rise to a procedural cascade that in turn resolves the deadlock.",
+        # "results in ... which produces" — 2 chain markers.
+        "The catalyst results in a phase transition, which produces a measurable energy release.",
+        # ZH chain: 导致 + 进而 = 2 markers.
+        "高温导致蛋白质变性，进而引发酶活性下降。",
     ]
     for s in real_chains:
         assert _classify_leaf_elements(s)["causal_chain"], f"missed: {s!r}"
+
+
+def test_classify_problem_tradeoff_avoids_bare_to_resolve_and_reconcile():
+    """Greptile PR #34 round-1 follow-up: bare `to resolve` and bare
+    `reconcile` fired on common non-problem prose ("to resolve a DNS
+    query", "reconcile accounts") without any problem/paradox/tension
+    framing. The fix dropped both bare markers; remaining markers
+    encode the problem framing explicitly in their own match.
+
+    This test pins the false-positive avoidance so a future regex
+    refactor that re-adds bare `to resolve` / `reconcile` fails loud."""
+    # NONE of these have explicit problem/paradox/tension framing.
+    false_positives = [
+        # bare `to resolve` — common in tech / network / dispute prose.
+        "The client called to resolve a DNS query against the upstream server.",
+        "Steps taken to resolve a merge conflict in the integration branch.",
+        "The agent dialed back to resolve a session cookie discrepancy.",
+        # bare `reconcile` — financial / data domain.
+        "We need to reconcile accounts before quarter-end.",
+        "Engineers were tasked to reconcile data discrepancies in the warehouse.",
+        "The audit will reconcile expense reports against the ledger.",
+    ]
+    for s in false_positives:
+        assert not _classify_leaf_elements(s)["problem_tradeoff"], f"false positive: {s!r}"
+    # Genuine problem-tradeoff framing still fires via the surviving
+    # explicit markers.
+    real_problem_framings = [
+        "The apparent paradox in the Bronze-vs-Gold ranking resolves through the Cosmo-depth doctrine.",
+        "The tension between manga continuity and anime canon is the central issue.",
+        "The challenge of reconciling Episode G with the original timeline drives debate.",
+        "To address this, contributors restructured the chronology in 2019.",
+        "The resolution of the Sanctuary-arc paradox lies in the Seventh-Sense awakening.",
+        "Saori's bloodline reveal resolves this in the Hades arc.",
+    ]
+    for s in real_problem_framings:
+        assert _classify_leaf_elements(s)["problem_tradeoff"], f"missed: {s!r}"
 
 
 def test_classify_problem_tradeoff_orthogonal_to_alternative():
@@ -419,8 +507,11 @@ def test_insight_distribution_per_archetype_target_applied():
     # predict archetype — Wave 3 PR-0: forward_looking_min = 70.
     p = _score_insight_distribution(article, "predict")
     assert p["per_element_target_pct"]["forward_looking"] == 70
-    # Wave 3 PR 2: causal_chain target is highest on predict (45%).
-    assert p["per_element_target_pct"]["causal_chain"] == 45
+    # Greptile PR #34 round-1: causal_chain target dropped from 45 to 2
+    # after tightening detector to require ≥2 chain markers per leaf
+    # (the broad detector overcounted bare 'enables/produces/due to/
+    # subsequently' as chain hits).
+    assert p["per_element_target_pct"]["causal_chain"] == 2
     # list-all archetype — Wave 3 PR-0: alternative_min = 60.
     la = _score_insight_distribution(article, "list-all")
     assert la["per_element_target_pct"]["alternative"] == 60

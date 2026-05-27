@@ -114,11 +114,17 @@ def test_insight_distribution_for_list_all_biases_alternative_up():
 
 def test_insight_distribution_for_explain_mechanism_corpus_calibrated():
     """explain-mechanism uses Wave 3 PR-0 fresh-corpus targets:
-    fwd 15 / contr 3 / quant 3 / alt 25 / causal 25 / problem 4.
-    Derived from 4-task Qianfan mean (19 / 4 / 6 / 32 / 31 / 5).
-    Notably LOW on contrarian/quant — Qianfan explains with
-    alternatives + causal chains, not contrarian framing or heavy
-    quantification."""
+    fwd 15 / contr 3 / quant 3 / alt 25. Derived from 4-task Qianfan
+    mean (19 / 4 / 6 / 32). Notably LOW on contrarian/quant — Qianfan
+    explains with alternatives, not contrarian framing or heavy
+    quantification.
+
+    Greptile PR #34 round-1 follow-up: causal_chain target lowered
+    from 25 → 3 after tightening the detector to require ≥2 chain
+    markers per leaf (the prior broad detector inflated Qianfan rates
+    by counting bare 'enables/produces/due to/subsequently' as chain
+    hits). Under the strict detector, Qianfan explain-mech rate is
+    4% mean — target set to 3 as a measurable floor."""
     d = insight_distribution("explain-mechanism")
     # Alternative remains the dominant of the original 4 for explain-mech.
     assert d["alternative_min"] >= 20, (
@@ -127,21 +133,26 @@ def test_insight_distribution_for_explain_mechanism_corpus_calibrated():
     # Contrarian/quant remain minimal.
     assert d["contrarian_min"] <= 15
     assert d["quant_min"] <= 10
-    # Wave 3 PR 2: causal_chain is central to this archetype (the
-    # explain-mech archetype IS multi-step causal explanation).
-    assert d["causal_chain_min"] >= 20, (
-        f"causal_chain_min should be ≥20% (Wave 3 target 25); got {d['causal_chain_min']}"
+    # Wave 3 PR 2 (Greptile PR #34 round-1): causal_chain is the central
+    # RACE 2 element for this archetype, but the strict detector
+    # threshold is low (Q observed 4% mean under the tightened regex).
+    # Floor set to 3 so a writer producing any genuine multi-link
+    # chains clears it.
+    assert 1 <= d["causal_chain_min"] <= 10, (
+        f"causal_chain_min should be 1-10% for explain-mechanism under strict detector (target 3); got {d['causal_chain_min']}"
     )
 
 
-def test_insight_distribution_for_predict_has_high_causal_chain_target():
-    """Wave 3 PR 2: predict is causal-chain-by-mission (multi-step
-    forecasting), so causal_chain_min is the highest of any archetype.
-    Qianfan predict (id=3) observed 57%; target set to 45 (5-15%
-    below observed)."""
+def test_insight_distribution_for_predict_has_nonzero_causal_chain_target():
+    """Wave 3 PR 2: predict was originally targeted at 45% causal_chain
+    (Q broad-detector rate 57%). Greptile PR #34 round-1 follow-up:
+    after tightening to require ≥2 chain markers, Q strict-rate dropped
+    to 3% on id=3. Target lowered to 2 — a measurable floor that
+    surfaces a deficit if Lunon's predict articles construct zero
+    chains, but doesn't impose an impossible bar."""
     d = insight_distribution("predict")
-    assert d["causal_chain_min"] >= 40, (
-        f"predict: causal_chain_min should be ≥40% (Wave 3 target 45); got {d['causal_chain_min']}"
+    assert 1 <= d["causal_chain_min"] <= 10, (
+        f"predict: causal_chain_min should be 1-10% under strict detector; got {d['causal_chain_min']}"
     )
 
 
@@ -256,15 +267,19 @@ def test_insight_distribution_writer_prompt_mirrors_targets():
 
     Wave 3 PR 2: writer block now lists all SIX elements (added
     causal_chain + problem_tradeoff). Targets updated per PR-0 fresh-
-    corpus recalibration (predict's forward target jumped 45 → 70)."""
+    corpus recalibration (predict's forward target jumped 45 → 70).
+    Greptile PR #34 round-1 follow-up: causal_chain targets lowered
+    across all archetypes after the detector was tightened to require
+    ≥2 chain markers per leaf."""
     from deep_research.pipeline.writer import _insight_distribution_block
 
     # predict archetype: Wave 3 calibration set forward_looking_min=70
-    # (Q observed 76% on id=3) and causal_chain_min=45 (Q observed 57%).
+    # (Q observed 76% on id=3). causal_chain_min was 45 in the original
+    # Wave 3 PR 2; Greptile follow-up dropped it to 2 after the strict
+    # detector showed Q at 3%.
     block = _insight_distribution_block("predict")
     assert "INSIGHT DISTRIBUTION" in block
     assert "≥70%" in block, "predict's recalibrated forward_looking target should appear"
-    assert "≥45%" in block, "predict's recalibrated causal_chain target should appear"
     # list-all archetype: Wave 3 set alternative_min=60 (Q observed 76%).
     block_la = _insight_distribution_block("list-all")
     assert "INSIGHT DISTRIBUTION" in block_la
@@ -273,6 +288,11 @@ def test_insight_distribution_writer_prompt_mirrors_targets():
     # the writer sees what (e) and (f) are.
     assert "(e) CAUSAL CHAIN" in block
     assert "(f) PROBLEM-TRADEOFF" in block
+    # Per-element percentage strings must appear for ALL six elements
+    # on this archetype (predict targets fwd 70 / contr 5 / quant 25 /
+    # alt 35 / causal 2 / problem 5).
+    for pct in ("≥70%", "≥5%", "≥25%", "≥35%", "≥2%"):
+        assert pct in block, f"predict: missing target string {pct!r}"
     # The compliance scorer reference must be there so the writer
     # knows the targets are MEASURED downstream.
     assert "p2_writer_compliance.py" in block
