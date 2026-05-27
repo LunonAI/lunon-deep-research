@@ -780,8 +780,15 @@ def _normalize(plan: dict, *, archetype: str | None = None) -> None:
         dims = em["dimensions"]
 
         # P3-W1: instantiation_mode + min_axes_per_entity defaults.
-        em.setdefault("instantiation_mode", "prose_subheaders")
-        em.setdefault("min_axes_per_entity", 3)
+        # Use `or`-based assignment, NOT setdefault: setdefault only
+        # writes on a missing key, so an explicit `"min_axes_per_entity":
+        # null` from the LLM would survive normalize and crash the
+        # writer's `int(None)` coercion downstream. `or` collapses
+        # missing-key / None / 0 / "" all to the default — the same
+        # pattern PR #37 round-2 applied to render_order in
+        # `_normalize_dimensions`. Greptile PR #37 round-3 finding.
+        em["instantiation_mode"] = em.get("instantiation_mode") or "prose_subheaders"
+        em["min_axes_per_entity"] = em.get("min_axes_per_entity") or 3
 
         audit["entity_matrix_entities"] = len(ents)
         audit["entity_matrix_dimensions"] = len(dims)

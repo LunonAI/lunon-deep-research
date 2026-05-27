@@ -247,6 +247,25 @@ def test_normalize_populates_min_axes_per_entity_default():
     assert plan["entity_matrix"]["min_axes_per_entity"] == 3
 
 
+def test_normalize_coerces_explicit_null_to_default():
+    """Greptile PR #37 round-3 (issue 2): when the LLM emits an explicit
+    `"min_axes_per_entity": null` or `"instantiation_mode": null`,
+    `dict.setdefault` does NOT overwrite the stored None — only missing
+    keys. The result was a None flowing to `int(em.get(...))` in the
+    writer / validator, raising TypeError. `_normalize` now uses
+    `or`-based assignment so explicit null is coerced to the default
+    (the same fix PR #37 round-2 applied to render_order)."""
+    plan = _bare_plan_with_matrix(min_axes_per_entity=None, instantiation_mode=None)
+    architect._normalize(plan, archetype="list-all")
+    em = plan["entity_matrix"]
+    assert em["min_axes_per_entity"] == 3, f"explicit null leaked through; got {em}"
+    assert em["instantiation_mode"] == "prose_subheaders", f"explicit null leaked through; got {em}"
+    # The defaults must also propagate to the audit fields (drift telemetry).
+    audit = plan["_outline_audit"]
+    assert audit["entity_matrix_min_axes_per_entity"] == 3
+    assert audit["entity_matrix_instantiation_mode"] == "prose_subheaders"
+
+
 def test_normalize_audit_records_new_fields():
     """The _outline_audit must surface instantiation_mode + min_axes +
     auto_promoted flag so drift telemetry can correlate them with
