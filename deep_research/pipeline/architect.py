@@ -151,6 +151,37 @@ criteria into a STRICT JSON research plan. Output ONLY this JSON object:
      "perturbation_pp": 10,         /* ±10 percentage points by default */
      "report": "rank_stability"     /* what the sensitivity sub-section reports */
    }
+ } | null,
+ "limitations_chapter": {          /* P3-W5 (2026-05-27): penultimate
+                                      chapter for predict / compare /
+                                      explain-mechanism / list-all
+                                      archetypes. Omit / null for trend
+                                      and recommend. Engineering-grade
+                                      falsification — reference-verified
+                                      pattern (6/11 articles). The
+                                      scenario_stress_test sub-node
+                                      recomputes tier_ranking under
+                                      base/optimistic/pessimistic scenarios
+                                      for the predict archetype. */
+   "title": str,                    /* e.g. "Limitations and Future
+                                       Research Directions" */
+   "sub_sections": [
+     {"id": "SN.1", "type": "data_granularity",
+      "title": str, "content_directive": str},
+     {"id": "SN.2", "type": "scope_cap",
+      "title": str, "content_directive": str},
+     {"id": "SN.3", "type": "time_validity",
+      "title": str, "content_directive": str},
+     {"id": "SN.4", "type": "sampling",
+      "title": str, "content_directive": str},
+     {"id": "SN.5", "type": "falsifiers",
+      "title": str, "content_directive": str}
+   ],
+   "scenario_stress_test": null     /* predict archetype ONLY: 3-scenario
+                                       (base/optimistic/pessimistic)
+                                       recompute of the article's main
+                                       ranking (typically tier_ranking).
+                                       Null for other archetypes. */
  } | null
 }
 
@@ -699,6 +730,23 @@ _TIER_RANKING_WEIGHT_TOTAL_TOLERANCE = 0.05
 _TIER_RANKING_PERTURBATION_PP_MIN = 5
 _TIER_RANKING_PERTURBATION_PP_MAX = 20
 
+# P3-W5 (2026-05-27): limitations chapter sub-section types. the reference's
+# 6/11-article pattern (q14 §9.10 / q23 §8.11 / q56 §10.7.5 / q3 §8.4 /
+# q44 §6+ / q89 §close) all enumerate 5 limitation dimensions: data
+# granularity, scope cap, time validity, sampling, falsifiers. The
+# scenario_stress_test sub-node (predict archetype only) recomputes the
+# article's main ranking (typically tier_ranking, the §N analytic block
+# from PR #43) under 3 scenarios.
+_LIMITATIONS_SUBSECTION_TYPES: tuple[str, ...] = (
+    "data_granularity",
+    "scope_cap",
+    "time_validity",
+    "sampling",
+    "falsifiers",
+)
+_LIMITATIONS_REQUIRED_ARCHETYPES = frozenset({"predict", "compare", "explain-mechanism", "list-all"})
+_LIMITATIONS_STRESS_TEST_ARCHETYPES = frozenset({"predict"})
+
 
 def _normalize(plan: dict, *, archetype: str | None = None) -> None:
     """Attach specialist_role to every query; backfill depth_seeds default;
@@ -1017,5 +1065,51 @@ def _normalize(plan: dict, *, archetype: str | None = None) -> None:
                         )
             if not tr.get("scoring_formula"):
                 audit["shortfalls"].append("tier_ranking.scoring_formula=empty")
+
+    # P3-W5 (2026-05-27): limitations_chapter audit. For required
+    # archetypes, check the chapter exists with all 5 sub-section types
+    # and (for predict) a populated scenario_stress_test. Same advisory-
+    # only pattern as entity_matrix / framing_chapter / tier_ranking.
+    lc = plan.get("limitations_chapter")
+    lc_is_required = archetype in _LIMITATIONS_REQUIRED_ARCHETYPES
+    if lc_is_required:
+        lc_was_missing = not isinstance(lc, dict)
+        if lc_was_missing:
+            lc = {"title": "", "sub_sections": [], "scenario_stress_test": None}
+            plan["limitations_chapter"] = lc
+            audit["shortfalls"].append("limitations_chapter=missing(required-for-archetype)")
+        if not isinstance(lc.get("sub_sections"), list):
+            lc["sub_sections"] = []
+        # Greptile PR #41 round-2: gate ALL per-sub-section audit keys on
+        # `not lc_was_missing`, symmetric with the stress-test gate below.
+        # When the chapter is entirely absent the backfilled `sub_sections=[]`
+        # would otherwise emit `sub_section_types=[]` + `missing_sub_section_
+        # types=<all 5>` — values indistinguishable from "chapter present but
+        # all 5 sub-types missing." A targeted-retry consumer reading those
+        # keys could fire 5 sub-section retries for a single root cause
+        # (chapter entirely absent), already captured by the
+        # `limitations_chapter=missing` shortfall.
+        if not lc_was_missing:
+            sub_types = [str(s.get("type", "")).strip().lower() for s in lc["sub_sections"] if isinstance(s, dict)]
+            missing_types = [t for t in _LIMITATIONS_SUBSECTION_TYPES if t not in sub_types]
+            audit["limitations_chapter_sub_section_types"] = sub_types
+            audit["limitations_chapter_missing_sub_section_types"] = missing_types
+            if missing_types:
+                audit["shortfalls"].append(f"limitations_chapter.missing_sub_section_types={','.join(missing_types)}")
+            # Stress-test sub-node check (predict archetype only today; the
+            # set may grow). Same gate rationale as the sub-section audit
+            # keys above: avoid emitting an ambiguous `False` when the
+            # chapter was absent. The shortfall message interpolates the
+            # actual `archetype` so a future addition to
+            # `_LIMITATIONS_STRESS_TEST_ARCHETYPES` doesn't silently emit a
+            # misleading "required-for-predict" tag for the new archetype.
+            if archetype in _LIMITATIONS_STRESS_TEST_ARCHETYPES:
+                sst = lc.get("scenario_stress_test")
+                has_sst = isinstance(sst, dict) and bool(sst.get("scenarios"))
+                audit["limitations_chapter_has_stress_test"] = has_sst
+                if not has_sst:
+                    audit["shortfalls"].append(
+                        f"limitations_chapter.scenario_stress_test=missing(required-for-{archetype})"
+                    )
 
     plan["_outline_audit"] = audit
