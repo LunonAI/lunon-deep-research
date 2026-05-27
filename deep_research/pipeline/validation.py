@@ -311,8 +311,11 @@ def _validate_micro_template(article: str, entity_matrix) -> dict | None:
     # int(None) would raise TypeError. Matches the writer's coercion.
     # Greptile PR #37 round-3 finding.
     min_axes = int(entity_matrix.get("min_axes_per_entity") or 3)
+    # `axis_names` is non-empty here: the `if not axis_names: return None`
+    # guard above fires first. So n_dims > 0 always — no zero-division
+    # branch needed. Greptile PR #37 round-7.
     n_dims = len(axis_names)
-    threshold_ratio = min(1.0, min_axes / n_dims) if n_dims > 0 else 1.0
+    threshold_ratio = min(1.0, min_axes / n_dims)
 
     per_entity: dict[str, float] = {}
     below: list[str] = []
