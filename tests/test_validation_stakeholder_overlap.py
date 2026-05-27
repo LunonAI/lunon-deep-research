@@ -143,11 +143,21 @@ def test_short_bodies_fall_back_to_bigrams_when_4gram_empty():
     has 2 words → empty 4-gram and 3-gram sets. Previously the pair was
     silently skipped (false-negative). Now the audit falls back to
     bigrams (n=2) so even terse stakeholder directives are compared,
-    and the fact that fallback fired is recorded in `short_pairs`."""
+    and the fact that fallback fired is recorded in `short_pairs`.
+
+    Greptile PR #42 round-4: this test previously used a 3-word body
+    ("Reduce risk now") which made `_ngrams(text, 3)` return a single
+    trigram (`3 < 3` is False, so the trigram path fired and bigram
+    fallback never ran). The test name, docstring, and inline comment
+    all claimed bigram fallback, while the assertion `in (2, 3)` only
+    passed because it hedged on the n value. A genuine 2-word body
+    forces the trigram set empty and exercises the actual bigram path
+    the test claims to cover.
+    """
     article = (
         "## Recommendations\n\n"
-        "### For Investors\n\nReduce risk now\n\n"  # 3 words → no 4-grams, no 3-grams (3<3 false), needs bigrams
-        "### For Policymakers\n\nReduce risk now\n"
+        "### For Investors\n\nReduce risk\n\n"  # 2 words → empty 4/3-grams, needs bigrams
+        "### For Policymakers\n\nReduce risk\n"
     )
     sc = {
         "stakeholders": [
@@ -156,14 +166,16 @@ def test_short_bodies_fall_back_to_bigrams_when_4gram_empty():
         ]
     }
     out = _validate_stakeholder_overlap(article, sc)
-    # Identical 3-word bodies → bigram fallback fires; bigrams identical → jaccard 1.0.
+    # Identical 2-word bodies → bigram fallback fires; bigrams identical → jaccard 1.0.
     assert out["max_pair_overlap"] > 0.20, f"identical short bodies not detected: {out}"
     assert any(t[0] == "investors" and t[1] == "policymakers" for t in out["overlap_pairs"])
-    # short_pairs records that n<4 was needed; investors+policymakers used n=3 (3 words → 1 trigram).
+    # short_pairs records bigram fallback (n_used = 2), exactly. No hedging.
     assert out["short_pairs"], f"short_pairs should record fallback firing: {out}"
     assert out["short_pairs"][0][0] == "investors"
     assert out["short_pairs"][0][1] == "policymakers"
-    assert out["short_pairs"][0][2] in (2, 3), f"expected n_used in 2..3, got {out['short_pairs'][0]}"
+    assert out["short_pairs"][0][2] == 2, (
+        f"expected bigram fallback (n_used=2) for 2-word body, got {out['short_pairs'][0]}"
+    )
 
 
 def test_short_bodies_disjoint_at_bigram_level_not_flagged():
@@ -386,6 +398,50 @@ def test_label_in_heading_with_numbering_prefix_is_matched():
     out = _validate_stakeholder_overlap(article, sc)
     assert out["n_stakeholders_audited"] == 2, f"numbered headings should still be matched; got {out}"
     assert out["missing_labels"] == []
+
+
+def test_heading_label_match_is_case_insensitive():
+    """Greptile PR #42 round-4: the writer LLM may de-capitalize headings
+    mid-sentence (e.g. plan label `"For Investors"` → rendered as
+    `### for investors`). Pre-fix the case-sensitive `re.search` returned
+    None, the body was stored as `""`, and `"investors"` was added to
+    `missing_labels` — a silent false-negative on the overlap audit.
+
+    This test pins the fix: lowercase headings + a Title-Case heading +
+    an UPPER-CASE heading must all match their plan-label counterparts,
+    so every stakeholder enters the pairwise comparison and none lands
+    in missing_labels.
+
+    Also exercises that the case-insensitive match interoperates with
+    the round-3 numbering-prefix tolerance (so a `### 8.1 for investors`
+    still matches `For Investors`).
+
+    Symmetric with `_validate_framing_chapter`'s vocabulary lookup
+    (`body.lower().count(term.lower())`), which has been case-tolerant
+    since round-1.
+    """
+    article = (
+        "## 8 Strategic Recommendations\n\n"
+        "### 8.1 for investors\n\n"  # lowercase + numbering prefix
+        "Investor-only advice: allocate to hardware, hedge approaches.\n\n"
+        "### For Policymakers\n\n"  # canonical Title-Case
+        "Policymaker-only advice: coordinate Wassenaar, fund QIS-CRAFT.\n\n"
+        "### FOR INDUSTRY\n\n"  # UPPER-CASE
+        "Industry-only advice: hybrid teams, error-correction pipelines.\n"
+    )
+    sc = {
+        "stakeholders": [
+            {"id": "investors", "label": "For Investors"},
+            {"id": "policymakers", "label": "For Policymakers"},
+            {"id": "industry", "label": "For Industry"},
+        ]
+    }
+    out = _validate_stakeholder_overlap(article, sc)
+    assert out["n_stakeholders_declared"] == 3
+    assert out["n_stakeholders_audited"] == 3, (
+        f"case-insensitive heading match should find all 3 stakeholders; got {out}"
+    )
+    assert out["missing_labels"] == [], f"no labels should be missing; got {out['missing_labels']}"
 
 
 def test_n_stakeholders_declared_vs_audited_distinct_when_partial_missing():

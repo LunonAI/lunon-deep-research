@@ -364,9 +364,19 @@ def _validate_stakeholder_overlap(article: str, stakeholder_chapter) -> dict | N
         # occurrence of the label string. Headings may carry leading
         # numbering (`### 8.3 For Investors`) so we allow optional
         # `\d+(?:\.\d+)*\s+` between the hashes and the label.
+        #
+        # Greptile PR #42 round-4: case-insensitive. The writer LLM may
+        # de-capitalize headings (e.g. plan label `"For Investors"` →
+        # rendered `### for investors`), and the canonical English-only
+        # `re.IGNORECASE` flag matches the same casing tolerance already
+        # used by `_validate_framing_chapter` for vocabulary lookup
+        # (`body.lower().count(term.lower())`). Without this, a single
+        # casing drift dropped the stakeholder into `missing_labels` and
+        # silently excluded it from the pairwise audit.
         m = re.search(
             r"(?m)^#{2,4}\s+(?:\d+(?:\.\d+)*\s+)?" + re.escape(label),
             article,
+            re.IGNORECASE,
         )
         if m is None:
             bodies[sid] = ""
