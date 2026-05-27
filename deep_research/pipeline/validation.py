@@ -30,6 +30,49 @@ _FAIL_LOG = pathlib.Path(__file__).resolve().parent.parent.parent / "p1_artifact
 _FAIL_LOG.parent.mkdir(parents=True, exist_ok=True)
 _TOK = 4  # ~chars-per-token heuristic; cheap, scoring uses the harness cleaner
 
+# Greptile PR #42 round-8 issue #1: extracted as module-level constant so
+# the value is visible + tuneable. Body extraction in
+# `_validate_stakeholder_overlap` falls back to this cap when no
+# subsequent heading is found (e.g., for the trailing stakeholder of a
+# closing chapter at end-of-article). For long stakeholder blocks —
+# routine in deep-research articles where individual blocks can run
+# 6-12k chars — only the first N chars enter the Jaccard computation.
+# Truncation in opposite directions across two sections can produce
+# either inflated similarity (shared boilerplate within cap, divergence
+# past it) or missed overlap (sections share content only in second
+# halves). When the cap fires, the stakeholder's id is recorded in
+# `truncated_bodies` so the audit trail is honest about which bodies
+# were truncated (parallel to the `short_pairs` fallback signal).
+_STAKEHOLDER_BODY_MAX_CHARS = 5000
+
+# Greptile PR #42 round-8 issue #2: extended CJK character ranges. The
+# prior `"一" <= c <= "鿿"` heuristic covered ONLY CJK Unified Ideographs
+# (U+4E00-U+9FFF) and missed CJK Extension A (U+3400-U+4DBF), CJK
+# Compatibility Ideographs (U+F900-U+FAFF), Kangxi Radicals
+# (U+2F00-U+2FDF), and CJK Extension B (U+20000+). Additionally the
+# prior scan window `text[:200]` would miss CJK detection when a heading
+# opened with a non-CJK prefix (`"1. 投资者建议"`, `"§ 投资者"`), silently
+# triggering word-tokenized n-grams on ZH bodies and yielding an empty
+# overlap set. Centralized as a module-level regex so a future range
+# adjustment touches a single source of truth.
+_CJK_TEXT_RE = re.compile(r"[㐀-䶿一-鿿豈-﫿⼀-⿟]|[\U00020000-\U0002a6df]")
+
+
+def _is_cjk_text(text: str) -> bool:
+    """True when `text` contains at least one character in any of the
+    common CJK blocks (Unified, Ext A, Ext B, Compat, Kangxi Radicals).
+
+    Used by `_validate_framing_chapter` and `_validate_stakeholder_overlap`
+    to decide between CJK-character n-gram tokenization and EN word
+    tokenization. Scans the entire string (not a 200-char prefix) so a
+    heading like `"1. 投资者建议"` is correctly classified — the prior
+    prefix-only scan silently produced false-negatives on numbered ZH
+    headings.
+    """
+    if not text:
+        return False
+    return _CJK_TEXT_RE.search(text) is not None
+
 
 @dataclass
 class ValidationInput:
@@ -278,8 +321,11 @@ def _validate_framing_chapter(article: str, framing_chapter) -> dict | None:
     body = article[skip_chars:]
     vocab_counts: dict[str, int] = {}
     for term in vocab:
-        if any("一" <= c <= "鿿" for c in term):
-            # CJK: case is meaningless; count verbatim.
+        if _is_cjk_text(term):
+            # CJK: case is meaningless; count verbatim. Greptile PR #42
+            # round-8: routed through `_is_cjk_text` so the same extended
+            # CJK ranges (Ext A/B, Compat, Kangxi) apply here as in the
+            # stakeholder-overlap audit's n-gram tokenizer.
             vocab_counts[term] = body.count(term)
         else:
             # EN: case-insensitive (writers may de-capitalize mid-sentence).
@@ -350,6 +396,11 @@ def _validate_stakeholder_overlap(article: str, stakeholder_chapter) -> dict | N
         return None
     bodies: dict[str, str] = {}
     missing_labels: list[str] = []
+    # Greptile PR #42 round-8 issue #1: sids whose body extraction hit
+    # the `_STAKEHOLDER_BODY_MAX_CHARS` cap (no subsequent heading found
+    # within N chars). Recorded as a diagnostic so downstream readers can
+    # correlate audit results with truncation risk.
+    truncated_bodies: list[str] = []
     n_declared = 0
     for s in stakeholders:
         if not isinstance(s, dict):
@@ -413,14 +464,33 @@ def _validate_stakeholder_overlap(article: str, stakeholder_chapter) -> dict | N
         # `#{1,4}` still excludes `#####` deep headers which the reference
         # corpus doesn't use.
         next_heading = re.search(r"\n#{1,4}\s+", article[start:])
-        end = start + (next_heading.start() if next_heading else 5000)
+        # Greptile PR #42 round-8 issue #1: use the module-level
+        # `_STAKEHOLDER_BODY_MAX_CHARS` constant + record truncation in
+        # `truncated_bodies` so the audit trail surfaces when the cap
+        # was binding. For long stakeholder blocks the cap can hide
+        # second-half divergence or convergence; this signal lets a
+        # downstream reader correlate audit results with truncation.
+        if next_heading is not None:
+            end = start + next_heading.start()
+        else:
+            end = start + _STAKEHOLDER_BODY_MAX_CHARS
+            if end < len(article):
+                truncated_bodies.append(sid)
         bodies[sid] = article[start : min(end, len(article))]
 
     def _ngrams(text: str, n: int) -> set:
         text = text.strip()
         if not text or n < 1:
             return set()
-        if any("一" <= c <= "鿿" for c in text[:200]):
+        # Greptile PR #42 round-8 issue #2: route through `_is_cjk_text`
+        # which scans the FULL text (not a 200-char prefix) and covers
+        # CJK Ext A / Ext B / Compat / Kangxi Radicals in addition to
+        # Unified Ideographs. Pre-fix a heading body opening with
+        # `"1. 投资者..."` (numeric prefix) would fall through to the
+        # EN word path because the first 200 chars contained no CJK
+        # match — yielding an empty EN word set on a ZH body and a
+        # silent skip in the pairwise comparison.
+        if _is_cjk_text(text):
             if len(text) < n:
                 return set()
             return {text[i : i + n] for i in range(len(text) - n + 1)}
@@ -472,6 +542,7 @@ def _validate_stakeholder_overlap(article: str, stakeholder_chapter) -> dict | N
         "overlap_pairs": overlap_pairs,
         "short_pairs": short_pairs,
         "missing_labels": missing_labels,
+        "truncated_bodies": truncated_bodies,
     }
 
 
