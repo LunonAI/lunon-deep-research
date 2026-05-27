@@ -9,6 +9,7 @@ obligation, and per-section depth targets. Archetype-aware (item 16).
 """
 
 import json
+import re
 
 from .. import llm
 
@@ -568,6 +569,33 @@ _ENTITY_MATRIX_OPTIONAL_ARCHETYPES = frozenset({"predict", "explain-mechanism", 
 # they're naturally entity-iterating. Conservative (under-promotes rather
 # than over-promotes) since false-positive promotion forces the writer
 # into a rigid template that may not fit the prompt.
+
+# Title-Case English tokens that are common function/article words — present
+# in an entity title but not themselves entity-indicative.
+_ENTITY_TITLE_STOPWORDS = frozenset({"The", "And", "Of", "For", "In", "To", "A", "An", "Is", "Are"})
+
+# Token pattern: Title-Case English word (capital + lowercase tail). Used to
+# detect proper-noun-like tokens in section titles.
+_TITLE_CASE_TOKEN_RE = re.compile(r"\b[A-Z][a-zA-Z]+\b")
+
+
+# CJK script ranges treated as "proper-noun-like" by the entity-list heuristic.
+# Chinese Hanzi, Japanese Hiragana/Katakana, and Korean Hangul all carry
+# entity-name signal without Title-Case markers, so any character in these
+# blocks counts the title as proper-noun-like.
+def _has_cjk_char(s: str) -> bool:
+    for c in s:
+        cp = ord(c)
+        if (
+            0x4E00 <= cp <= 0x9FFF  # CJK Unified Ideographs (Chinese, Kanji)
+            or 0x3040 <= cp <= 0x309F  # Hiragana
+            or 0x30A0 <= cp <= 0x30FF  # Katakana
+            or 0xAC00 <= cp <= 0xD7AF  # Hangul Syllables
+        ):
+            return True
+    return False
+
+
 def _should_promote_entity_matrix(plan: dict, archetype: str | None) -> bool:
     """Return True when an optional-archetype plan looks like it should
     use entity_matrix (≥3 sibling sub-chapters with proper-noun-like
@@ -588,25 +616,22 @@ def _should_promote_entity_matrix(plan: dict, archetype: str | None) -> bool:
         if len(subs) < 3:
             continue
         # "proper-noun-like": at least one capitalized non-stopword token,
-        # or contains CJK content (Chinese proper nouns are unambiguous by
-        # context), or contains a quoted name. Conservative check — we
-        # don't want to fire on generic structural titles like "Background"
-        # or "Methodology".
+        # or contains CJK content (Hanzi/Kana/Hangul carry entity signal
+        # without Title-Case markers), or contains a quoted name.
+        # Conservative check — we don't want to fire on generic structural
+        # titles like "Background" or "Methodology".
         proper_count = 0
         for sub in subs:
             title = str(sub.get("title", ""))
             if not title:
                 continue
-            # CJK detection — every Chinese title is "proper-noun-like" for our purposes
-            if any("一" <= c <= "鿿" for c in title):
+            # CJK detection — any Hanzi/Kana/Hangul title is "proper-noun-like"
+            if _has_cjk_char(title):
                 proper_count += 1
                 continue
             # English: at least one Title-Case token that's not a common stopword
-            import re as _re
-
-            tokens = _re.findall(r"\b[A-Z][a-zA-Z]+\b", title)
-            stopwords = {"The", "And", "Of", "For", "In", "To", "A", "An", "Is", "Are"}
-            content_tokens = [t for t in tokens if t not in stopwords]
+            tokens = _TITLE_CASE_TOKEN_RE.findall(title)
+            content_tokens = [t for t in tokens if t not in _ENTITY_TITLE_STOPWORDS]
             if content_tokens:
                 proper_count += 1
         if proper_count >= 3:
