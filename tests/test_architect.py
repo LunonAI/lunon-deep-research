@@ -365,6 +365,19 @@ def _build_good_plan_obj():
             "entities": [f"E{i + 1}" for i in range(architect._ENTITY_MATRIX_ENTITIES_MIN)],
             "dimensions": [f"D{i + 1}" for i in range(architect._ENTITY_MATRIX_DIMENSIONS_MIN)],
         },
+        # P3-W7 merge follow-up (2026-05-27): predict + compare archetypes
+        # with ≥5 entity_matrix entities require tier_ranking. Minimal valid
+        # form so retry tests preserve the `shortfalls == []` invariant.
+        "tier_ranking": {
+            "title": "Tier Ranking",
+            "scoring_formula": "S_final = Σ(w_i × d_i)",
+            "weights": {"R-1": 0.25, "R-2": 0.25, "R-3": 0.25, "R-4": 0.25},
+            "tiers": [
+                {"name": "Tier 1", "threshold": ">=8.0"},
+                {"name": "Tier 2", "threshold": "<8.0"},
+            ],
+            "sensitivity_check": {"perturbation_pp": 10, "report": "rank_stability"},
+        },
     }
 
 

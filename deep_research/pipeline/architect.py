@@ -89,7 +89,28 @@ criteria into a STRICT JSON research plan. Output ONLY this JSON object:
     "target_sections": ["S1", ...]} ... 24-32 ],
  "queries": [ {"id": "Q1", "text": str,
     "type": "factual"|"causal"|"comparative"|"critical"|"trend",
-    "target_sections": ["S1", ...], "rationale": str } ... 48-64 ]
+    "target_sections": ["S1", ...], "rationale": str } ... 48-64 ],
+ "tier_ranking": {                /* P3-W7 (2026-05-27): compare/predict
+                                     archetypes with ≥5 entities in
+                                     entity_matrix. Publishes a weighted-
+                                     scoring formula + tier thresholds +
+                                     ±10pp sensitivity check. the reference-
+                                     verified pattern: q14 §7.3-§7.6 tier-
+                                     ranks 10 teams with S_base/RBM/S_final;
+                                     q3 §8.1 tier-ranks 11 sub-sectors. */
+   "title": str,                   /* e.g. "Tier Ranking" */
+   "scoring_formula": str,         /* e.g. "S_final = Σ(weight_i × dim_i)" */
+   "weights": {"R-1": float, "R-2": float, ...},   /* sum ≈ 1.0 ± 0.01 */
+   "tiers": [
+     {"name": "Tier 1", "threshold": ">=8.0"},
+     {"name": "Tier 2", "threshold": ">=6.0"},
+     {"name": "Tier 3", "threshold": "<6.0"}
+   ],
+   "sensitivity_check": {
+     "perturbation_pp": 10,         /* ±10 percentage points by default */
+     "report": "rank_stability"     /* what the sensitivity sub-section reports */
+   }
+ } | null
 }
 
 HARD RULES:
@@ -490,6 +511,20 @@ _ENTITY_MATRIX_ENTITIES_MAX = 20
 _ENTITY_MATRIX_DIMENSIONS_MIN = 4
 _ENTITY_MATRIX_DIMENSIONS_MAX = 8
 
+# P3-W7 (2026-05-27): tier_ranking bounds + archetype gating.
+# the reference q14 §7.3-§7.6 ranks 10 teams across 6 rubric items (Direction
+# 20% / Paper 22% / Collab 13% / Funding 18% / Industry 15% / Talent 12%).
+# q3 §8.1 ranks 11 sub-sectors across 6 dimensions. Both run a ±10pp
+# weight perturbation in a sensitivity sub-section to report rank
+# stability.
+_TIER_RANKING_REQUIRED_ARCHETYPES = frozenset({"compare", "predict"})
+_TIER_RANKING_MIN_TIERS = 2
+_TIER_RANKING_MAX_TIERS = 5
+_TIER_RANKING_DEFAULT_PERTURBATION_PP = 10
+# Weights must sum to ~1.0 ± tolerance. Tolerance accommodates rounding
+# (LLMs frequently emit 0.20+0.20+0.20+0.20+0.18 = 0.98 instead of 1.0).
+_TIER_RANKING_WEIGHT_TOTAL_TOLERANCE = 0.05
+
 
 def _normalize(plan: dict, *, archetype: str | None = None) -> None:
     """Attach specialist_role to every query; backfill depth_seeds default;
@@ -632,5 +667,48 @@ def _normalize(plan: dict, *, archetype: str | None = None) -> None:
                 audit["shortfalls"].append(f"entity_matrix.dimensions={len(dims)}<{_ENTITY_MATRIX_DIMENSIONS_MIN}")
             if len(dims) > _ENTITY_MATRIX_DIMENSIONS_MAX:
                 audit["shortfalls"].append(f"entity_matrix.dimensions={len(dims)}>{_ENTITY_MATRIX_DIMENSIONS_MAX}")
+
+    # P3-W7 (2026-05-27): tier_ranking audit. Required for compare/predict
+    # when entity_matrix has ≥5 entities (otherwise the ranking has too few
+    # rows to be meaningful). Audits: scoring_formula presence, weights
+    # sum-to-1.0 ± tolerance, tier count 2-5, sensitivity_check populated.
+    tr = plan.get("tier_ranking")
+    em = plan.get("entity_matrix")
+    em_entities = (em.get("entities") if isinstance(em, dict) else []) or []
+    tr_is_required = archetype in _TIER_RANKING_REQUIRED_ARCHETYPES and len(em_entities) >= _ENTITY_MATRIX_ENTITIES_MIN
+    if tr_is_required:
+        tr_was_missing = not isinstance(tr, dict)
+        if tr_was_missing:
+            tr = {
+                "title": "",
+                "scoring_formula": "",
+                "weights": {},
+                "tiers": [],
+                "sensitivity_check": None,
+            }
+            plan["tier_ranking"] = tr
+            audit["shortfalls"].append("tier_ranking=missing(required-for-archetype-and-entity-count)")
+        if not isinstance(tr.get("weights"), dict):
+            tr["weights"] = {}
+        if not isinstance(tr.get("tiers"), list):
+            tr["tiers"] = []
+        weights_sum = sum(float(v) for v in tr["weights"].values() if isinstance(v, (int, float)))
+        n_tiers = len(tr["tiers"])
+        audit["tier_ranking_weights_sum"] = round(weights_sum, 4)
+        audit["tier_ranking_n_tiers"] = n_tiers
+        audit["tier_ranking_has_sensitivity_check"] = isinstance(tr.get("sensitivity_check"), dict)
+        if not tr_was_missing:
+            if abs(weights_sum - 1.0) > _TIER_RANKING_WEIGHT_TOTAL_TOLERANCE:
+                audit["shortfalls"].append(
+                    f"tier_ranking.weights_sum={weights_sum:.3f}!=1.0±{_TIER_RANKING_WEIGHT_TOTAL_TOLERANCE}"
+                )
+            if n_tiers < _TIER_RANKING_MIN_TIERS:
+                audit["shortfalls"].append(f"tier_ranking.tiers={n_tiers}<{_TIER_RANKING_MIN_TIERS}")
+            if n_tiers > _TIER_RANKING_MAX_TIERS:
+                audit["shortfalls"].append(f"tier_ranking.tiers={n_tiers}>{_TIER_RANKING_MAX_TIERS}")
+            if not audit["tier_ranking_has_sensitivity_check"]:
+                audit["shortfalls"].append("tier_ranking.sensitivity_check=missing")
+            if not tr.get("scoring_formula"):
+                audit["shortfalls"].append("tier_ranking.scoring_formula=empty")
 
     plan["_outline_audit"] = audit
