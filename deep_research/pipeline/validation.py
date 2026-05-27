@@ -351,8 +351,15 @@ def _validate_micro_template(article: str, entity_matrix) -> dict | None:
         n_axes_found = 0
         for ax in axis_names:
             # The micro-template directive emits `**{axis_name}:**` (EN)
-            # or `**{axis_name}：**` (ZH). Accept both colon forms.
-            patterns = [f"**{ax}:**", f"**{ax}：**", f"**{ax}:", f"**{ax}："]
+            # or `**{axis_name}：**` (ZH). Accept both colon forms — but
+            # only the FULL `**...:**` shape. Earlier rounds also matched
+            # the open-only `**{ax}:` shape, but those partials are a
+            # superstring of the full pattern and never add a new match
+            # when the writer closed the bold correctly. They DID falsely
+            # match `**Axis: unclosed bold text` from a malformed writer
+            # output — silently inflating compliance on cases where the
+            # writer forgot to close the markers (Greptile PR #37 round-5).
+            patterns = (f"**{ax}:**", f"**{ax}：**")
             if any(p in window for p in patterns):
                 n_axes_found += 1
         ratio = n_axes_found / n_dims
