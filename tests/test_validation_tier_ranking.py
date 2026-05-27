@@ -410,3 +410,70 @@ def test_chapter_title_followed_by_known_terminators_still_matches():
         assert audit["scoring_table_present"] is True, (
             f"title with terminator {terminator!r} should still match: {audit}"
         )
+
+
+# ---------- Sensitivity heading anchor token set (Greptile PR #47 round-3) ----------
+
+
+def test_sensitivity_heading_matches_each_documented_token():
+    """The validator's sensitivity-heading regex MUST match each of the
+    4 documented heading-anchor tokens: `sensitivity` (EN), `敏感性`
+    (ZH), `±Npp` (symbolic-shorthand EN), `±N个百分点` (symbolic ZH).
+    These four tokens are the contract surface — writer.py directive +
+    `_TIER_RANKING_RULE` + the comment above the regex all enumerate
+    exactly these four. Pin each individually so a future tightening
+    of the regex can't silently drop one.
+    """
+    base_chapter = (
+        "# Title\n\n"
+        "## 7 Tier Ranking\n\n"
+        "Per §1.2 R-1, R-2, R-3:\n\n"
+        "| Entity | R-1 | S_final |\n|---|---|---|\n"
+        "| A | 8.50 | 7.85 |\n\n"
+        "{sensitivity_heading}\n\n"
+        "Recompute under perturbation: A stays Tier 1.\n"
+    )
+    documented_tokens = (
+        "### 7.1 Sensitivity Check",  # EN word
+        "### 7.1 敏感性分析",  # ZH word
+        "### 7.1 ±10pp Robustness",  # symbolic-shorthand EN
+        "### 7.1 ±10个百分点扰动",  # symbolic-shorthand ZH
+    )
+    for heading in documented_tokens:
+        article = base_chapter.format(sensitivity_heading=heading)
+        audit = validation._validate_tier_ranking(article, {"tier_ranking": _full_tr()})
+        assert audit is not None
+        assert audit["sensitivity_subsection_present"] is True, (
+            f"documented heading anchor `{heading}` failed to match: {audit}"
+        )
+
+
+def test_sensitivity_heading_does_not_match_undocumented_stress_test_form():
+    """Greptile PR #47 round-3: the regex previously had an undocumented
+    `stress\\s+test` alternation — not in the writer directive, not in
+    `_TIER_RANKING_RULE`, not in the comment above the regex. A chapter
+    with a `### Stress Test Analysis` heading but NO actual ±pp re-
+    ranking content would have `sensitivity_subsection_present=True`
+    logged in drift telemetry even though the required computational
+    sub-section was absent — silent false-negative on the audit
+    contract. Also conflicts terminology with the P3-W5 limitations
+    chapter's `scenario_stress_test` sub-node (a different
+    architectural concept).
+
+    Post-fix, a "Stress Test"-only heading must NOT match — the writer
+    is correctly steered toward the 4 documented forms.
+    """
+    article = (
+        "# Title\n\n"
+        "## 7 Tier Ranking\n\n"
+        "Per §1.2 R-1, R-2, R-3:\n\n"
+        "| Entity | R-1 | S_final |\n|---|---|---|\n"
+        "| A | 8.50 | 7.85 |\n\n"
+        "### 7.1 Stress Test Analysis\n\n"  # undocumented form
+        "Some prose about stressing the model, but no ±pp recompute.\n"
+    )
+    audit = validation._validate_tier_ranking(article, {"tier_ranking": _full_tr()})
+    assert audit is not None
+    assert audit["sensitivity_subsection_present"] is False, (
+        f"undocumented `Stress Test` form leaked back into sensitivity match: {audit}"
+    )

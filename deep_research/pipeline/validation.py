@@ -766,8 +766,18 @@ _TIER_RANKING_3PLUS_DEC_RE = re.compile(r"(?<!\d)\b\d+\.\d{3,}\b(?!\d)")
 # Python regex). We therefore drop the `\b` and rely on substring
 # match within the heading line — false positives ("Insensitivity of X"
 # at heading level) are vanishingly rare in DRB-genre prose.
+#
+# Greptile PR #47 round-3: a 5th alternation `stress\s+test` was here
+# but undocumented in the comment, writer.py directive, and
+# `_TIER_RANKING_RULE`. Silent contract drift: a chapter with a
+# `### Stress Test Analysis` heading but no actual ±pp re-ranking
+# section would have `sensitivity_subsection_present=True` logged
+# even though the required computational content is absent. Also
+# conflicts terminology with P3-W5 `limitations_chapter.scenario_
+# stress_test` (a different architectural concept). Removed —
+# validator now matches the documented contract.
 _TIER_RANKING_SENSITIVITY_HEADING_RE = re.compile(
-    r"(?im)^#{2,4}\s+(?:\d+(?:\.\d+)*\s+)?.*(?:sensitivity|敏感性|stress\s+test|±\s*\d+\s*(?:pp|个百分点|percentage\s+points))",
+    r"(?im)^#{2,4}\s+(?:\d+(?:\.\d+)*\s+)?.*(?:sensitivity|敏感性|±\s*\d+\s*(?:pp|个百分点|percentage\s+points))",
 )
 
 # Citation marker + § ref strip — re-used from limitations validator
