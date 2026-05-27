@@ -387,7 +387,15 @@ def _validate_stakeholder_overlap(article: str, stakeholder_chapter) -> dict | N
         # remainder of the heading line.
         nl = article.find("\n", m.end())
         start = nl + 1 if nl >= 0 else m.end()
-        next_heading = re.search(r"\n#{2,4}\s+", article[start:])
+        # Greptile PR #42 round-5 fix: broadened `#{2,4}` → `#{1,4}` so
+        # level-1 chapter breaks (`# Appendix`, `# References`) are
+        # recognized as section boundaries. Pre-fix, a stakeholder block
+        # immediately followed by `# Appendix` would not see that boundary
+        # and the body would run to the 5000-char cap, pulling in
+        # unrelated content and inflating/deflating the Jaccard score.
+        # `#{1,4}` still excludes `#####` deep headers which the Qianfan
+        # corpus doesn't use.
+        next_heading = re.search(r"\n#{1,4}\s+", article[start:])
         end = start + (next_heading.start() if next_heading else 5000)
         bodies[sid] = article[start : min(end, len(article))]
 
