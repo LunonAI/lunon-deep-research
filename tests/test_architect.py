@@ -365,11 +365,14 @@ def _build_good_plan_obj():
             "entities": [f"E{i + 1}" for i in range(architect._ENTITY_MATRIX_ENTITIES_MIN)],
             "dimensions": [f"D{i + 1}" for i in range(architect._ENTITY_MATRIX_DIMENSIONS_MIN)],
         },
-        # P3-W2 merge follow-up (2026-05-27): predict / compare / etc.
-        # archetypes now require a populated framing_chapter (§1 contract).
-        # Without this the "good plan" carries a
-        # `framing_chapter=missing(required-for-archetype)` shortfall and
-        # breaks the `shortfalls == []` invariant the retry tests assert.
+        # P3-W2 + P3-W5 merge follow-up (2026-05-27): predict / compare /
+        # etc. archetypes now require BOTH a populated framing_chapter (§1
+        # contract) and a populated limitations_chapter (penultimate
+        # falsification chapter). Without both, the "good plan" carries
+        # `framing_chapter=missing(...)` and/or `limitations_chapter=missing(...)`
+        # shortfalls and breaks the `shortfalls == []` invariant the retry
+        # tests assert.
+        #
         # Minimal valid framing chapter: 4 sub-sections (scope/rubric/
         # roadmap/vocabulary), 5 vocabulary terms, 4 rubric items.
         "framing_chapter": {
@@ -404,6 +407,28 @@ def _build_good_plan_obj():
                 {"name": "Tier 2", "threshold": "<8.0"},
             ],
             "sensitivity_check": {"perturbation_pp": 10, "report": "rank_stability"},
+        },
+        # P3-W5 merge follow-up (2026-05-27): predict / compare / explain-
+        # mechanism / list-all archetypes require a populated limitations_
+        # chapter (penultimate falsification chapter). Without this the
+        # "good plan" carries a `limitations_chapter=missing(required-for-
+        # archetype)` shortfall and breaks the `shortfalls == []` invariant.
+        # Minimal valid form: 5 sub-section types + scenario_stress_test
+        # (required only for predict; benign on other archetypes).
+        "limitations_chapter": {
+            "title": "Limitations",
+            "sub_sections": [
+                {"id": "S9.1", "type": "data_granularity", "title": "DG", "content_directive": "..."},
+                {"id": "S9.2", "type": "scope_cap", "title": "Scope", "content_directive": "..."},
+                {"id": "S9.3", "type": "time_validity", "title": "Time", "content_directive": "..."},
+                {"id": "S9.4", "type": "sampling", "title": "Sample", "content_directive": "..."},
+                {"id": "S9.5", "type": "falsifiers", "title": "Falsifiers", "content_directive": "..."},
+            ],
+            "scenario_stress_test": {
+                "scenarios": ["base", "optimistic", "pessimistic"],
+                "recompute_target": "tier_ranking",
+                "directive": "...",
+            },
         },
     }
 

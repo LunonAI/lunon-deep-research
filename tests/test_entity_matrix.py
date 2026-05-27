@@ -109,10 +109,10 @@ def test_normalize_records_no_shortfalls_when_matrix_meets_bounds():
     plan["queries"] = [
         {"id": f"Q{i + 1}", "text": f"q{i + 1}", "type": "factual"} for i in range(architect._QUERIES_MIN)
     ]
-    # P3-W2 merge follow-up (2026-05-27): list-all archetype requires a
-    # framing_chapter — without it the audit carries the missing-required
-    # shortfall and the test's `== []` invariant breaks. Minimal valid
-    # framing chapter matches the predict-archetype fixture.
+    # P3-W2 + P3-W5 merge follow-up (2026-05-27): list-all archetype
+    # requires BOTH a framing_chapter (§1 contract) and a limitations_chapter
+    # (penultimate falsification chapter) — without both, the audit carries
+    # missing-required shortfalls and the test's `== []` invariant breaks.
     plan["framing_chapter"] = {
         "title": "Framework",
         "sub_sections": [
@@ -123,6 +123,17 @@ def test_normalize_records_no_shortfalls_when_matrix_meets_bounds():
         ],
         "published_vocabulary": ["v1", "v2", "v3", "v4", "v5"],
         "published_rubric_items": [],  # list-all not in RUBRIC_REQUIRED set
+    }
+    plan["limitations_chapter"] = {
+        "title": "Limitations",
+        "sub_sections": [
+            {"id": "SN.1", "type": "data_granularity", "title": "DG", "content_directive": "..."},
+            {"id": "SN.2", "type": "scope_cap", "title": "Scope", "content_directive": "..."},
+            {"id": "SN.3", "type": "time_validity", "title": "Time", "content_directive": "..."},
+            {"id": "SN.4", "type": "sampling", "title": "Sample", "content_directive": "..."},
+            {"id": "SN.5", "type": "falsifiers", "title": "Falsifiers", "content_directive": "..."},
+        ],
+        "scenario_stress_test": None,  # list-all not in stress-test required set
     }
     architect._normalize(plan, archetype="list-all")
     audit = plan["_outline_audit"]
