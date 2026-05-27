@@ -99,6 +99,66 @@ def test_repair_returns_required_stats_keys():
     assert set(stats.keys()) == expected, f"got {set(stats.keys())}"
 
 
+def test_repair_preserves_paragraph_boundaries_before_next_heading():
+    r"""Greptile PR #39 round-2 issue #1: the prior `re.split(r"(?<=[.!?])\s+")`
+    + `" ".join(...)` collapsed every `\n\n` separator into a single space,
+    pushing the next `## N` heading INLINE with the preceding sentence and
+    silently breaking markdown rendering. This test feeds a canonical
+    paragraph-then-heading shape and confirms the `\n\n` separator is
+    preserved verbatim."""
+    text = (
+        "## 1 Intro\n\n"
+        "First sentence in paragraph one. Second sentence here.\n\n"
+        "## 2 Body\n\nThird sentence in chapter two.\n"
+    )
+    out, _ = repair(text)
+    # Critical: `## 2 Body` must remain at the start of a line.
+    assert "\n\n## 2 Body" in out, f"paragraph→heading separator collapsed: {out!r}"
+    # The separator must NOT have been replaced by a single space.
+    assert "Second sentence here. ## 2 Body" not in out, (
+        f"sentence and heading collapsed inline: {out!r}"
+    )
+
+
+def test_repair_preserves_paragraph_boundaries_with_dangling_ref_present():
+    """The boundary-preservation must hold even on the dangling-ref repair
+    branch (the path that previously did `out_parts.append(...)` + final
+    `" ".join`). This routes through the path Greptile flagged."""
+    text = (
+        "## 1 Intro\n\n## 2 Body\n\n"
+        "Real sentence (Section 99) hallucinated. End of paragraph.\n\n"
+        "## 3 More\n\nNext chapter prose.\n"
+    )
+    out, stats = repair(text)
+    # Repair fired on the dangling ref.
+    assert stats["dangling_refs_rewritten"] + stats["sentences_deleted"] >= 1
+    # The `## 3 More` heading must remain at line start.
+    assert "\n\n## 3 More" in out, f"separator collapsed near repair site: {out!r}"
+    assert "## 3 More\n\nNext chapter prose." in out
+
+
+def test_repair_handles_dotted_section_numbers_in_building_on_template():
+    """Greptile PR #39 round-2 issue #2: `[^.]*\\.` stopped at the FIRST
+    dot, which in "Building on §1.2 established in §3, this section…"
+    matched the embedded decimal dot in `§1.2` and left
+    `.2 established in §3, this section…` stranded as an orphan
+    fragment. The corrected pattern (`\\.(?=\\s|$)`) requires a
+    sentence-end-style dot, so `§1.2` is skipped."""
+    text = (
+        "## 2 Foo\n\n"
+        "Building on §1.2 established in §3, this section covers Pegasus mechanics. "
+        "Substantive content follows after.\n"
+    )
+    out, stats = repair(text)
+    assert stats["templates_repaired"] == 1, f"template not detected: {stats}; {out!r}"
+    # The orphan fragment that the old pattern left behind must NOT appear:
+    assert ".2 established in" not in out, f"orphan decimal fragment leaked: {out!r}"
+    assert "Building on" not in out
+    # Heading + downstream prose intact.
+    assert "## 2 Foo" in out
+    assert "Substantive content follows after." in out
+
+
 def test_repair_preserves_legitimate_text_in_forbidden_block():
     """Defensive: if the literal 'Building on' string appears INSIDE a
     legitimate sentence mid-paragraph (not at chapter open), it's NOT
