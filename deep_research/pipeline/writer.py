@@ -145,16 +145,27 @@ def write_section(
     # the post-Wave-1 id=91 smoke (writer emitted 183 clean inline markers
     # but zero `[^X]: source` def lines → all 183 stripped as orphans →
     # no References block → distance score regressed to 1.966).
-    ev_view = [
-        {
+    ev_view = []
+    for i, e in enumerate(evidence):
+        atom = {
             "marker": f"[^{sid}-{i + 1}]",
             "eid": e["eid"],
             "source_name": e["source_name"],
             "url": e["url"],
             "text": e["text"],
         }
-        for i, e in enumerate(evidence)
-    ]
+        # P3-W0b (2026-05-27): surface specialist-extracted causal chain
+        # to the writer when the finding is multi-step (2+ links).
+        # Single-link "chains" are degenerate (= statement again) and
+        # add no information, so they're suppressed at render time. The
+        # writer is instructed (CITATION CONTRACT block below) to emit
+        # the chain prose as "X → Y → Z" when present rather than
+        # synthesizing chains from the flat `text` field — preserves
+        # source-grounded reasoning vs hallucinated chain construction.
+        chain = e.get("chain") or []
+        if len(chain) >= 2:
+            atom["causal_chain"] = list(chain)
+        ev_view.append(atom)
     # Wave 2 §1.2 follow-up (PR #30 self-review): thread per-archetype
     # outline bounds into writer_system so the system-prompt STRUCTURAL
     # CAPS block matches the user-prompt OUTLINE SHAPE block (no
@@ -327,7 +338,22 @@ def write_section(
         f"read complete if all `[^X]` markers are deleted. Footnotes "
         f"are SUPPLEMENTARY identifiers, not the substantive claim.\n"
         f"• Numeric `[n]` markers (without the `^`) are NOT used in this "
-        f"pipeline — only `[^{sid}-N]` form.\n\n"
+        f"pipeline — only `[^{sid}-N]` form.\n"
+        # P3-W0b (2026-05-27): when an evidence atom carries a
+        # `causal_chain` field (populated by the mechanism_explorer
+        # specialist for multi-step findings), prefer rendering the
+        # chain explicitly rather than synthesizing one from the flat
+        # statement. RACE Insight criterion 2 (causal reasoning) scores
+        # higher when chains are source-grounded vs writer-invented.
+        f"• CAUSAL CHAIN RENDER (when evidence atom has `causal_chain` field): "
+        f"some atoms carry a `causal_chain` array of 2-4 ordered clauses "
+        f"naming the intervening causal links (populated by the "
+        f"mechanism_explorer specialist). When you cite such an atom, "
+        f"prefer rendering the chain EXPLICITLY in prose — '<link1>, "
+        f"which leads to <link2>, in turn enabling <link3>[^{sid}-N]' — "
+        f"rather than collapsing to the flat `text` summary. This makes "
+        f"the causal mechanism visible and source-grounded; do NOT "
+        f"invent additional links beyond what the chain provides.\n\n"
         # Wave 2 §3.2 (2026-05-26): mirror the system-prompt `_INSIGHT_MIN`
         # distribution targets here in the user prompt with per-archetype
         # interpolation so the writer sees the explicit percentages for
