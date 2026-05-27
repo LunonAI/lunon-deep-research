@@ -134,13 +134,13 @@ criteria into a STRICT JSON research plan. Output ONLY this JSON object:
      {"id": "S1.4", "type": "vocabulary",
       "title": str, "content_directive": str}
    ],
-   "published_vocabulary": [str, ...]  /* 5-10 NAMED terms/axioms that
-                                          downstream chapters reuse
-                                          UNMODIFIED. Examples: the reference
-                                          q3 uses "五篇大文章", "新质生产力";
-                                          q14 uses "Rubric P-1..P-6";
-                                          q56 uses "Level of solution
-                                          (4-level taxonomy)". */,
+   "published_vocabulary": [str, ...],  /* 5-10 NAMED terms/axioms that
+                                           downstream chapters reuse
+                                           UNMODIFIED. Examples: the reference
+                                           q3 uses "五篇大文章", "新质生产力";
+                                           q14 uses "Rubric P-1..P-6";
+                                           q56 uses "Level of solution
+                                           (4-level taxonomy)". */
    "published_rubric_items": [        /* 4-6 items WHEN applicable
                                           (compare/predict/recommend
                                           archetypes; omit or empty for
@@ -207,6 +207,18 @@ criteria into a STRICT JSON research plan. Output ONLY this JSON object:
                                        recompute of the article's main
                                        ranking (typically tier_ranking).
                                        Null for other archetypes. */
+ } | null,
+ "stakeholder_chapter": {          /* P3-W6 (2026-05-27): closing chapter
+                                      that splits recommendations into
+                                      3-5 stakeholder addressee blocks
+                                      with NON-OVERLAPPING content.
+                                      Populate when prompt signals
+                                      plural audience; null otherwise. */
+   "title": str,                    /* e.g. "Strategic Recommendations
+                                       by Stakeholder" */
+   "stakeholders": [
+     {"id": str, "label": str, "content_directive": str}, ...
+   ]
  } | null
 }
 
@@ -586,6 +598,23 @@ def build(
         f"but they ARE measured against this contract by the post-write "
         f"compliance scorer.\n"
     )
+
+    # P3-W6 Greptile PR #42 round-2: explicit Python-side audience detection
+    # injected into the prompt as a binary hint. Previously the LLM was left
+    # to self-determine plural audience from the prompt; now `_prompt_signals_
+    # plural_audience` runs first and tells the architect EXPLICITLY whether
+    # to populate `stakeholder_chapter` (3-5 blocks) or leave it null. The
+    # regex detector is conservative (precision over recall), so the hint
+    # errs toward "single audience → null" rather than spurious chapters.
+    plural_audience = _prompt_signals_plural_audience(prompt)
+    audience_directive = (
+        "populate `stakeholder_chapter` with 3-5 addressee-distinct blocks "
+        "(each `content_directive` MUST be non-overlapping; the closing "
+        "chapter must address ALL named audiences with disjoint advice)"
+        if plural_audience
+        else "set `stakeholder_chapter` to null — this prompt has a single "
+        "audience and a stakeholder-segmented closing would bloat the article"
+    )
     user = (
         f"PROMPT ({language}):\n{prompt}\n\n"
         f"ARCHETYPE: {archetype}\nARCHETYPE EMPHASIS: {emphasis}\n\n"
@@ -597,6 +626,7 @@ def build(
         f"criterion with a verification method):\n"
         f"{json.dumps(coverage_obligations, ensure_ascii=False)[:24000]}\n\n"
         f"SCOUT LANDSCAPE:\n{json.dumps(landscape, ensure_ascii=False)[:20000]}\n\n"
+        f"PLURAL_AUDIENCE_DETECTED: {str(plural_audience).lower()} — {audience_directive}.\n\n"
         f"Produce the STRICT JSON plan now."
     )
     # Adaptive thinking on, effort=low: the structured prompt does the heavy
@@ -801,6 +831,66 @@ _LIMITATIONS_SUBSECTION_TYPES: tuple[str, ...] = (
 )
 _LIMITATIONS_REQUIRED_ARCHETYPES = frozenset({"predict", "compare", "explain-mechanism", "list-all"})
 _LIMITATIONS_STRESS_TEST_ARCHETYPES = frozenset({"predict"})
+
+# P3-W6 (2026-05-27): stakeholder chapter bounds. the reference corpus pattern
+# (6/11 articles): closing chapter splits recommendations into 3-5
+# addressee blocks (q23 §8.4-§8.10 has 7 sub-blocks; q3 §8.7 has 4;
+# q14 §9.6-§9.9 has 4). We require ≥3 and cap at 5 to prevent the
+# closing chapter from becoming a long enumeration of overlapping
+# advice (the Comprehensiveness signal is in CONTENT, not COUNT).
+_STAKEHOLDER_COUNT_MIN = 3
+_STAKEHOLDER_COUNT_MAX = 5
+
+# Plural-audience detection: regex patterns that signal "the prompt is
+# asking for advice addressed to multiple parties." When at least ONE
+# fires, the architect should populate stakeholder_chapter. The regex
+# is intentionally conservative (precision over recall) — false-positive
+# stakeholder chapters bloat the article for prompts that have a single
+# audience, while false-negatives mean the chapter is omitted and the
+# closing recommendations stay generic (acceptable; not a regression).
+_PLURAL_AUDIENCE_PATTERNS = (
+    r"\binvestors?\s+and\s+(?:policymakers?|regulators?|researchers?|consumers?|users?)\b",
+    r"\b(?:policymakers?|regulators?|researchers?|practitioners?|industry)\s+and\s+(?:investors?|practitioners?|industry|stakeholders?)\b",
+    # Greptile PR #42 round-6 fix: the prior `\bfor\s+(?:both|each\s+of)\s+\w+\s+(?:and|&)\s+\w+`
+    # pattern used bare `\w+` anchors that matched ANY "for both X and Y"
+    # construction — including "for both short and long time horizons",
+    # "for both old and new architectures", or "for both quantum and
+    # classical regimes." Those are NOT plural-audience signals, but the
+    # pre-fix regex would set PLURAL_AUDIENCE_DETECTED=true and force a
+    # spurious stakeholder_chapter — the exact false-positive class the
+    # "precision over recall" comment is designed to prevent. Constraining
+    # both slots to the known audience vocabulary closes the hole.
+    r"\bfor\s+(?:both|each\s+of)\s+(?:investors?|policymakers?|regulators?|researchers?|practitioners?|industry|stakeholders?|consumers?|users?)\s+(?:and|&)\s+(?:investors?|policymakers?|regulators?|researchers?|practitioners?|industry|stakeholders?|consumers?|users?)\b",
+    r"\brecommendations?\s+(?:for|to|targeting|aimed\s+at)\s+(?:investors?|policymakers?|regulators?|researchers?|practitioners?|industry|stakeholders?)",
+    r"\bguidance\s+(?:for|to)\s+(?:investors?|policymakers?|practitioners?|industry|stakeholders?)",
+    # ZH patterns: "面向多元主体" / "为投资者和决策者" / "对不同利益相关方"
+    r"面向[多种各]+[元方主体]+",
+    r"为(?:投资者|决策者|监管者|研究人员|从业者|产业|消费者)[和与、](?:投资者|决策者|监管者|研究人员|从业者|产业|消费者|读者|用户)",
+    r"对(?:不同|各类|各个|多个)?(?:利益相关方|stakeholder|读者|受众)",
+)
+
+
+def _prompt_signals_plural_audience(prompt: str) -> bool:
+    """Return True when the prompt signals advice for multiple audiences.
+
+    Called from `build()` (Greptile PR #42 round-2 wiring; Greptile PR #42
+    round-7 docstring correction — the module exposes `build()` as the
+    public entry point, not `plan()`, and `build()` is also what the
+    pinning tests in `tests/test_architect_stakeholder.py` invoke) to
+    inject a `PLURAL_AUDIENCE_DETECTED: true/false` hint into the
+    architect's user prompt right before the strict-JSON instruction. The
+    hint tells the LLM whether to populate `stakeholder_chapter` (3-5
+    addressee-distinct blocks) or leave it null. Conservative — a
+    false-negative leaves the closing generic (acceptable), while a
+    false-positive bloats the article (the explicit regex patterns
+    above are the precision/recall calibration knob).
+    """
+    if not prompt or not isinstance(prompt, str):
+        return False
+    for pat in _PLURAL_AUDIENCE_PATTERNS:
+        if re.search(pat, prompt, re.I):
+            return True
+    return False
 
 
 def _max_entities_for_archetype(archetype: str | None) -> int:
@@ -1242,11 +1332,13 @@ def _normalize(plan: dict, *, archetype: str | None = None) -> None:
                 # against the default constant + acceptable band. Backfills with
                 # default when missing/wrong-type so downstream readers always
                 # see a usable value; emits shortfall on backfill OR
-                # out-of-band so the audit trail is honest.
-                sc = tr["sensitivity_check"]
-                pp = sc.get("perturbation_pp")
+                # out-of-band so the audit trail is honest. Local name
+                # `senschk` (not `sc`) so it doesn't shadow the
+                # `stakeholder_chapter` block's `sc` variable below.
+                senschk = tr["sensitivity_check"]
+                pp = senschk.get("perturbation_pp")
                 if not isinstance(pp, (int, float)) or isinstance(pp, bool):
-                    sc["perturbation_pp"] = _TIER_RANKING_DEFAULT_PERTURBATION_PP
+                    senschk["perturbation_pp"] = _TIER_RANKING_DEFAULT_PERTURBATION_PP
                     audit["tier_ranking_sensitivity_perturbation_pp"] = _TIER_RANKING_DEFAULT_PERTURBATION_PP
                     audit["shortfalls"].append(
                         "tier_ranking.sensitivity_check.perturbation_pp=missing"
@@ -1308,6 +1400,31 @@ def _normalize(plan: dict, *, archetype: str | None = None) -> None:
                     audit["shortfalls"].append(
                         f"limitations_chapter.scenario_stress_test=missing(required-for-{archetype})"
                     )
+
+    # P3-W6 (2026-05-27): stakeholder_chapter audit. Unlike other Phase 3
+    # artifacts, this one is OPTIONAL — only populated when the prompt
+    # signals a plural audience. The architect chooses to populate it
+    # based on the prompt; we audit COUNT bounds when present but never
+    # flag missing-chapter as a shortfall (avoids forcing single-audience
+    # prompts to have a useless 3-stakeholder section).
+    sc = plan.get("stakeholder_chapter")
+    if isinstance(sc, dict):
+        stakeholders = sc.get("stakeholders") if isinstance(sc.get("stakeholders"), list) else []
+        # Normalize to a clean list.
+        sc["stakeholders"] = [s for s in stakeholders if isinstance(s, dict) and s.get("id")]
+        audit["stakeholder_chapter_count"] = len(sc["stakeholders"])
+        # Greptile PR #42 round-5 fix: pre-fix the `if sc["stakeholders"]:`
+        # guard skipped both count checks when normalization produced an
+        # empty list (e.g., the LLM emitted stakeholders without `id`
+        # fields, all of which were stripped above). The audit then
+        # recorded `stakeholder_chapter_count=0` with NO shortfall —
+        # contradicting the `< _STAKEHOLDER_COUNT_MIN` check that fires
+        # for count=1 or count=2. Dropping the guard makes the existing
+        # bounds checks cover 0 correctly (0 < 3 fires the same shortfall).
+        if len(sc["stakeholders"]) < _STAKEHOLDER_COUNT_MIN:
+            audit["shortfalls"].append(f"stakeholder_chapter.count={len(sc['stakeholders'])}<{_STAKEHOLDER_COUNT_MIN}")
+        if len(sc["stakeholders"]) > _STAKEHOLDER_COUNT_MAX:
+            audit["shortfalls"].append(f"stakeholder_chapter.count={len(sc['stakeholders'])}>{_STAKEHOLDER_COUNT_MAX}")
 
     plan["_outline_audit"] = audit
 
