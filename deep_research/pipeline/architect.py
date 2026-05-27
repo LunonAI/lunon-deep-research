@@ -819,10 +819,13 @@ _PLURAL_AUDIENCE_PATTERNS = (
 def _prompt_signals_plural_audience(prompt: str) -> bool:
     """Return True when the prompt signals advice for multiple audiences.
 
-    Called from `plan()` (Greptile PR #42 round-2 wiring) to inject a
-    `PLURAL_AUDIENCE_DETECTED: true/false` hint into the architect's
-    user prompt right before the strict-JSON instruction. The hint
-    tells the LLM whether to populate `stakeholder_chapter` (3-5
+    Called from `build()` (Greptile PR #42 round-2 wiring; Greptile PR #42
+    round-7 docstring correction — the module exposes `build()` as the
+    public entry point, not `plan()`, and `build()` is also what the
+    pinning tests in `tests/test_architect_stakeholder.py` invoke) to
+    inject a `PLURAL_AUDIENCE_DETECTED: true/false` hint into the
+    architect's user prompt right before the strict-JSON instruction. The
+    hint tells the LLM whether to populate `stakeholder_chapter` (3-5
     addressee-distinct blocks) or leave it null. Conservative — a
     false-negative leaves the closing generic (acceptable), while a
     false-positive bloats the article (the explicit regex patterns
