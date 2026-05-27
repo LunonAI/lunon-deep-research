@@ -120,7 +120,7 @@ CLEANING_RESISTANT_RULE = (
 # §27.1.3, §54, §63-65, §70 in W2 smoke; those refs were emitted because the
 # v2 templates encouraged §N back-references and the writer guessed numbers
 # the architect later didn't produce).
-_SECTION_OPENING_RECAP_RULE = (
+_SECTION_OPENING_PROSE_LEAD_RULE = (
     "SECTION-OPENING PROSE LEAD (P2-Wave-3-§12.A.v3 — Qianfan-parity rewrite):\n"
     "EVERY section, including those whose primary content is a markdown "
     "table or list, MUST open with at least one substantive prose sentence "
@@ -189,7 +189,17 @@ _SECTION_OPENING_RECAP_RULE = (
     "forbidden.\n\n"
     "The FIRST section (or article opening) is EXEMPT from the topic-"
     "restriction — it establishes the framework rather than diving into "
-    "a sub-topic. The prose-before-table requirement still applies to it."
+    "a sub-topic. The prose-before-table requirement still applies to it. "
+    "ALL OTHER FORBIDDEN patterns above ALSO still apply to the first "
+    "section / article opener: do NOT open the article with 'This report "
+    "examines...' / 'This chapter introduces...' / 'This section discusses...' "
+    "(the meta-subject ban), do NOT lead with a '§N' / '第N节' reference "
+    "(there is no earlier section to refer to anyway), do NOT open with "
+    "a table or list before any prose, and do NOT state only the topic "
+    "with no substantive claim. The exemption is NARROW: it only frees "
+    "the opener from the requirement to introduce a sub-topic, allowing "
+    "it to establish the article-wide framework instead. Every other "
+    "antipattern in the FORBIDDEN list is in force."
 )
 
 
@@ -574,7 +584,7 @@ def writer_system(
     middle_rules = [_NUMBERING_RULE]
     if include_dedup:
         middle_rules.append(_DEDUP_RULE)
-    middle_rules.extend([_INSIGHT_MIN, CLEANING_RESISTANT_RULE, _SECTION_OPENING_RECAP_RULE])
+    middle_rules.extend([_INSIGHT_MIN, CLEANING_RESISTANT_RULE, _SECTION_OPENING_PROSE_LEAD_RULE])
     middle_block = "\n\n".join(middle_rules)
 
     # Wave 2 §1.2 follow-up: interpolate per-archetype outline bounds into

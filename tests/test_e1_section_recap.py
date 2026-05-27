@@ -159,13 +159,21 @@ def test_v3_acceptable_templates_are_substantive_not_recap(monkeypatch):
 def test_v3_provides_both_en_and_zh_acceptable_templates(monkeypatch):
     """Bilingual coverage preserved: v3 must offer both EN templates
     (modeled on verified Qianfan EN samples) and ZH templates (modeled
-    on Qianfan ZH samples)."""
+    on Qianfan ZH samples). Each of the four ZH templates is asserted
+    individually to mirror the EN test — a single-token proxy would
+    pass even if templates were deleted."""
     sys = _sys(monkeypatch)
     assert "Acceptable opening patterns (EN" in sys
-    assert "Acceptable opening patterns (ZH" in sys
-    # At least one ZH template token must appear so the bilingual
-    # coverage isn't an empty header.
-    assert "主题名词" in sys
+    acceptable_zh_idx = sys.find("Acceptable opening patterns (ZH")
+    assert acceptable_zh_idx > 0
+    zh_block = sys[acceptable_zh_idx:]
+    # Each of the four v3 ZH templates must be named (definition,
+    # quantified-claim, factual-anchor, substantive-contextualisation —
+    # the ZH counterparts of the four EN templates checked above).
+    assert "主题名词" in zh_block  # definition + contextualisation openings
+    assert "具体数字" in zh_block  # quantified-claim opening
+    assert "事实陈述" in zh_block  # factual-anchor opening
+    assert "起源于" in zh_block  # substantive-contextualisation opening
 
 
 def test_v3_body_narrowing_preserved_for_named_artefacts(monkeypatch):
