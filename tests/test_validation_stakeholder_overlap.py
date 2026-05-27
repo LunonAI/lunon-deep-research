@@ -127,6 +127,8 @@ def test_returns_required_keys():
     # `n_stakeholders_declared` (plan total) and `n_stakeholders_audited`
     # (non-empty bodies actually compared) + added `missing_labels` to
     # surface plan entries whose label was not found in the article.
+    # Greptile PR #42 round-8 added `truncated_bodies` listing sids whose
+    # body extraction hit the `_STAKEHOLDER_BODY_MAX_CHARS` cap.
     expected = {
         "n_stakeholders_declared",
         "n_stakeholders_audited",
@@ -134,6 +136,7 @@ def test_returns_required_keys():
         "overlap_pairs",
         "short_pairs",
         "missing_labels",
+        "truncated_bodies",
     }
     assert set(out.keys()) == expected
 
@@ -599,3 +602,114 @@ def test_label_matches_heading_with_trailing_colon():
     # Both stakeholders found despite trailing `:` and ` —` terminators.
     assert out["missing_labels"] == [], f"trailing punctuation (`:`, `—`) terminators should be accepted; got {out}"
     assert out["n_stakeholders_audited"] == 2
+
+
+def test_body_extraction_cap_records_truncation_in_audit():
+    """Greptile PR #42 round-8 issue #1: when no next-heading boundary
+    is found, body extraction falls back to the
+    `_STAKEHOLDER_BODY_MAX_CHARS` cap. Pre-fix this was a silent 5000-
+    char truncation (literal constant, no telemetry). Post-fix the sid
+    is recorded in `truncated_bodies` so a downstream reader can see
+    which audits hit the cap (and therefore may have missed second-half
+    divergence/convergence).
+
+    Setup: two stakeholders, both followed by long bodies; the trailing
+    one (no subsequent heading) genuinely exceeds the cap."""
+    from deep_research.pipeline.validation import _STAKEHOLDER_BODY_MAX_CHARS
+
+    long_body = "Distinct policymaker advice. " * 300  # ~9000 chars, well over cap
+    article = (
+        "## Strategic Recommendations\n\n"
+        "### For Investors\n\n"
+        "Investor advice that is moderate length and ends before the next heading.\n\n"
+        f"### For Policymakers\n\n{long_body}\n"
+    )
+    sc = {
+        "stakeholders": [
+            {"id": "investors", "label": "For Investors"},
+            {"id": "policymakers", "label": "For Policymakers"},
+        ]
+    }
+    out = _validate_stakeholder_overlap(article, sc)
+    # The trailing policymaker block had no subsequent heading and
+    # exceeded the cap → recorded.
+    assert "policymakers" in out["truncated_bodies"], f"policymaker body should be recorded as truncated; got {out}"
+    # Investors block had a next heading → NOT truncated.
+    assert "investors" not in out["truncated_bodies"]
+    # Sanity: constant exists and is the value we configured the test around.
+    assert _STAKEHOLDER_BODY_MAX_CHARS == 5000
+
+
+def test_body_extraction_no_truncation_when_under_cap():
+    """Symmetric: when both bodies have a subsequent heading boundary,
+    `truncated_bodies` is empty (the cap is not relevant)."""
+    article = (
+        "## Strategic Recommendations\n\n"
+        "### For Investors\n\nInvestor advice that is short and clean.\n\n"
+        "### For Policymakers\n\nPolicymaker advice that is short and clean.\n\n"
+        "## Conclusion\n\nClosing remarks.\n"
+    )
+    sc = {
+        "stakeholders": [
+            {"id": "investors", "label": "For Investors"},
+            {"id": "policymakers", "label": "For Policymakers"},
+        ]
+    }
+    out = _validate_stakeholder_overlap(article, sc)
+    assert out["truncated_bodies"] == [], f"unexpected truncation: {out}"
+
+
+def test_ngrams_detects_cjk_after_non_cjk_prefix():
+    """Greptile PR #42 round-8 issue #2: pre-fix `text[:200]` scan would
+    miss CJK characters that appear after a non-CJK prefix. A heading
+    like `"1. 投资者建议"` or a body that opens with a numbered list item
+    `"1) 推荐分散投资硬件公司..."` would be classified as EN, then word-
+    tokenized into an empty set (no [a-zA-Z0-9]+ ZH matches), and the
+    pairwise comparison would silently skip. Post-fix `_is_cjk_text`
+    scans the FULL text via regex.
+
+    Setup: declare ZH stakeholders whose body opens with `"1. "` prefix.
+    Pre-fix: word-tokenized → empty → skip → overlap not detected.
+    Post-fix: CJK-detected via full-text scan → char 4-grams → overlap
+    correctly computed."""
+    shared_body = "推荐分散投资硬件公司，关注专利保护机制，监控政府资助信号变化"
+    article = f"## 战略建议\n\n### 投资者\n\n1. {shared_body}\n\n### 决策者\n\n1. {shared_body}\n"
+    sc = {
+        "stakeholders": [
+            {"id": "investor", "label": "投资者"},
+            {"id": "policy", "label": "决策者"},
+        ]
+    }
+    out = _validate_stakeholder_overlap(article, sc)
+    # Identical ZH bodies (post numeric prefix) → char-4-gram overlap should fire.
+    assert out["max_pair_overlap"] > 0.20, (
+        f"identical ZH bodies with numeric prefix not detected — CJK detection "
+        f"likely failed (regression on round-8 fix): {out}"
+    )
+    assert any(t[0] == "investor" and t[1] == "policy" for t in out["overlap_pairs"]), (
+        f"expected investor/policy overlap pair: {out}"
+    )
+
+
+def test_is_cjk_text_covers_extended_blocks():
+    """Greptile PR #42 round-8 issue #2: the helper must accept all four
+    common CJK blocks. Spot-check one character from each range."""
+    from deep_research.pipeline.validation import _is_cjk_text
+
+    # CJK Unified Ideographs (U+4E00-U+9FFF) — most common
+    assert _is_cjk_text("投资者") is True
+    # CJK Extension A (U+3400-U+4DBF)
+    assert _is_cjk_text("㐀") is True  # first char of Ext A
+    # CJK Compatibility Ideographs (U+F900-U+FAFF)
+    assert _is_cjk_text("豈") is True
+    # Kangxi Radicals (U+2F00-U+2FDF)
+    assert _is_cjk_text("⼀") is True
+    # CJK Extension B (U+20000+) — surrogate-pair range
+    assert _is_cjk_text("\U00020000") is True
+    # Mixed prefix: numeric / punct then CJK — must still be True
+    assert _is_cjk_text("1. 投资者") is True
+    assert _is_cjk_text("§ 投资者建议") is True
+    # Pure EN — must be False
+    assert _is_cjk_text("For Investors capital allocation") is False
+    # Empty — False (not a crash)
+    assert _is_cjk_text("") is False
