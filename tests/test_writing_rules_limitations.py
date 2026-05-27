@@ -63,45 +63,63 @@ def test_limitations_rule_names_scenario_stress_test_for_predict():
     )
 
 
-def test_limitations_rule_installed_in_writer_system_for_predict():
-    """The rule must be reachable through `writer_system()` so the
-    writer LLM sees it in the system prompt. Calling writer_system
-    for an archetype that has the limitations chapter (predict) must
-    surface the rule somewhere in the assembled string."""
+def test_limitations_rule_installed_when_has_limitations_chapter_true():
+    """Greptile PR #45 round-6 issue #2 (2026-05-27): the rule is
+    gated on `has_limitations_chapter`. When the caller signals the
+    plan carries the chapter (predict / compare / explain-mechanism /
+    list-all), the rule must appear in the assembled system prompt."""
+    sys_prompt = wr.writer_system(
+        archetype="predict",
+        domain="default",
+        language="en",
+        toc_titles=["Intro", "Body", "Limitations"],
+        has_limitations_chapter=True,
+    )
+    assert "LIMITATIONS CHAPTER STRUCTURE" in sys_prompt, (
+        f"writer_system with has_limitations_chapter=True missing _LIMITATIONS_RULE; "
+        f"writer LLM will not see the system-level structural contract. "
+        f"Got prompt-head: {sys_prompt[:600]}..."
+    )
+
+
+def test_limitations_rule_omitted_when_has_limitations_chapter_false():
+    """Greptile PR #45 round-6 issue #2 (2026-05-27): when the caller
+    signals the plan has NO limitations chapter (trend / recommend),
+    the ~1300-char rule is pure prompt noise and must be omitted.
+    Mirrors the `_STAKEHOLDER_RULE` gating precedent at
+    `has_stakeholder_chapter`."""
+    sys_prompt = wr.writer_system(
+        archetype="trend",
+        domain="default",
+        language="en",
+        toc_titles=["Intro", "Body"],
+        has_limitations_chapter=False,
+    )
+    assert "LIMITATIONS CHAPTER STRUCTURE" not in sys_prompt, (
+        f"writer_system with has_limitations_chapter=False unexpectedly included "
+        f"_LIMITATIONS_RULE; the rule should be gated like _STAKEHOLDER_RULE to "
+        f"keep the system prompt lean on non-limitations archetypes. "
+        f"Got prompt-head: {sys_prompt[:600]}..."
+    )
+
+
+def test_limitations_rule_defaults_omitted_when_flag_not_passed():
+    """Back-compat: a caller that doesn't thread `has_limitations_chapter`
+    gets the default `False`, which omits the rule. Mirrors the
+    `has_stakeholder_chapter` default-False behaviour. The textual
+    self-guard inside the rule ("required for predict / compare /
+    explain-mechanism / list-all archetypes when `limitations_chapter`
+    is in the plan") would still kick in if a future caller forgot
+    the flag, preventing silent breakage."""
     sys_prompt = wr.writer_system(
         archetype="predict",
         domain="default",
         language="en",
         toc_titles=["Intro", "Body", "Limitations"],
     )
-    assert "Limitations Chapter".upper() in sys_prompt.upper() or "LIMITATIONS CHAPTER STRUCTURE" in sys_prompt, (
-        f"writer_system for predict archetype missing _LIMITATIONS_RULE; "
-        f"writer LLM will not see the system-level structural contract. "
-        f"Got prompt-head: {sys_prompt[:600]}..."
-    )
-
-
-def test_limitations_rule_installed_in_writer_system_for_trend():
-    """The rule is included via middle_block for ALL archetypes — the
-    architect-side gating decides whether the chapter is in the plan
-    or not; the writer always carries the system-level rule so it's
-    ready when the chapter IS present. (Pre-W5.b regression bar: a
-    refactor that gated the rule by archetype in writer_system would
-    create an asymmetry with the architect that limitations is
-    archetype-gated — but only the architect makes that decision.)"""
-    sys_prompt = wr.writer_system(
-        archetype="trend",
-        domain="default",
-        language="en",
-        toc_titles=["Intro", "Body"],
-    )
-    # Rule should still be present (the architect decides if the chapter
-    # is in the plan; the rule is a no-op when the chapter is null).
-    assert "LIMITATIONS CHAPTER STRUCTURE" in sys_prompt, (
-        f"writer_system unexpectedly omits _LIMITATIONS_RULE for trend archetype; "
-        f"the rule must always be present so any future architect change that "
-        f"emits limitations_chapter for trend tasks doesn't lose the system-level "
-        f"directive. Got prompt-head: {sys_prompt[:600]}..."
+    assert "LIMITATIONS CHAPTER STRUCTURE" not in sys_prompt, (
+        f"writer_system without explicit has_limitations_chapter flag should default "
+        f"to omitting the rule. Got prompt-head: {sys_prompt[:600]}..."
     )
 
 
@@ -111,12 +129,14 @@ def test_limitations_rule_follows_mermaid_directive_in_middle_block():
     affect semantics, but pinning the order keeps the system prompt
     structurally stable across PRs — a future refactor that moves rules
     out of band order would risk reshuffling the entire middle_block
-    and confuse Greptile diffs."""
+    and confuse Greptile diffs. The assertion only fires when the rule
+    is actually present (gated on `has_limitations_chapter=True`)."""
     sys_prompt = wr.writer_system(
         archetype="predict",
         domain="default",
         language="en",
         toc_titles=["Intro", "Body", "Limitations"],
+        has_limitations_chapter=True,
     )
     mermaid_pos = sys_prompt.find("SEMANTIC DIAGRAM DIRECTIVE")
     lim_pos = sys_prompt.find("LIMITATIONS CHAPTER STRUCTURE")

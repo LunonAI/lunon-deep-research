@@ -102,6 +102,9 @@ def write_opening(plan, prompt, language, archetype, domain, digest, *, task_id=
     # chapter. The architect emits stakeholder_chapter as None for
     # single-audience prompts; bool() correctly yields False on None
     # and on empty dicts.
+    # Greptile PR #45 round-6 issue #2 (2026-05-27): same pattern for
+    # `has_limitations_chapter` — trend / recommend archetypes never
+    # carry the chapter, so the ~1300-char rule is omitted there.
     sys = wr.writer_system(
         archetype,
         domain,
@@ -110,6 +113,7 @@ def write_opening(plan, prompt, language, archetype, domain, digest, *, task_id=
         task_id=task_id,
         outline_shape=outline_shape,
         has_stakeholder_chapter=bool(plan.get("stakeholder_chapter")),
+        has_limitations_chapter=bool(plan.get("limitations_chapter")),
     )
     user = (
         f"PROMPT ({language}):\n{prompt}\n\nREPORT TITLE: "
@@ -186,6 +190,9 @@ def write_section(
     # `has_stakeholder_chapter` flag from `write_opening`. The per-
     # section call assembles the same system prompt; the architect's
     # decision lives on the plan, not the unit.
+    # Greptile PR #45 round-6 issue #2 (2026-05-27): same for
+    # `has_limitations_chapter` — must match `write_opening` to keep
+    # both call sites symmetric (plan-driven, not unit-driven).
     sys = wr.writer_system(
         archetype,
         domain,
@@ -194,6 +201,7 @@ def write_section(
         task_id=task_id,
         outline_shape=outline_shape,
         has_stakeholder_chapter=bool(plan.get("stakeholder_chapter")),
+        has_limitations_chapter=bool(plan.get("limitations_chapter")),
     )
 
     capel_block = ""

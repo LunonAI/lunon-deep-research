@@ -59,7 +59,17 @@ _LIMITATIONS_BODY_MAX_CHARS = 3000
 # limitations sub-section body. A sub-section passes the anti-generic
 # bar when its body contains ≥1 of:
 #   - 4-digit year in the 1900-2099 range.
-#   - Acronym (2+ all-caps letters): "IBM", "EU", "NIST", "PQC".
+#   - Acronym (3+ all-caps letters): "IBM", "NIST", "PQC", "CMA".
+#     Greptile PR #45 round-6 issue #1 (2026-05-27): tightened from
+#     `{2,}` to `{3,}` because 2-letter all-caps tokens like "AI",
+#     "IT", "OR", "IS", "OF" appear ubiquitously in generic
+#     research-prose phrasing ("AI capabilities are limited", "IT data
+#     is unavailable") — pre-fix these silently passed the anti-generic
+#     bar. "EU" is admitted as a specific 2-letter entity carve-out
+#     since it is a legitimate organization reference frequently named
+#     in scope/jurisdiction boundary discussion; other 2-letter entity
+#     references would need an explicit carve-out (none observed in
+#     the Qianfan corpus to date).
 #   - Mid-sentence proper noun (capitalized 3+ letters preceded by a
 #     lowercase letter + a literal space or tab — excludes sentence-
 #     initial words like "The", "Per", "Beyond" which are common leaders,
@@ -89,7 +99,8 @@ _LIMITATIONS_BODY_MAX_CHARS = 3000
 # correctly fails the anchor check.
 _LIMITATIONS_SPECIFIC_ANCHOR_RE = re.compile(
     r"\b(?:19|20)\d{2}\b"  # 4-digit year
-    r"|\b[A-Z]{2,}\b"  # acronym
+    r"|\bEU\b"  # EU (2-letter entity carve-out)
+    r"|\b[A-Z]{3,}\b"  # acronym 3+ letters
     r"|(?<=[a-z][ \t])[A-Z][a-zA-Z]{2,}"  # mid-sentence proper noun
     r"|\bR-\d+\b"  # rubric id
     r"|[㐀-䶿一-鿿豈-﫿⼀-⿟]{4,}"  # CJK BMP entity / org / location run
