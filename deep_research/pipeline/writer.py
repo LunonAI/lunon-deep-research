@@ -267,7 +267,12 @@ def write_section(
         axis_lines = "\n".join(
             f"    **{d['axis_name']}{colon}** ({d.get('content_template', '')})" for d in dims_sorted
         )
-        min_axes = int(em.get("min_axes_per_entity", 3))
+        # Defensive `or 3`: covers the case where the plan reaches the
+        # writer without passing through architect._normalize (e.g. unit
+        # tests, future caller). `dict.get(key, default)` returns the
+        # stored None when the key is present-with-null, and int(None)
+        # raises TypeError. Greptile PR #37 round-3 finding.
+        min_axes = int(em.get("min_axes_per_entity") or 3)
         if mode == "prose_subheaders" and dims_sorted:
             template_block = (
                 f"PER-ENTITY MICRO-TEMPLATE — for every entity in the matrix that "

@@ -178,3 +178,94 @@ def test_validate_min_axes_per_entity_exposed_in_result():
     em = _em(["E1"], ["D1", "D2", "D3"], min_axes=2)
     out = _validate_micro_template("\n## E1\n\n**D1:** x.\n", em)
     assert out["min_axes_per_entity"] == 2
+
+
+def test_validate_skips_s1_matrix_table_for_anchor():
+    """Greptile PR #37 round-3 (issue 3): the §1 entity matrix is
+    rendered as a markdown table (writer.py §1 wrapper). Entity names
+    first appear in compact pipe-bounded rows ~20-80 chars apart. If
+    the validator anchored on `article.find(ent)`, the window would
+    land inside the table, contain no `**Axis:**` patterns, and score
+    every entity except the last 0.0 — even when the writer correctly
+    instantiated the micro-template in body chapters. The anchor must
+    skip table-row matches and land on a non-table line."""
+    entities = ["IBM", "Google", "Origin"]
+    dims = ["D1", "D2", "D3"]
+    # Realistic article shape: §1 has the matrix as a markdown table
+    # (rows are pipe-bounded), then §2+ contain the body sections with
+    # the bolded sub-headers. Pre-fix this article scored ~0.0 on every
+    # entity because anchors landed inside the table.
+    s1_table = (
+        "## §1 Overview\n\n"
+        "| Entity | Dimension | Notes |\n"
+        "|---|---|---|\n"
+        "| IBM | x | y |\n"
+        "| Google | x | y |\n"
+        "| Origin | x | y |\n\n"
+    )
+    s2_body = (
+        "## §2 IBM\n\n"
+        "**D1:** ibm-d1.\n**D2:** ibm-d2.\n**D3:** ibm-d3.\n\n"
+        "## §3 Google\n\n"
+        "**D1:** g-d1.\n**D2:** g-d2.\n**D3:** g-d3.\n\n"
+        "## §4 Origin\n\n"
+        "**D1:** o-d1.\n**D2:** o-d2.\n**D3:** o-d3.\n"
+    )
+    article = s1_table + s2_body
+    em = _em(entities, dims, min_axes=3)
+    out = _validate_micro_template(article, em)
+    assert out is not None
+    # Post-fix: anchors skip the §1 table rows and land on §2/§3/§4
+    # body sections, each fully compliant.
+    assert out["per_entity_compliance"]["IBM"] == 1.0, f"IBM anchor leaked into §1 table; got {out}"
+    assert out["per_entity_compliance"]["Google"] == 1.0, f"Google anchor leaked into §1 table; got {out}"
+    assert out["per_entity_compliance"]["Origin"] == 1.0, f"Origin anchor leaked into §1 table; got {out}"
+    assert out["below_threshold_entities"] == [], f"got {out['below_threshold_entities']}"
+
+
+def test_validate_anchor_falls_back_when_all_mentions_table_bound():
+    """If an entity appears ONLY inside the §1 matrix table (writer
+    never produced a body section for it), the anchor should fall
+    back to the table-row position rather than crash or skip the
+    entity. The resulting compliance is correctly 0.0 — communicating
+    the real failure (no body instantiation), not a measurement bug."""
+    entities = ["TableOnly"]
+    dims = ["D1", "D2"]
+    article = (
+        "## §1 Overview\n\n"
+        "| Entity | x |\n"
+        "|---|---|\n"
+        "| TableOnly | y |\n"
+        "## §2 Other section\n\nbody content without sub-headers.\n"
+    )
+    em = _em(entities, dims, min_axes=2)
+    out = _validate_micro_template(article, em)
+    assert out is not None
+    # TableOnly has zero body instantiation → 0.0 compliance, flagged.
+    assert out["per_entity_compliance"]["TableOnly"] == 0.0
+    assert "TableOnly" in out["below_threshold_entities"]
+
+
+def test_validate_handles_null_min_axes_per_entity_without_crash():
+    """Greptile PR #37 round-3 (issue 1): a matrix arriving at the
+    validator without passing through `architect._normalize` may carry
+    `min_axes_per_entity: None` (architect uses `or`-assignment to
+    coerce null → 3, but the validator can be invoked directly e.g.
+    in unit tests, future caller paths). The validator must not
+    crash with `int(None)` — defensive `or 3` coercion in place."""
+    entities = ["E1"]
+    dims = ["D1", "D2"]
+    em = {
+        "entities": entities,
+        "dimensions": [{"axis_name": d, "render_order": i, "content_template": "t"} for i, d in enumerate(dims)],
+        "instantiation_mode": "prose_subheaders",
+        "min_axes_per_entity": None,  # the case Greptile flagged
+    }
+    article = "\n## E1\n\n**D1:** x.\n**D2:** y.\n"
+    # Must not raise.
+    out = _validate_micro_template(article, em)
+    assert out is not None
+    # Default of 3 applied: threshold = min(1.0, 3/2) = 1.0; ratio = 1.0
+    # → not below threshold. Confirms the default flowed through.
+    assert out["min_axes_per_entity"] == 3
+    assert out["per_entity_compliance"]["E1"] == 1.0

@@ -171,6 +171,33 @@ def test_prose_subheaders_includes_min_axes_compliance_floor(monkeypatch):
     assert "4 of the 5 axes must be populated" in user, f"compliance floor missing; got: {user[:2500]}"
 
 
+def test_writer_handles_null_min_axes_per_entity_without_crash(monkeypatch):
+    """Greptile PR #37 round-3 (issue 1): if a plan reaches the writer
+    without passing through `architect._normalize` (e.g. unit test path,
+    future caller) and the LLM emitted `"min_axes_per_entity": null`,
+    `dict.get(key, default)` returns the stored None — not the default —
+    and `int(None)` raises TypeError, crashing write_section. The
+    writer now uses `int(em.get(...) or 3)` to coerce null → default,
+    matching architect's `or`-assignment in `_normalize`."""
+    em = {
+        "entities": ["E1", "E2"],
+        "dimensions": [{"axis_name": "D1", "render_order": 1, "content_template": "t"}],
+        "instantiation_mode": "prose_subheaders",
+        "min_axes_per_entity": None,  # the case Greptile flagged
+    }
+    plan = _bare_plan_with_em(em)
+    # Must not raise.
+    captured = _call_writer(monkeypatch, plan, archetype="list-all")
+    user = captured[0]["user"]
+    # Default of 3 applied — surfaced in the RULES block. (1 dim total,
+    # so the rendered floor is min(3, len(dims_sorted)) effectively 3,
+    # which renders verbatim as "3 of the 1 axes" — the test only pins
+    # that the writer did not crash and the directive emitted.)
+    assert "PER-ENTITY MICRO-TEMPLATE" in user, (
+        f"directive missing — writer may have crashed silently; got: {user[:2500]}"
+    )
+
+
 # --------------------------------------------------------------------------
 # 2. table_columns_only mode falls back to legacy directive.
 # --------------------------------------------------------------------------

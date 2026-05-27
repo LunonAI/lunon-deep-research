@@ -223,6 +223,41 @@ def run(inp: ValidationInput) -> ValidationOutput:
     return ValidationOutput(ok=ok, failures=failures, feedback_text=fb, counts=counts)
 
 
+def _find_entity_body_anchor(article: str, ent: str) -> int:
+    """Locate the first occurrence of `ent` that is on a line which is
+    NOT a markdown table row, so the resulting window covers the
+    entity's body section rather than its row inside the §1 matrix.
+
+    The §1 entity matrix is rendered as a markdown table (writer.py
+    §1 wrapper). Entity names therefore first appear inside that
+    table — pipe-bounded rows, ~20-80 chars apart. Anchoring on the
+    bare first occurrence (`article.find(ent)`) lands inside the
+    table; the window extends only to the adjacent entity's row;
+    the window contains no `**Axis:**` patterns; and every entity
+    except the last scores 0.0 — systematically misleading telemetry
+    (Greptile PR #37 round-3 finding).
+
+    A table row's first non-whitespace char is `|`. We walk all
+    case-insensitive occurrences and return the first one whose
+    containing line does not start with `|`. Fall back to the bare
+    first occurrence if every match is table-bound — the function
+    stays total, and the (still 0.0) compliance signal for that
+    entity is correct: the writer never instantiated it outside the
+    table.
+
+    Returns the byte index of the anchor, or -1 if `ent` is absent.
+    """
+    first_any = -1
+    for m in re.finditer(re.escape(ent), article, re.IGNORECASE):
+        idx = m.start()
+        if first_any < 0:
+            first_any = idx
+        line_start = article.rfind("\n", 0, idx) + 1
+        if not article[line_start:idx].lstrip().startswith("|"):
+            return idx
+    return first_any
+
+
 def _validate_micro_template(article: str, entity_matrix) -> dict | None:
     """P3-W1 (2026-05-27): compute per-entity micro-template compliance ratio.
 
@@ -259,28 +294,38 @@ def _validate_micro_template(article: str, entity_matrix) -> dict | None:
                 axis_names.append(n)
     if not axis_names:
         return None
-    min_axes = int(entity_matrix.get("min_axes_per_entity", 3))
+    # Defensive `or 3`: covers the case where the matrix reaches the
+    # validator without passing through architect._normalize. `dict.get`
+    # returns the stored None when the key is present-with-null;
+    # int(None) would raise TypeError. Matches the writer's coercion.
+    # Greptile PR #37 round-3 finding.
+    min_axes = int(entity_matrix.get("min_axes_per_entity") or 3)
     n_dims = len(axis_names)
     threshold_ratio = min(1.0, min_axes / n_dims) if n_dims > 0 else 1.0
 
     per_entity: dict[str, float] = {}
     below: list[str] = []
-    # For each entity, find its first mention and slice a window that
-    # extends until the NEXT entity's first mention (or a 3000-char cap,
-    # whichever is shorter). Without the next-entity boundary, the window
-    # would overlap with later entities' sections and inflate the axis
-    # count — Greptile pre-scan caught this in the partial-compliance test.
-    # Build a sorted list of (entity, first_idx) tuples so we know each
-    # entity's natural body slice.
-    article_lower = article.lower()
+    # For each entity, find its body-section anchor and slice a window
+    # that extends until the NEXT entity's body anchor (or a 3000-char
+    # cap, whichever is shorter). Without the next-entity boundary, the
+    # window would overlap with later entities' sections and inflate
+    # the axis count — Greptile pre-scan caught this in the partial-
+    # compliance test.
+    #
+    # Body-section anchor (Greptile PR #37 round-3): NOT a bare first
+    # occurrence — the §1 entity matrix is rendered as a markdown table
+    # where every entity name appears in compact pipe-bounded rows
+    # (~20-80 chars apart). A bare first-mention anchor would land
+    # inside that table, the window to the next entity would be tiny
+    # and table-bound, contain no `**Axis:**` patterns, and score every
+    # entity 0.0 — systematically misleading telemetry. `_find_entity_
+    # body_anchor` skips table-row matches.
     entity_positions: list[tuple[str, int]] = []
     for ent_raw in entities:
         ent = str(ent_raw).strip()
         if not ent:
             continue
-        idx = article.find(ent)
-        if idx < 0:
-            idx = article_lower.find(ent.lower())
+        idx = _find_entity_body_anchor(article, ent)
         entity_positions.append((ent, idx))
     # Sort by position; -1 (not found) sorted last but treated specially.
     found = sorted(((e, i) for e, i in entity_positions if i >= 0), key=lambda p: p[1])
