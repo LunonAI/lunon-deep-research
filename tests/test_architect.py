@@ -365,6 +365,29 @@ def _build_good_plan_obj():
             "entities": [f"E{i + 1}" for i in range(architect._ENTITY_MATRIX_ENTITIES_MIN)],
             "dimensions": [f"D{i + 1}" for i in range(architect._ENTITY_MATRIX_DIMENSIONS_MIN)],
         },
+        # P3-W2 merge follow-up (2026-05-27): predict / compare / etc.
+        # archetypes now require a populated framing_chapter (§1 contract).
+        # Without this the "good plan" carries a
+        # `framing_chapter=missing(required-for-archetype)` shortfall and
+        # breaks the `shortfalls == []` invariant the retry tests assert.
+        # Minimal valid framing chapter: 4 sub-sections (scope/rubric/
+        # roadmap/vocabulary), 5 vocabulary terms, 4 rubric items.
+        "framing_chapter": {
+            "title": "Framework",
+            "sub_sections": [
+                {"id": "S1.1", "type": "scope", "title": "Scope", "content_directive": "..."},
+                {"id": "S1.2", "type": "rubric", "title": "Rubric", "content_directive": "..."},
+                {"id": "S1.3", "type": "roadmap", "title": "Roadmap", "content_directive": "..."},
+                {"id": "S1.4", "type": "vocabulary", "title": "Vocab", "content_directive": "..."},
+            ],
+            "published_vocabulary": ["v1", "v2", "v3", "v4", "v5"],
+            "published_rubric_items": [
+                {"id": "R-1", "label": "L1", "weight": 0.25},
+                {"id": "R-2", "label": "L2", "weight": 0.25},
+                {"id": "R-3", "label": "L3", "weight": 0.25},
+                {"id": "R-4", "label": "L4", "weight": 0.25},
+            ],
+        },
     }
 
 
