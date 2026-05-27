@@ -1308,7 +1308,17 @@ def check_xref_quality(text: str) -> dict:
             idx = post.find(sep)
             if idx >= 0:
                 wend = min(wend, xend + idx)
-        if forward_defer_pattern.search(text, wstart, wend):
+        # Greptile PR #39 round-6: search `masked_text`, not `text`. The
+        # pre-window clamp can land `wstart` past a `\n## ` boundary at
+        # the heading content itself (e.g. `"5 Section will return to §3
+        # below"`). If we searched the unmasked `text`, a heading title
+        # containing "will return" / "below" / another forward-defer
+        # phrase within 80 chars of an xref would inflate
+        # `n_forward_defer` — same heading-bleed class of bug round-5
+        # fixed for ref counting. `masked_text` preserves character
+        # offsets (same-length space substitution), so the clamped
+        # wstart/wend positions remain valid and no arithmetic changes.
+        if forward_defer_pattern.search(masked_text, wstart, wend):
             n_forward_defer += 1
 
     # Opening-template antipattern (P3-W3 regression detector for §12.A.v4).

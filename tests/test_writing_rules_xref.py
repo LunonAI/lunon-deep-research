@@ -173,6 +173,46 @@ def test_forward_defer_ratio_zero_when_no_xrefs():
     assert not any("forward_defer_ratio" in f for f in out["fail"])
 
 
+def test_forward_defer_window_ignores_heading_title_phrases():
+    """Greptile PR #39 round-6: the forward-defer proximity search
+    previously ran against the unmasked `text`. After the pre-window
+    clamp moves `wstart` past a `\\n## ` boundary, the window can
+    start AT the heading content itself — so a heading title
+    containing "will return" / "below" / another forward-defer phrase
+    within 80 chars of an xref would inflate `n_forward_defer`. The
+    fix routes the search through `masked_text` (same-offset
+    same-length space substitution from round-5), so heading-title
+    phrases are blanked out for the forward-defer pattern just as
+    they're blanked out for ref counting.
+
+    Fixture: 10 body xrefs, all in plain (non-forward-defer) prose
+    contexts. The xrefs sit immediately after H2 headings whose titles
+    contain "will return" / "below" / "will detail" — pre-fix those
+    title phrases would land inside the post-clamp ±80-char windows
+    and falsely classify the xrefs as forward-defer. Post-fix the
+    forward-defer ratio is 0.0.
+    """
+    text = (
+        "## 1 Chapter Title will return to topic\n\nPlain reference (Section 3).\n\n"
+        "## 2 Topic discussed below in detail\n\nPlain reference (Section 4).\n\n"
+        "## 3 Will detail downstream\n\nPlain reference (Section 5).\n\n"
+        "## 4 Title with below as a literal token\n\nPlain reference (Section 6).\n\n"
+        "## 5 Will return phrase\n\nPlain reference (Section 7).\n\n"
+        "## 6 Below phrase\n\nPlain reference (Section 8).\n\n"
+        "## 7 Body\n\n"
+        "Plain (Section 9). Plain (Section 10). Plain (Section 11). "
+        "Plain (Section 12).\n\n" + "\n\n".join(f"## {i} S{i}" for i in range(3, 13)) + "\n"
+    )
+    out = wr.check_xref_quality(text)
+    assert out["n_total_xrefs"] >= 10, f"expected ≥10 xrefs: {out}"
+    # No xref sits in an actual forward-defer prose context — all
+    # candidate phrases are inside HEADING titles which the mask blanks.
+    assert out["forward_defer_ratio"] == 0.0, f"heading-title forward-defer phrases leaked into the ratio: {out}"
+    assert not any("forward_defer_ratio" in f for f in out["fail"]), (
+        f"spurious forward_defer fail entry from heading bleed: {out['fail']}"
+    )
+
+
 def test_heading_title_chapter_n_not_treated_as_dangling_xref():
     r"""Greptile PR #39 round-5 issue #1: `generic_pattern` and
     `paren_pattern` previously scanned the FULL document including
