@@ -220,3 +220,98 @@ def test_repair_preserves_legitimate_text_in_forbidden_block():
     out, stats = repair(text)
     assert stats["templates_repaired"] == 0, f"false positive: {stats}; out={out}"
     assert "building on prior work" in out
+
+
+def test_repair_does_not_destroy_heading_with_short_name_when_first_sentence_is_dangler():
+    r"""Greptile PR #39 round-3 issue #1: the sentence splitter
+    `re.split(r"((?<=[.!?])\s+)", text)` cannot place a split-point
+    BEFORE a chapter heading (headings don't end in `.!?`), so a
+    heading is always grouped with the first body sentence into a
+    single token. When that first sentence is a dangler-only
+    reference, the residual computation INCLUDES the heading
+    characters. For short chapter names ("Results", "Summary",
+    "Overview", "Methods" — all ≤7 letters), the combined residual
+    falls below the 15-char delete threshold, and the entire token —
+    heading included — is silently deleted.
+
+    Concrete failure (the exact case Greptile reported):
+      "## 1 Results\n\nSee (Section 47).\n\n## 2 Body\n\nContent."
+    Residual after stripping "(Section 47)" = "##1ResultsSee" = 13
+    chars < 15 → pre-fix, the WHOLE token "## 1 Results\n\nSee
+    (Section 47)." was deleted, removing the `## 1 Results` heading
+    from the article. Post-write data loss in a chapter-structural
+    element.
+
+    Fix: when the token contains a markdown heading line, route to
+    the rewrite path (heading preserved, dangler swapped for "a later
+    section") instead of the delete path.
+    """
+    text = "## 1 Results\n\nSee (Section 47).\n\n## 2 Body\n\nContent here is fine.\n"
+    out, stats = repair(text)
+    # The heading MUST survive.
+    assert "## 1 Results" in out, f"heading silently destroyed: {out!r}"
+    # The dangler must have been rewritten (not deleted) — the rewrite path
+    # path swaps it for "a later section".
+    assert "a later section" in out, f"dangler not rewritten on heading path: {out!r}"
+    assert "(Section 47)" not in out
+    # The delete path must NOT have fired — heading guard routes to rewrite.
+    assert stats["sentences_deleted"] == 0, f"heading-rooted token wrongly deleted: {stats}; {out!r}"
+    assert stats["dangling_refs_rewritten"] >= 1
+    # Downstream content is unaffected.
+    assert "## 2 Body" in out
+    assert "Content here is fine." in out
+
+
+def test_repair_heading_guard_covers_common_short_chapter_names():
+    """Greptile PR #39 round-3 issue #1: parameterized verification
+    that each of the canonical short-name chapters Greptile called out
+    ("Summary", "Results", "Overview", "Methods") survives a
+    dangler-only first sentence. Pre-fix every one of these would have
+    silently lost the heading; post-fix every heading must appear in
+    the repaired output."""
+    short_names = ("Summary", "Results", "Overview", "Methods")
+    for name in short_names:
+        text = f"## 1 {name}\n\nSee (Section 99).\n\n## 2 Body\n\nReal content here.\n"
+        out, _stats = repair(text)
+        assert f"## 1 {name}" in out, f"heading `## 1 {name}` destroyed by repair (output: {out!r})"
+        assert "## 2 Body" in out
+
+
+def test_repair_strips_lowercase_building_on_template():
+    r"""Greptile PR #39 round-3 issue #2: `_OPENING_TEMPLATE_PATTERN`
+    previously had no `re.I` flag, so only Title-Case "Building on"
+    templates were stripped by `repair()`. But the auditor's
+    `opening_template_pattern` in `writing_rules.check_xref_quality`
+    uses `re.I` and flags lowercase variants too. A model regression
+    that emitted lowercase `"## 2 Foo\n\nbuilding on §1 …"` would slip
+    past `repair()` unchanged while the auditor reported
+    `opening_template_violations=1` — a false divergence between what
+    the post-write pass "repaired" and what the auditor sees. Adding
+    `re.I` to the repair pattern aligns both passes.
+    """
+    # Same fixture as test_repair_replaces_building_on_template_with_clean_intro
+    # but with a lowercase 'b' to exercise the re.I codepath.
+    text = "## 2 Foo\n\nbuilding on §1 established earlier, this section continues. Substantive content follows here."
+    out, stats = repair(text)
+    assert stats["templates_repaired"] == 1, f"lowercase template not stripped: {stats}; out={out!r}"
+    assert "building on" not in out.lower(), f"lowercase template leaked through: {out!r}"
+    # Heading and downstream prose retained.
+    assert "## 2 Foo" in out
+    assert "Substantive content follows here." in out
+
+
+def test_repair_lowercase_template_strip_does_not_false_positive_in_prose():
+    """Symmetric to test_repair_preserves_legitimate_text_in_forbidden_block:
+    the `re.I` flag added in round-3 must NOT cause mid-paragraph
+    lowercase 'building on' to be flagged. The `^##` anchor (no
+    letters) already prevents this regardless of the flag, but pin
+    the invariant explicitly."""
+    text = (
+        "## 1 Intro\n\n"
+        "The author's strategy of building on prior work shapes the discussion. "
+        "Specifically (Section 2)…\n\n"
+        "## 2 Body\n\n"
+    )
+    out, stats = repair(text)
+    assert stats["templates_repaired"] == 0, f"mid-paragraph false positive: {stats}; out={out}"
+    assert "building on prior work" in out
