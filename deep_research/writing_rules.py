@@ -1205,8 +1205,16 @@ def check_xref_quality(text: str) -> dict:
     # `## N.M Title` numeric prefix in markdown headings as the legitimate
     # set of §-targets — same convention `numbering_fix.renumber_headings`
     # uses.
+    # Greptile PR #39 round-7 issue #2: collect heading_ids and mask
+    # heading lines uniformly across H2-H6. The prior `#{2,4}` bound
+    # left H5/H6 lines unmasked: a sub-sub-heading like
+    # `##### 5.1 Section 99 Subtopic` would have "Section 99" picked up
+    # by `generic_pattern` and "99" flagged as a dangling ref, even
+    # though it's title text. Widening to `#{2,6}` aligns the masked-
+    # text replacement, in-body mask in `_count_refs_in`, and this
+    # heading-id collection.
     heading_ids: set[str] = set()
-    for m in re.finditer(r"(?m)^#{2,4}\s+([\d\.]+)\b", text):
+    for m in re.finditer(r"(?m)^#{2,6}\s+([\d\.]+)\b", text):
         hid = m.group(1).rstrip(".")
         heading_ids.add(hid)
 
@@ -1230,7 +1238,7 @@ def check_xref_quality(text: str) -> dict:
     # text match offsets in the original `text` exactly (the
     # forward-defer proximity windows below still index into `text`).
     masked_text = re.sub(
-        r"(?m)^#{2,4}[^\n]*",
+        r"(?m)^#{2,6}[^\n]*",
         lambda m: " " * len(m.group(0)),
         text,
     )
@@ -1334,6 +1342,16 @@ def check_xref_quality(text: str) -> dict:
     # the writer may legitimately reference a sub-section of an existing
     # chapter, and over-flagging here would force-rewrite legitimate
     # navigational refs.
+    # Greptile PR #39 round-7 issue #1: dedupe by unique ref-id.
+    # The prior list accumulated one entry per OCCURRENCE of a dangling
+    # ref, so a doc that cited `(Section 47)` five times would produce
+    # `dangling_forward_refs=["47","47","47","47","47"]` and the fail
+    # entry would read `dangling_forward_refs=5` — a caller reading the
+    # audit output would reasonably interpret that as five distinct
+    # missing sections when there's only one. Order-preserving dedup
+    # via a `seen` set keeps the first-occurrence ordering stable for
+    # any downstream consumer that snapshots the list.
+    dangling_seen: set[str] = set()
     dangling: list[str] = []
     for ref in paren_refs + raw_refs:
         ref_clean = (ref or "").rstrip(".")
@@ -1348,6 +1366,9 @@ def check_xref_quality(text: str) -> dict:
         top = ref_clean.split(".", 1)[0]
         if top in heading_ids:
             continue
+        if ref_clean in dangling_seen:
+            continue
+        dangling_seen.add(ref_clean)
         dangling.append(ref_clean)
 
     # Per-chapter xref count. Split body on `## N` headings; count xrefs
@@ -1361,7 +1382,7 @@ def check_xref_quality(text: str) -> dict:
     # the article-level mask above.
     def _count_refs_in(body: str) -> int:
         masked_body = re.sub(
-            r"(?m)^#{2,4}[^\n]*",
+            r"(?m)^#{2,6}[^\n]*",
             lambda m: " " * len(m.group(0)),
             body,
         )
