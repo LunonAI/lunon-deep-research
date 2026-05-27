@@ -8,7 +8,9 @@ across the article; rubric items cited 1+ times from each evaluation chapter.
 Tests pin: None for missing/empty framing; vocabulary reuse counts
 (case-insensitive EN, verbatim ZH); rubric reference counts; reuse rate
 computation; §1 region exclusion (avoid attributing in-§1 mentions as
-"downstream reuse").
+"downstream reuse"); long-article proportional skip (Greptile PR #38
+round-1); end-to-end wiring from `validation.run()` (Greptile PR #38
+round-1).
 """
 
 from deep_research.pipeline.validation import _validate_framing_chapter
@@ -155,3 +157,102 @@ def test_validate_returns_dict_keys_pinned():
         "rubric_reference_rate",
     }
     assert set(out.keys()) == expected_keys, f"got {set(out.keys())}"
+
+
+def test_validate_skip_scales_to_long_articles():
+    """Greptile PR #38 round-1 (skip heuristic): on LONG articles the
+    skip must scale to 9% of article length (Qianfan §1 upper bound),
+    not cap at 8k. A vocab term mentioned ONLY inside §1 (e.g. chars
+    0-44k of a 500k article) must NOT be counted as downstream reuse —
+    the prior `min(8000, len//7)` bound capped the skip at 8k for long
+    articles, leaking in-§1 mentions into the downstream count."""
+    fc = {"published_vocabulary": ["axiom1"], "published_rubric_items": []}
+    # 9% of 500k = 45k. Place axiom1 only at chars 20k-30k (well past
+    # the old 8k cap, but well inside the new 45k proportional skip).
+    s1 = ("x" * 20000) + (" axiom1" * 1000) + ("x" * 10000)
+    downstream = "filler content " * 30000  # ~450k chars
+    article = s1 + downstream
+    assert len(article) > 400_000, f"sanity: article should be long, got {len(article)}"
+    out = _validate_framing_chapter(article, fc)
+    assert out is not None
+    # axiom1 was only in §1 — downstream count must be 0. Pre-fix this
+    # would have returned ≥1000 because the skip capped at 8k and the
+    # axiom1 mentions at chars 20k+ would all have leaked into "body".
+    assert out["vocabulary_terms_reused"]["axiom1"] == 0, (
+        f"long-article skip did not exclude §1 mentions; got {out['vocabulary_terms_reused']}"
+    )
+
+
+def test_validate_short_article_skips_safely():
+    """Greptile PR #38 round-1 (skip heuristic): the proportional skip
+    is clamped to len(article), so a stub article shorter than the 8k
+    floor yields an empty body (zero reuse counts), not an index error
+    or partial-skip leak."""
+    fc = {"published_vocabulary": ["axiom1"], "published_rubric_items": []}
+    article = "axiom1 appears here in a short stub."  # ~36 chars
+    out = _validate_framing_chapter(article, fc)
+    assert out is not None
+    # Body is empty (skip == len(article)); count must be 0.
+    assert out["vocabulary_terms_reused"]["axiom1"] == 0
+    assert out["vocabulary_reuse_rate"] == 0.0
+
+
+def test_run_populates_framing_chapter_reuse_in_counts():
+    """Greptile PR #38 round-1 (dead-code wiring): `validation.run()`
+    must call `_validate_framing_chapter` and surface its output under
+    `counts["framing_chapter_reuse"]`. Without this wiring, the 35-test
+    isolated suite passes but the metric is a no-op in production —
+    drift telemetry never sees a reuse number."""
+    from deep_research.pipeline.validation import ValidationInput, run
+    from deep_research.state import DesignGuide, Scaffold
+
+    article = "x" * 10000 + " ... axiom1 here. R-1 referenced too. axiom1 again."
+    plan = {
+        "framing_chapter": {
+            "published_vocabulary": ["axiom1"],
+            "published_rubric_items": [{"id": "R-1", "label": "x"}],
+        }
+    }
+    inp = ValidationInput(
+        article=article,
+        plan=plan,
+        scaffold=Scaffold(sections=[]),
+        design_guide=DesignGuide(),
+        language="en",
+        domain="default",
+    )
+    vout = run(inp)
+    assert "framing_chapter_reuse" in vout.counts, (
+        f"_validate_framing_chapter not wired into run(); got counts keys: {list(vout.counts.keys())}"
+    )
+    fc_reuse = vout.counts["framing_chapter_reuse"]
+    for k in ("vocabulary_terms_reused", "vocabulary_reuse_rate", "rubric_items_referenced", "rubric_reference_rate"):
+        assert k in fc_reuse, f"missing key `{k}` in framing_chapter_reuse: {fc_reuse}"
+    # Spot-check that the wired call actually saw the article body and
+    # counted reuse (axiom1 appears twice past the 8k skip).
+    assert fc_reuse["vocabulary_terms_reused"]["axiom1"] >= 1, (
+        f"wired call did not see downstream axiom1; got {fc_reuse}"
+    )
+
+
+def test_run_omits_framing_chapter_reuse_when_no_framing():
+    """Greptile PR #38 round-1: when the plan has no `framing_chapter`,
+    `counts["framing_chapter_reuse"]` must be ABSENT (not `None`, not
+    `{}`) so drift-telemetry consumers can distinguish 'no framing
+    chapter on this plan' from 'framing chapter present, zero reuse'."""
+    from deep_research.pipeline.validation import ValidationInput, run
+    from deep_research.state import DesignGuide, Scaffold
+
+    inp = ValidationInput(
+        article="x" * 10000,
+        plan={},  # no framing_chapter
+        scaffold=Scaffold(sections=[]),
+        design_guide=DesignGuide(),
+        language="en",
+        domain="default",
+    )
+    vout = run(inp)
+    assert "framing_chapter_reuse" not in vout.counts, (
+        f"framing_chapter_reuse must be absent when plan has no framing_chapter; "
+        f"got: {vout.counts.get('framing_chapter_reuse')!r}"
+    )

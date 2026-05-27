@@ -189,6 +189,17 @@ def run(inp: ValidationInput) -> ValidationOutput:
                 }
             )
 
+    # 8. P3-W2 (2026-05-27): framing-chapter downstream-reuse — telemetry
+    # only. Measures whether §2+ chapters re-engage with §1's published
+    # vocabulary + rubric items (Qianfan corpus-wide pattern of
+    # analytical continuity). No fail/pass — surfaced in counts for drift
+    # logging; the corrective-feedback loop is via the post-write
+    # compliance scorer, not the validation gate. Returns None (skipped)
+    # when the plan has no framing_chapter or it is empty.
+    fc_reuse = _validate_framing_chapter(inp.article, inp.plan.get("framing_chapter"))
+    if fc_reuse is not None:
+        counts["framing_chapter_reuse"] = fc_reuse
+
     ok = not failures
 
     # Build structured feedback for the refiner (NOT free-text)
@@ -217,10 +228,12 @@ def _validate_framing_chapter(article: str, framing_chapter) -> dict | None:
         "rubric_reference_rate": float (fraction of items referenced),
       }
 
-    "Body" = article excluding the first ~8000 chars (an upper-bound on
-    §1 length per the Qianfan 5-9% pattern). Reuse measures whether
-    DOWNSTREAM chapters re-engage with §1 vocabulary + rubric items —
-    the Qianfan-verified corpus-wide pattern of analytical continuity.
+    "Body" = article after the first `max(8000, 0.09 * len)` chars
+    (the Qianfan-verified 5-9% upper bound on §1 length, floored at 8k
+    to maintain margin on short/mid-length articles). Reuse measures
+    whether DOWNSTREAM chapters re-engage with §1 vocabulary + rubric
+    items — the Qianfan-verified corpus-wide pattern of analytical
+    continuity.
     """
     if not isinstance(framing_chapter, dict):
         return None
@@ -229,11 +242,18 @@ def _validate_framing_chapter(article: str, framing_chapter) -> dict | None:
     if not vocab and not rubric:
         return None
     # Skip §1 region — heuristic upper bound on the framing chapter's
-    # extent. Qianfan §1 is 5-9% of article length (~5-25k chars on a
-    # full article); 8k is a conservative skip that protects against
-    # mis-attributing in-§1 mentions as "downstream reuse".
-    skip_chars = min(8000, len(article) // 7)
-    body = article[skip_chars:] if len(article) > skip_chars else ""
+    # extent. Qianfan §1 is 5-9% of article length, so the proportional
+    # skip is `0.09 * len(article)`. Floor at 8000 chars to maintain
+    # margin on short/mid-length articles where 9% would otherwise leave
+    # too little buffer past §1's actual close (e.g. on a 50k article,
+    # 9% is 4.5k while §1 routinely runs 3-4.5k). Clamp to len(article)
+    # so a stub article slices to an empty body rather than past-the-end.
+    # Greptile PR #38 round-1: the prior `min(8000, len//7)` capped long
+    # articles at 8k (under-skipping when §1 grows to 45k on a 500k-char
+    # article) AND under-skipped short articles by falling to the //7
+    # branch — both directions of the bound were inverted.
+    skip_chars = min(len(article), max(8000, int(0.09 * len(article))))
+    body = article[skip_chars:]
     vocab_counts: dict[str, int] = {}
     for term in vocab:
         if any("一" <= c <= "鿿" for c in term):
