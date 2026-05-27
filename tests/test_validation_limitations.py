@@ -186,8 +186,9 @@ def test_generic_subsection_body_flagged():
 def test_citation_marker_digits_do_not_falsely_count_as_year():
     """Greptile pre-scan: a body containing only citation markers like
     `[^S5-2024]` MUST NOT pass the anchor check via the year regex —
-    the digits are not a date. Lookbehind `(?<![\\^\\d])` excludes
-    `[^...-2024]` and `[^S5-2024]`."""
+    the digits are not a date. `_LIMITATIONS_CITATION_STRIP_RE` pre-strips
+    `[^...]` markers from the body before the anchor regex runs, so the
+    embedded `-2024` / `-1999` digits cannot match the year sub-pattern."""
     article = (
         "## 5 Limitations\n\n"
         "### 5.1 Data Granularity\n\n"
