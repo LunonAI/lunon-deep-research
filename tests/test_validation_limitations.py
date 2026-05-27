@@ -238,6 +238,58 @@ def test_scenario_stress_test_detected_zh():
     assert audit["scenario_stress_test_present"] is True
 
 
+# ---------- truncated_bodies fallback ----------
+
+
+def test_truncated_bodies_surfaced_when_trailing_subsection_exceeds_cap():
+    """When the article-trailing sub-section has no subsequent heading
+    AND its body exceeds `_LIMITATIONS_BODY_MAX_CHARS` (3000 chars), the
+    body extraction falls back to a fixed-size window and the sub-type
+    is recorded in `truncated_bodies` so the audit trail is honest about
+    which bodies were truncated. Mirrors the stakeholder validator's
+    `truncated_bodies` signal.
+
+    The final sub-section is built with a >3000-char filler that
+    contains no heading-like `\n#` sequence. The anchor (R-4 rubric id)
+    is placed at the START of the body so the truncated slice still
+    passes the anti-generic check — isolating the assertion to the
+    truncation signal only."""
+    filler = ("padding sentence with no heading markers. " * 90)  # ~3870 chars
+    assert len(filler) > validation._LIMITATIONS_BODY_MAX_CHARS, (
+        f"test filler must exceed body cap to trigger truncation; got {len(filler)}"
+    )
+    article = (
+        "## 5 Limitations\n\n"
+        "### 5.1 Data Granularity\n\nThe 2024 IBM filing data is incomplete.\n\n"
+        "### 5.2 Scope Cap\n\nPer R-1, excludes pre-commercial labs.\n\n"
+        "### 5.3 Time Validity\n\nBeyond 2028 EU CMA reset invalidates conclusions.\n\n"
+        "### 5.4 Sampling\n\nPer R-2 the Brazilian sample is under-represented.\n\n"
+        "### 5.5 Falsifiers\n\n"
+        f"Per R-4, the §4 thesis is refuted if NIST cancels PQC. {filler}"
+    )
+    audit = validation._validate_limitations_chapter(article, _full_lc())
+    assert audit is not None
+    assert "falsifiers" in audit["truncated_bodies"], (
+        f"trailing sub-section with >3000-char body must be flagged in truncated_bodies; got: {audit}"
+    )
+    # Anchor at body start is still inside the 3000-char window → not generic.
+    assert "falsifiers" not in audit["generic_subsections"], (
+        f"falsifiers body has R-4 anchor in first 3000 chars; should not be flagged generic; got: {audit}"
+    )
+
+
+def test_truncated_bodies_empty_when_next_heading_within_range():
+    """When every sub-section is followed by another heading inside the
+    cap, `truncated_bodies` stays empty — the fallback branch is not
+    exercised. Pins the negative side of the truncation signal."""
+    article = _full_article_with_5_subsections() + "## 6 Closing\n\nContent.\n"
+    audit = validation._validate_limitations_chapter(article, _full_lc())
+    assert audit is not None
+    assert audit["truncated_bodies"] == [], (
+        f"no sub-section exceeded the cap; truncated_bodies must be empty; got: {audit}"
+    )
+
+
 # ---------- run() integration ----------
 
 
