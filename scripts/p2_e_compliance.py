@@ -75,11 +75,14 @@ _V3_FORBIDDEN_OPENING_TOKENS = re.compile(
     r"(?:returns? to|revisits?) the (?:framework|rubric|dimensions)|"
     # Meta-subject openers ("This section adds...", "The present chapter...")
     # — v3 explicitly forbids 'This section' / 'This chapter' / 'This report'
-    # as the SUBJECT of an opening sentence.
-    r"this (?:chapter|section|report) (?:adds|extends|populates|builds|"
-    r"operationalises|operationalizes|catalogues|catalogs|examines|"
-    r"records|maps|measures|operationalise|operationalize|"
-    r"discusses|introduces|presents|covers|describes|analyses|analyzes)|"
+    # as the SUBJECT of an opening sentence, REGARDLESS of the verb that
+    # follows. The verb slot is `\w+` (any word) rather than an enumerated
+    # list — earlier rounds used a closed list that missed common synonyms
+    # (explores / focuses / provides / offers / highlights / investigates
+    # / summarises / explains). The `\s+\w+` requirement keeps possessives
+    # like "This section's four-pillar framework" from matching (no space
+    # between `section` and `'s`).
+    r"this (?:chapter|section|report)\s+\w+|"
     r"the present (?:section|chapter|report)|"
     # ANY §N / section-N reference in the opener (v3 forbids these in
     # openings even when paired with a named artefact).
@@ -91,7 +94,9 @@ _V3_FORBIDDEN_OPENING_TOKENS = re.compile(
     r"在(?:上述|前述)(?:框架|维度|分类)下?|在前述基础上|"
     r"基于(?:上文|前述|第\d+章)|根据第\d+章|"
     r"本(?:节|章|报告)(?:补充|拓展|添加|建立|应用|延伸|具体化|"
-    r"考察|分析|讨论|研究|记录|测量|介绍|阐述|论述)|"
+    r"考察|分析|讨论|研究|记录|测量|介绍|阐述|论述|涉及|探讨|"
+    r"关注|涵盖|着重|聚焦|侧重|阐释|描述|呈现|展示|总结|概述|"
+    r"说明|审视|旨在|意在|尝试|致力)|"
     r"第\s*\d+\s*(?:节|章))",
     re.IGNORECASE,
 )
@@ -127,12 +132,21 @@ def e1_section_opening_recap(article: str) -> dict:
       - semantic_ok only            = opener vocab clean BUT section opens
                                       with a table/list/sub-heading
       - neither                     = data-block lead AND forbidden phrase
+
+    §1 grading (v3): every section is graded, including sections[0]. v3's
+    narrowed §1 exemption frees the article opener from the introduce-a-
+    sub-topic requirement ONLY; all FORBIDDEN antipatterns (meta-subject
+    openers, §N refs in opener, table-first leads, topic-only stubs) still
+    apply to it. The earlier sections[1:] skip was v2-era logic where §1
+    had a wholesale exemption — under v3 that would silently mark a "This
+    report examines..." article opener as compliant by default, overstating
+    the post-merge smoke compliance rate.
     """
     sections = re.split(r"(?=^#{1,3}\s+\S)", article, flags=re.MULTILINE)
     sections = [s for s in sections if s.strip()]
-    if len(sections) < 2:
-        return {"n_sections": len(sections), "n_compliant": 0, "rate": 0.0, "applicable": False}
-    candidates = sections[1:]
+    if not sections:
+        return {"n_sections": 0, "n_compliant": 0, "rate": 0.0, "applicable": False}
+    candidates = sections
     n_compliant = 0
     n_only_structural = 0  # prose lead but uses v3-forbidden opener vocab
     n_only_semantic = 0  # opener vocab clean but data-block-first
