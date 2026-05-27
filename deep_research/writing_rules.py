@@ -338,6 +338,54 @@ _MERMAID_DIRECTIVE = (
 )
 
 
+# P3-W6.b (2026-05-27): STAKEHOLDER-SEGMENTED CLOSING rule.
+#
+# System-prompt summary of the 3-5 addressee-block discipline + non-
+# overlap quality bar. The heavy lifting (per-stakeholder label +
+# content_directive payload) is in the writer.py user-prompt
+# `stakeholder_block`. This rule gives the writer LLM a system-level
+# anchor so the per-section directive from writer.py reinforces — not
+# contradicts — the structural contract. the reference corpus-verified
+# pattern: 6/11 articles, typically 4 stakeholders for predict (q3,
+# q14) or 7 for compare-contest (q23 — though Lunon's architect caps
+# emit at 5, the rule's "3-5" wording matches architect.py:213).
+# Architect-side schema lives at architect.py:211-222; post-write
+# validator `_validate_stakeholder_overlap` (already ACTIVE since
+# PR #42, P3-W6) at validation.py:517-716 enforces pairwise Jaccard
+# 4-gram overlap < 0.20 between every pair of sub-sections. The
+# `_STAKEHOLDER_JACCARD_MAX` constant references the same threshold
+# value the validator uses so source-of-truth stays one place.
+_STAKEHOLDER_JACCARD_MAX = 0.20
+
+_STAKEHOLDER_RULE = (
+    "STAKEHOLDER-SEGMENTED CLOSING (P3-W6; applies when "
+    "`stakeholder_chapter` is in the plan and the section currently "
+    "being written IS the stakeholder chapter):\n"
+    "When the architect signals a plural audience, the closing chapter "
+    "splits recommendations into 3-5 stakeholder addressee blocks.\n"
+    "Per sub-section requirements:\n"
+    "  - Heading names the addressee verbatim (EN: 'For Policymakers' / "
+    "'Recommendations for Investors'; ZH: '对政策制定者的建议' / "
+    "'对投资者的建议').\n"
+    "  - 200-500 words of advice SPECIFIC to that stakeholder's decision "
+    "context (budget / time horizon / decision authority / information "
+    "access).\n"
+    "  - Opening phrase modelled on the reference corpus: 'For {stakeholder}, "
+    "the priority is…' / '{Stakeholder} should focus on…' / "
+    "'From the {stakeholder} perspective, three steps emerge…'.\n"
+    "Non-overlap discipline:\n"
+    f"  - The post-write validator enforces pairwise Jaccard 4-gram "
+    f"overlap < {_STAKEHOLDER_JACCARD_MAX:.2f} between every pair of "
+    "sub-sections.\n"
+    "  - Each block's recommendations must be DISJOINT from sibling "
+    "blocks; advice applicable to multiple stakeholders goes under the "
+    "PRIMARY stakeholder only.\n"
+    "  - Forbidden: 'recommendations for all stakeholders'-style "
+    "boilerplate; advice that doesn't name the stakeholder's specific "
+    "constraints."
+)
+
+
 # P2-Option-A-#3 (2026-05-23): _INSIGHT_MIN rewritten to be Insight-positive
 # across ALL archetypes. The previous version (post-W9 over-correction) told
 # the writer to NOT add forward-looking content for list-all/compare/
@@ -876,6 +924,7 @@ def writer_system(
             _SECTION_OPENING_PROSE_LEAD_RULE,
             _MID_PARAGRAPH_XREF_RULE,
             _MERMAID_DIRECTIVE,
+            _STAKEHOLDER_RULE,
         ]
     )
     middle_block = "\n\n".join(middle_rules)
