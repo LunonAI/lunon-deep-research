@@ -108,6 +108,21 @@ def test_normalize_records_no_shortfalls_when_matrix_meets_bounds():
     plan["queries"] = [
         {"id": f"Q{i + 1}", "text": f"q{i + 1}", "type": "factual"} for i in range(architect._QUERIES_MIN)
     ]
+    # P3-W2 merge follow-up (2026-05-27): list-all archetype requires a
+    # framing_chapter — without it the audit carries the missing-required
+    # shortfall and the test's `== []` invariant breaks. Minimal valid
+    # framing chapter matches the predict-archetype fixture.
+    plan["framing_chapter"] = {
+        "title": "Framework",
+        "sub_sections": [
+            {"id": "S1.1", "type": "scope", "title": "Scope", "content_directive": "..."},
+            {"id": "S1.2", "type": "rubric", "title": "Rubric", "content_directive": "..."},
+            {"id": "S1.3", "type": "roadmap", "title": "Roadmap", "content_directive": "..."},
+            {"id": "S1.4", "type": "vocabulary", "title": "Vocab", "content_directive": "..."},
+        ],
+        "published_vocabulary": ["v1", "v2", "v3", "v4", "v5"],
+        "published_rubric_items": [],  # list-all not in RUBRIC_REQUIRED set
+    }
     architect._normalize(plan, archetype="list-all")
     audit = plan["_outline_audit"]
     assert audit["shortfalls"] == [], f"unexpected shortfalls: {audit['shortfalls']}"
