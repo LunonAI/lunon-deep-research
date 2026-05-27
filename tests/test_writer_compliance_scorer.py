@@ -397,20 +397,40 @@ def test_heading_numbering_catches_pre_wave_0_corruption():
     assert scores["n_corrupt_heading_numbering"] >= 1
 
 
-def test_section_opening_recap_compliance_excludes_first_section():
-    """§1 establishes the framework rather than recapping it, so the
-    recap rule applies to sections AFTER §1 only."""
+def test_section_opening_recap_compliance_grades_first_section():
+    """v3 (P2-Wave-3-§12.A, 2026-05-26) narrowed the §1 exemption to the
+    topic-restriction only — the prose-before-data requirement still
+    applies to the article opener, matching the canonical gate in
+    `scripts/p2_e_compliance.py`. Pre-v3 this scorer skipped §1, which
+    would have silently masked a table-first or list-first article
+    opener as compliant by default."""
     article = (
         "# T\n\n"
-        "## 1 Intro\nNo recap needed here.\n\n"
-        "## 2 Body\nRecap of framework from §1.\n\n"
+        "## 1 Intro\nThe framework establishes four canonical pillars.\n\n"
+        "## 2 Body\nThe Bronze rank originated in the Sanctuary arc.\n\n"
         "## 3 More\n| col1 | col2 |\n| --- | --- |\n| a | b |\n"  # table-first violation
     )
     scores = _score_section_opening_recap(article)
-    # 3 sections, 2 non-first. §2 has prose recap → compliant; §3 starts
+    # All 3 sections graded under v3. §1 + §2 open with prose; §3 opens
     # with a table → non-compliant.
-    assert scores["n_non_first_sections"] == 2
-    assert scores["n_with_recap"] == 1
+    assert scores["n_h2_sections"] == 3
+    assert scores["n_non_first_sections"] == 3
+    assert scores["n_with_recap"] == 2
+    assert scores["recap_compliance_rate"] == round(2 / 3, 3)
+
+
+def test_section_opening_recap_compliance_grades_table_first_section_one():
+    """v3 §1-grading regression test: a §1 that opens with a table must
+    be marked non-compliant. Pre-v3 the scorer would have returned this
+    as 100% compliant because it never inspected §1."""
+    article = (
+        "# T\n\n"
+        "## 1 Intro\n| col1 | col2 |\n| --- | --- |\n| a | b |\n\n"
+        "## 2 Body\nThe Bronze rank originated in the Sanctuary arc.\n"
+    )
+    scores = _score_section_opening_recap(article)
+    assert scores["n_h2_sections"] == 2
+    assert scores["n_with_recap"] == 1, scores
     assert scores["recap_compliance_rate"] == 0.5
 
 
@@ -428,20 +448,20 @@ def test_section_opening_recap_high_numbered_list_is_not_prose_recap():
     excluded from prose-recap-compliant counting."""
     article = (
         "# T\n\n"
-        "## 1 Intro\nIntro prose.\n\n"
+        "## 1 Intro\nThe franchise establishes four canonical pillars.\n\n"
         # §2 opens with item 7 of a numbered list — pre-fix this was
         # FALSELY counted as prose recap.
         "## 2 Section Two\n7. Seventh item from a larger enumeration.\n8. Eighth item.\n\n"
         # §3 opens with item 12 — also pre-fix false-positive.
         "## 3 Section Three\n12. Twelfth item from yet another list.\n\n"
-        # §4 has genuine prose recap.
-        "## 4 Section Four\nThis section recaps the framework from §1.\n"
+        # §4 has genuine prose.
+        "## 4 Section Four\nThe Bronze rank originated in the Sanctuary arc.\n"
     )
     scores = _score_section_opening_recap(article)
-    # 3 non-first sections (§2, §3, §4). §2 + §3 are list-first (NOT
-    # prose), §4 is prose-recap-compliant. So 1 of 3 compliant.
-    assert scores["n_non_first_sections"] == 3
-    assert scores["n_with_recap"] == 1, f"high-numbered list items wrongly counted as prose recap: {scores}"
+    # All 4 sections graded under v3. §1 + §4 are prose-compliant; §2 +
+    # §3 are list-first (NOT prose). So 2 of 4 compliant.
+    assert scores["n_non_first_sections"] == 4
+    assert scores["n_with_recap"] == 2, f"high-numbered list items wrongly counted as prose recap: {scores}"
 
 
 def test_section_opening_recap_subheading_is_not_prose_recap():
@@ -453,19 +473,19 @@ def test_section_opening_recap_subheading_is_not_prose_recap():
     article = (
         "# T\n\n"
         "## 1 Intro\n"
-        "Some intro text.\n\n"
+        "The franchise establishes four canonical pillars.\n\n"
         "## 2 Body\n"
         "### 2.1 First sub\n"  # subheading-first opening — should NOT count as prose recap
         "Sub body text.\n\n"
         "## 3 More\n"
-        "Real prose recap of framework from §1 applied here.\n"
+        "The Bronze rank originated in the Sanctuary arc.\n"
     )
     scores = _score_section_opening_recap(article)
-    # 2 non-first sections (§2 + §3). §2 opens with `###` subheading
-    # (NOT prose), §3 opens with prose. So only 1 of 2 is compliant.
-    assert scores["n_non_first_sections"] == 2
-    assert scores["n_with_recap"] == 1
-    assert scores["recap_compliance_rate"] == 0.5
+    # All 3 sections graded under v3. §1 + §3 open with prose; §2 opens
+    # with a `###` subheading (NOT prose). So 2 of 3 compliant.
+    assert scores["n_non_first_sections"] == 3
+    assert scores["n_with_recap"] == 2
+    assert scores["recap_compliance_rate"] == round(2 / 3, 3)
 
 
 def test_split_into_leaves_does_not_absorb_inter_h4_headings_into_preceding_leaf():
