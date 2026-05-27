@@ -330,6 +330,17 @@ def run(inp: ValidationInput) -> ValidationOutput:
     if fc_reuse is not None:
         counts["framing_chapter_reuse"] = fc_reuse
 
+    # 9b. TIER RANKING STRUCTURE + PRECISION (P3-W7.b). When the architect
+    # populated `plan["tier_ranking"]` (compare / predict archetypes with
+    # ≥5 entities and ≥4 dimensions), the chapter MUST carry a markdown
+    # scoring table with 2-decimal cells AND a sensitivity sub-section.
+    # Cross-PR consistency: weights keys should mirror framing_chapter
+    # rubric ids — divergence is flagged in `rubric_mismatch_keys`.
+    # Returns None when no chapter is in the plan; advisory severity.
+    tr_audit = _validate_tier_ranking(inp.article, inp.plan)
+    if tr_audit is not None:
+        counts["tier_ranking"] = tr_audit
+
     # 9. STAKEHOLDER CHAPTER OVERLAP (P3-W6; Greptile PR #42 round-2 wiring).
     # When the architect populated `plan["stakeholder_chapter"]` because the
     # prompt signaled plural audience, each stakeholder sub-section must
@@ -808,6 +819,191 @@ def _validate_stakeholder_overlap(article: str, stakeholder_chapter) -> dict | N
         "short_pairs": short_pairs,
         "missing_labels": missing_labels,
         "truncated_bodies": truncated_bodies,
+    }
+
+
+# P3-W7.b (2026-05-27): regexes for tier_ranking validator.
+#
+# `_TIER_RANKING_2DEC_RE` matches a 2-decimal score literal in the body,
+# scoped by `\b` boundaries so `7.45` matches but `7.452` (3 decimals)
+# and `1.234` and `7` and `7.5` do not.
+#
+# `_TIER_RANKING_3PLUS_DEC_RE` matches the disallowed 3+-decimal form,
+# used to reject articles that emit `7.452` style precision instead of
+# the Qianfan corpus's 2-decimal convention.
+#
+# Both regexes are pre-stripped of footnote markers + `§N.M` refs so
+# their internal digits don't cause false positives (mirrors the
+# limitations validator's pre-strip pattern from P3-W5.b).
+_TIER_RANKING_2DEC_RE = re.compile(r"(?<!\d)\b\d+\.\d{2}\b(?!\d)")
+_TIER_RANKING_3PLUS_DEC_RE = re.compile(r"(?<!\d)\b\d+\.\d{3,}\b(?!\d)")
+
+# Sensitivity sub-section heading detection. The W7.b directive teaches
+# the writer to use 'sensitivity' / '敏感性' / '±Npp' / '±N个百分点' as
+# heading-anchor tokens; the regex covers all 4 forms so EN / ZH /
+# symbolic-shorthand variants of the heading are all detected.
+#
+# Greptile pre-scan: `\b` word-boundary doesn't behave the same for CJK
+# characters. `\b敏感性\b` would FAIL on `敏感性分析` because `敏感性`
+# and `分析` are both word-character runs (no boundary between them in
+# Python regex). We therefore drop the `\b` and rely on substring
+# match within the heading line — false positives ("Insensitivity of X"
+# at heading level) are vanishingly rare in DRB-genre prose.
+#
+# Greptile PR #47 round-3: a 5th alternation `stress\s+test` was here
+# but undocumented in the comment, writer.py directive, and
+# `_TIER_RANKING_RULE`. Silent contract drift: a chapter with a
+# `### Stress Test Analysis` heading but no actual ±pp re-ranking
+# section would have `sensitivity_subsection_present=True` logged
+# even though the required computational content is absent. Also
+# conflicts terminology with P3-W5 `limitations_chapter.scenario_
+# stress_test` (a different architectural concept). Removed —
+# validator now matches the documented contract.
+_TIER_RANKING_SENSITIVITY_HEADING_RE = re.compile(
+    r"(?im)^#{2,4}\s+(?:\d+(?:\.\d+)*\s+)?.*(?:sensitivity|敏感性|±\s*\d+\s*(?:pp|个百分点|percentage\s+points))",
+)
+
+# Citation marker + § ref strip — re-used from limitations validator
+# pattern. Suppresses footnote-internal digits and chapter-ref digits
+# so `[^S7-2.45]` and `§7.45` don't false-positive the 2-decimal regex.
+_TIER_RANKING_NOISE_STRIP_RE = re.compile(r"\[\^[^\]]*\]|§\d+(?:\.\d+)*")
+
+
+def _validate_tier_ranking(article: str, plan: dict) -> dict | None:
+    """P3-W7.b (2026-05-27): structural + precision + sensitivity audit
+    on the tier_ranking chapter.
+
+    Returns None when no `tier_ranking` is active in the plan.
+    Otherwise:
+      {
+        "n_weights": int,             # weight entries the architect emitted
+        "n_tiers": int,
+        "scoring_table_present": bool,  # markdown table found in chapter region
+        "two_decimal_cells": int,      # number of `\\b\\d+\\.\\d{2}\\b` matches
+                                        # in chapter body (after noise strip)
+        "three_plus_decimal_cells": int,  # cells violating the 2-decimal rule
+        "decimal_precision_ok": bool,  # ≥1 two-dec cell AND 0 three-plus
+        "sensitivity_subsection_present": bool,
+        "rubric_mismatch_keys": [str],  # tier_ranking.weights keys NOT in
+                                        # framing_chapter.published_rubric_items
+                                        # (cross-PR consistency check)
+      }
+
+    Advisory severity — surfaced in `counts["tier_ranking"]` for drift
+    telemetry; does NOT block the validation gate. The corrective signal
+    is the (deferred) compliance scorer.
+    """
+    tr = plan.get("tier_ranking")
+    if not isinstance(tr, dict):
+        return None
+    weights = tr.get("weights")
+    tiers = tr.get("tiers")
+    if not isinstance(weights, dict) or not isinstance(tiers, list):
+        return None
+    # Filter weights to numeric only (mirror writer.py filter — bool
+    # subclass of int trap from W7 PR #43 round-3).
+    numeric_weights = {k: v for k, v in weights.items() if isinstance(v, (int, float)) and not isinstance(v, bool)}
+    valid_tiers = [t for t in tiers if isinstance(t, dict) and t.get("name")]
+    if not numeric_weights or not valid_tiers:
+        return None
+
+    # Locate the chapter region by title match (mirrors framing /
+    # limitations / stakeholder pattern). If the title isn't found,
+    # the chapter wasn't rendered — return an all-zero audit for
+    # drift visibility rather than None (None means "skip", but here
+    # the architect DID plan the chapter — non-render is a defect).
+    title = str(tr.get("title", "")).strip()
+    chapter_start = -1
+    chapter_end = len(article)
+    if title:
+        # Allow h1 OR h2 OR h3 for the chapter heading (`# Tier Ranking`,
+        # `## 7 Tier Ranking`, `### 7.1 Tier Ranking` all match). Capture
+        # the hash run as group 1 so the chapter-end boundary can be
+        # built at the SAME level — see below.
+        #
+        # End-anchor `(?=\s*(?:$|[:\-—–]))` prevents the prefix-collision
+        # class fixed in `_validate_stakeholder_overlap` (PR #42 round-7
+        # commit `4d420a9`) from recurring here: without the anchor,
+        # title `"Tier Ranking"` would silently match a heading like
+        # `## 7 Tier Ranking Considerations`, extracting the wrong
+        # chapter's body. Accepts the title followed by end-of-line OR a
+        # known heading terminator (colon, dash, em-dash, en-dash).
+        m = re.search(
+            r"(?m)^(#{1,3})\s+(?:\d+(?:\.\d+)*\s+)?" + re.escape(title) + r"(?=\s*(?:$|[:\-—–]))",
+            article,
+            re.IGNORECASE,
+        )
+        if m is not None:
+            chapter_start = m.end()
+            # Greptile PR #47 round-2: end the chapter scan at the next
+            # SIBLING-or-higher heading. The chapter's own sub-sections
+            # (e.g. the sensitivity sub-heading) sit ONE level deeper
+            # than the chapter heading itself, so ending at the chapter
+            # level keeps them inside the scanned region while preventing
+            # bleed into sibling chapters at the same level. The prior
+            # fixed `#{1,2}` boundary worked for h2 chapters but caused
+            # an h3 chapter (`### 7.3 Tier Ranking`) to absorb its h3
+            # siblings (`### 7.4 …`) — those siblings' tables and
+            # sensitivity headings then registered as passing for the
+            # actual (potentially empty) tier-ranking chapter, yielding
+            # false-positive drift telemetry.
+            chapter_hash_count = len(m.group(1))
+            next_h = re.search(
+                rf"\n#{{1,{chapter_hash_count}}}\s+",
+                article[chapter_start:],
+            )
+            chapter_end = chapter_start + next_h.start() if next_h else len(article)
+    chapter_body = article[chapter_start:chapter_end] if chapter_start >= 0 else ""
+
+    # Pre-strip footnote markers + § refs so their internal digits don't
+    # false-positive the 2-dec / 3+-dec regex.
+    scannable_body = _TIER_RANKING_NOISE_STRIP_RE.sub("", chapter_body)
+
+    # Scoring table presence: detect a markdown table pipe pattern
+    # within the chapter region (heuristic — 2+ consecutive lines with
+    # ≥3 pipe chars each indicates a markdown table).
+    scoring_table_present = False
+    pipe_lines = 0
+    for line in chapter_body.splitlines():
+        if line.count("|") >= 3:
+            pipe_lines += 1
+            if pipe_lines >= 2:
+                scoring_table_present = True
+                break
+        else:
+            pipe_lines = 0
+
+    two_dec_cells = len(_TIER_RANKING_2DEC_RE.findall(scannable_body))
+    three_plus_dec_cells = len(_TIER_RANKING_3PLUS_DEC_RE.findall(scannable_body))
+    decimal_precision_ok = two_dec_cells >= 1 and three_plus_dec_cells == 0
+
+    sensitivity_subsection_present = bool(_TIER_RANKING_SENSITIVITY_HEADING_RE.search(chapter_body))
+
+    # Cross-PR consistency: tier_ranking.weights keys SHOULD mirror the
+    # framing_chapter.published_rubric_items ids. When both are present
+    # in the plan, any tier_ranking weight key NOT in the rubric is
+    # flagged. Audit-only (advisory) — the architect MAY produce a
+    # weight key that doesn't appear in the rubric (e.g., a composite
+    # weight added downstream), but a divergence is worth surfacing.
+    rubric_mismatch_keys: list[str] = []
+    fc = plan.get("framing_chapter")
+    if isinstance(fc, dict):
+        rubric_items = fc.get("published_rubric_items") or []
+        rubric_ids = {str(r.get("id")) for r in rubric_items if isinstance(r, dict) and r.get("id")}
+        if rubric_ids:
+            for k in numeric_weights:
+                if k not in rubric_ids:
+                    rubric_mismatch_keys.append(k)
+
+    return {
+        "n_weights": len(numeric_weights),
+        "n_tiers": len(valid_tiers),
+        "scoring_table_present": scoring_table_present,
+        "two_decimal_cells": two_dec_cells,
+        "three_plus_decimal_cells": three_plus_dec_cells,
+        "decimal_precision_ok": decimal_precision_ok,
+        "sensitivity_subsection_present": sensitivity_subsection_present,
+        "rubric_mismatch_keys": rubric_mismatch_keys,
     }
 
 

@@ -338,6 +338,58 @@ _MERMAID_DIRECTIVE = (
 )
 
 
+# P3-W7.b (2026-05-27): TIER RANKING + SENSITIVITY CHECK rule.
+#
+# System-prompt summary of the weighted-scoring discipline + 2-decimal
+# precision + ±10pp sensitivity check. The heavy lifting (entity-
+# specific weights / tiers payload) is in the writer.py user-prompt
+# `tier_ranking_block`. Qianfan corpus-verified pattern: 3-5/11
+# articles, distinctive in q14 §7.3-§7.6 and q3 §8.1. Architect-side
+# schema at architect.py:153-179; post-write validator
+# `_validate_tier_ranking` at validation.py enforces table-row count,
+# 2-decimal precision (no 1-dec or 3+-dec cells), sensitivity sub-
+# section heading detection, and rubric-id cross-reference with
+# framing_chapter.
+_TIER_RANKING_RULE = (
+    "TIER RANKING + SENSITIVITY CHECK (P3-W7; applies when "
+    "`tier_ranking` is in the plan — compare / predict archetypes "
+    "with ≥5 entities and ≥4 rubric dimensions):\n"
+    "The chapter has 4 required parts:\n"
+    "  1. Opening: state the scoring formula explicitly (e.g., "
+    "S_final = Σ(weight_i × dim_i)); cite §1 rubric items by id "
+    "(R-1, R-2, ...) so weights trace to the published rubric.\n"
+    "  2. Scoring table — markdown:\n"
+    "     - Rows = entities (from §1 entity_matrix).\n"
+    "     - Columns = entity name + each rubric dimension score + "
+    "S_final + tier.\n"
+    "     - ALL scores reported to 2 DECIMAL PLACES (e.g., 7.45, "
+    "6.32, 8.81). NEVER 7.5 or 7. NEVER 7.452. The validator rejects "
+    "cells with 1-decimal or 3+-decimal precision.\n"
+    "  3. Tier assignment: each entity placed per the thresholds; "
+    "1-2 sentence rationale per entity naming the dominant dimension.\n"
+    # Greptile PR #47 round-6: keep the rerank instruction protocol-
+    # neutral (`±Npp`) to match the heading-anchor hint on the same
+    # line. The exact value is interpolated by the user-prompt
+    # `tier_ranking_block` from `plan.tier_ranking.sensitivity_check
+    # .perturbation_pp` (default 10, validator accepts 5-20). Prior
+    # `±10pp` literal here contradicted the user prompt whenever the
+    # plan specified a non-default perturbation — two conflicting
+    # instructions in the same LLM call.
+    "  4. Sensitivity check sub-section (heading must contain "
+    "'sensitivity' / '敏感性' / '±Npp'): re-rank under ±Npp "
+    "perturbation of each weight (the exact N is interpolated by the "
+    "user-prompt directive from `plan.tier_ranking.sensitivity_check"
+    ".perturbation_pp`); report:\n"
+    "     - Number of entities that change tier under perturbation.\n"
+    "     - The most-sensitive weight (highest tier-shift count).\n"
+    "     - A rank-stability table: scenarios × entities → tier.\n"
+    "Sensitivity check MUST be COMPUTATIONAL — produce actual "
+    "recomputed S_final values, not narrative prose. The validator "
+    "checks for table structure (2-decimal cells + sensitivity sub-"
+    "heading); narrative-only sensitivity sections fail."
+)
+
+
 # P3-W5.b (2026-05-27): LIMITATIONS CHAPTER STRUCTURE rule.
 #
 # System-prompt summary of the 5-sub-section discipline + falsification
@@ -913,6 +965,7 @@ def writer_system(
     outline_shape: dict | None = None,
     has_stakeholder_chapter: bool = False,
     has_limitations_chapter: bool = False,
+    has_tier_ranking: bool = False,
 ) -> str:
     """Assemble the writer system prompt.
 
@@ -956,6 +1009,18 @@ def writer_system(
     predict / compare / explain-mechanism / list-all archetypes when
     `limitations_chapter` is in the plan") still kicks in if a future
     caller forgets to set the flag, so silent breakage is impossible.
+
+    Greptile PR #47 round-5 preempt (2026-05-27): `has_tier_ranking`
+    gates `_TIER_RANKING_RULE` inclusion under the same rationale.
+    The architect only emits `plan["tier_ranking"]` for compare /
+    predict archetypes with ≥5 entities AND ≥4 rubric dimensions —
+    the minority of tasks. For everything else the ~700-char rule is
+    pure prompt noise. Mirrors the `has_stakeholder_chapter` pattern
+    and the parallel `has_limitations_chapter` gating in W5.b.
+    Callers in writer.py pass
+    `has_tier_ranking=bool(plan.get("tier_ranking"))`. Defaults False;
+    the rule's textual self-guard ("applies when `tier_ranking` is in
+    the plan…") prevents silent breakage if a future caller forgets.
     """
     ceil = length_ceiling(domain)
 
@@ -998,6 +1063,15 @@ def writer_system(
     # `has_stakeholder_chapter` precedent below.
     if has_limitations_chapter:
         middle_rules.append(_LIMITATIONS_RULE)
+    # Greptile PR #47 round-5 preempt: gate `_TIER_RANKING_RULE` on
+    # `has_tier_ranking`. The architect only populates
+    # `plan["tier_ranking"]` for compare / predict archetypes with
+    # ≥5 entities AND ≥4 rubric dimensions — the minority of tasks.
+    # For everything else the ~700-char rule is pure prompt noise.
+    # Mirrors the `has_stakeholder_chapter` precedent below and the
+    # parallel `has_limitations_chapter` gating from W5.b.
+    if has_tier_ranking:
+        middle_rules.append(_TIER_RANKING_RULE)
     # Greptile PR #46 round-1 issue #2: gate `_STAKEHOLDER_RULE` on
     # `has_stakeholder_chapter`. The architect only emits
     # `plan["stakeholder_chapter"]` for plural-audience prompts; for
