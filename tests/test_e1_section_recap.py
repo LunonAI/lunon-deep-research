@@ -165,7 +165,7 @@ def test_v4_keeps_bare_pointer_forbidden(monkeypatch):
     # example variants so the writer sees the failure mode.
     assert "BARE '§N'" in forbidden_section or "bare-pointer-as-recap" in forbidden_section
     # At least one of the concrete bare-pointer examples must be present.
-    assert "As discussed in §1" in sys or "Per §3" in forbidden_section or "如§1所述" in forbidden_section
+    assert "As discussed in §1" in forbidden_section or "Per §3" in forbidden_section or "如§1所述" in forbidden_section
 
 
 def test_v3_forbids_this_section_meta_subject(monkeypatch):
