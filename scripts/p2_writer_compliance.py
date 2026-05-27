@@ -245,8 +245,23 @@ _CAUSAL_CHAIN_RE = re.compile(
     r"\b(?:leads?|led|leading) to\b|"
     r"\b(?:results?|resulted) in\b|"
     r"\b(?:gives?|gave|giving) rise to\b|"
-    # Explicit chain connectors that require a prior cause to make sense.
-    r"\bin turn\b|"
+    # Chain connectors with "in turn" — narrowed to chain-context only.
+    # Greptile PR #34 round-3 follow-up (2026-05-26): bare `\bin turn\b`
+    # fired equally on ordinal enumeration ("each scenario reviewed in
+    # turn") and the chain connector ("which in turn..."). When an
+    # analytical leaf contained ordinal `in turn` PLUS one causal verb
+    # — e.g. "The team assessed each scenario in turn, which led to a
+    # consensus" — findall returned 2 matches and the ≥2 threshold
+    # classified the leaf as causal_chain=True despite containing only
+    # one actual causal link. Tightened to require explicit chain syntax:
+    #   - "which in turn" / "that in turn"  — relative-clause chain
+    #   - ", in turn," / ", in turn."        — parenthetical chain
+    #     (comma BEFORE in turn is what disambiguates from ordinal use)
+    #   - sentence-initial "In turn,"        — chain after a period or
+    #     at string start
+    r"\b(?:which|that) in turn\b|"
+    r",\s+in turn[,\.]|"
+    r"(?:^|\.\s+)in turn,|"
     # "Which X" where X is a causation verb — explicit second-link syntax.
     r"\bwhich (?:produces|produced|enables|enabled|drives|drove|leads|led|"
     r"causes|caused|results in|resulted in)\b|"
