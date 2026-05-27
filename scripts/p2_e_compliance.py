@@ -165,7 +165,7 @@ def e1_section_opening_recap(article: str) -> dict:
         return {"n_sections": 0, "n_compliant": 0, "rate": 0.0, "applicable": False}
     candidates = sections
     n_compliant = 0
-    n_only_structural = 0  # prose lead but uses v3-forbidden opener vocab
+    n_only_structural = 0  # prose lead but uses v4-forbidden opener vocab
     n_only_semantic = 0  # opener vocab clean but data-block-first
     n_neither = 0
     per_section = []
