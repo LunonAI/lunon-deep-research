@@ -102,6 +102,9 @@ def write_opening(plan, prompt, language, archetype, domain, digest, *, task_id=
     # chapter. The architect emits stakeholder_chapter as None for
     # single-audience prompts; bool() correctly yields False on None
     # and on empty dicts.
+    # Greptile PR #45 round-6 issue #2 (2026-05-27): same pattern for
+    # `has_limitations_chapter` — trend / recommend archetypes never
+    # carry the chapter, so the ~1300-char rule is omitted there.
     sys = wr.writer_system(
         archetype,
         domain,
@@ -110,6 +113,7 @@ def write_opening(plan, prompt, language, archetype, domain, digest, *, task_id=
         task_id=task_id,
         outline_shape=outline_shape,
         has_stakeholder_chapter=bool(plan.get("stakeholder_chapter")),
+        has_limitations_chapter=bool(plan.get("limitations_chapter")),
     )
     user = (
         f"PROMPT ({language}):\n{prompt}\n\nREPORT TITLE: "
@@ -186,6 +190,9 @@ def write_section(
     # `has_stakeholder_chapter` flag from `write_opening`. The per-
     # section call assembles the same system prompt; the architect's
     # decision lives on the plan, not the unit.
+    # Greptile PR #45 round-6 issue #2 (2026-05-27): same for
+    # `has_limitations_chapter` — must match `write_opening` to keep
+    # both call sites symmetric (plan-driven, not unit-driven).
     sys = wr.writer_system(
         archetype,
         domain,
@@ -194,6 +201,7 @@ def write_section(
         task_id=task_id,
         outline_shape=outline_shape,
         has_stakeholder_chapter=bool(plan.get("stakeholder_chapter")),
+        has_limitations_chapter=bool(plan.get("limitations_chapter")),
     )
 
     capel_block = ""
@@ -444,6 +452,85 @@ def write_section(
                     )
                 framing_block = "\n".join(parts) + "\n"
 
+    # P3-W5.b (2026-05-27): LIMITATIONS CHAPTER CONTRACT injection.
+    #
+    # The architect populates `plan["limitations_chapter"]` (architect.py
+    # schema lines 180-210) for predict / compare / explain-mechanism /
+    # list-all archetypes with 5 sub-section types (data_granularity,
+    # scope_cap, time_validity, sampling, falsifiers). The post-merge
+    # audit on `main` found that while the architect plans this chapter,
+    # the writer had no in-prompt directive instructing it to render the
+    # 5 sub-sections — the chapter showed up in the TOC but the writer
+    # produced generic prose. This block matches `framing_block`'s
+    # pattern (title-gated extraction + JSON serialisation + prose
+    # contract) so the writer LLM sees explicit instructions ONLY when
+    # the section currently being written IS the limitations chapter.
+    # Qianfan corpus-verified pattern: 6/11 articles. Engineering-grade
+    # falsification — each sub-section must name a concrete entity,
+    # year, or rubric item (avoid "this report has limitations" boiler-
+    # plate). For predict archetype with `scenario_stress_test` populated,
+    # an extra sub-section recomputes the tier_ranking (from P3-W7
+    # framing-rubric weights) under 3 scenarios (base / optimistic /
+    # pessimistic) with a rank-stability table.
+    limitations_block = ""
+    lc = plan.get("limitations_chapter")
+    if isinstance(lc, dict) and unit.get("title") and unit["title"] == lc.get("title"):
+        sub_sections = [s for s in (lc.get("sub_sections") or []) if isinstance(s, dict)]
+        # Greptile PR #45 round-5 issue #1 (2026-05-27): assign
+        # `scenario_stress_test` once instead of calling `lc.get(...)`
+        # twice (one inside `isinstance(...)`, one as the value). The
+        # double-call was fragile to future renames or property wraps —
+        # a single lookup is canonical.
+        _sst_raw = lc.get("scenario_stress_test")
+        sst = _sst_raw if isinstance(_sst_raw, dict) else None
+        if sub_sections:
+            parts = [
+                "\nLIMITATIONS CHAPTER CONTRACT (P3-W5; this section IS the "
+                "limitations chapter — engineering-grade falsification, Qianfan "
+                "corpus-verified pattern in 6/11 articles):"
+            ]
+            parts.append(f"  5 REQUIRED sub-sections: {json.dumps(sub_sections, ensure_ascii=False)}")
+            parts.append(
+                "  Each sub-section type drives content (each MUST name a "
+                "concrete entity, year, or rubric item — generic 'this report "
+                "has limitations' boilerplate is forbidden):\n"
+                "    - data_granularity: name a SPECIFIC observable the article's "
+                "sources could not resolve (2+ sentences naming the gap).\n"
+                "    - scope_cap: cite the §1 framing-chapter scope boundary "
+                "verbatim; name what the article does NOT cover (population, "
+                "region, technology, time-window).\n"
+                "    - time_validity: name a SPECIFIC year/phase boundary after "
+                "which the article's conclusions may stop holding (e.g., 'beyond "
+                "2028 the regulatory regime is expected to change, invalidating "
+                "the §3.2 cost projections').\n"
+                "    - sampling: name an under-represented entity class or "
+                "population whose perspective is not in the source base, with "
+                "one sentence on the bias direction.\n"
+                "    - falsifiers: name 2-3 SPECIFIC empirical observations that "
+                "would refute the article's main claims (drawing on §1.2 rubric "
+                "items for falsification axes — cite them by R-N id).\n"
+                "  Each sub-section: 150-300 words. Avoid the lazy form 'data "
+                "is limited / scope is constrained' — every sentence must point "
+                "to a concrete, checkable gap."
+            )
+            if sst is not None:
+                scenarios = sst.get("scenarios") or ["base", "optimistic", "pessimistic"]
+                recompute_target = sst.get("recompute_target") or "tier_ranking"
+                parts.append(
+                    "  SCENARIO STRESS TEST (predict archetype with tier_ranking — "
+                    "append as the FINAL sub-section after the 5 above):\n"
+                    f"    Scenarios: {json.dumps(scenarios, ensure_ascii=False)}\n"
+                    f"    Recompute the {recompute_target} from the prior chapter "
+                    "under each scenario. Render a markdown table with columns: "
+                    "Scenario | Top-Ranked Entity | Number of entities that "
+                    "moved tier vs base.\n"
+                    "    Interpretation directive: <3 tier shifts across scenarios "
+                    "= conclusions are robust; ≥3 shifts = conclusions are "
+                    "sensitive to scenario assumptions (acknowledge this "
+                    "explicitly in the closing sentence of the sub-section)."
+                )
+            limitations_block = "\n".join(parts) + "\n"
+
     # P3-W6.b (2026-05-27): STAKEHOLDER-SEGMENTED CLOSING CONTRACT injection.
     #
     # The architect populates `plan["stakeholder_chapter"]` (architect.py
@@ -529,6 +616,7 @@ def write_section(
         f"{depth_block}"
         f"{entity_matrix_block}"
         f"{framing_block}"
+        f"{limitations_block}"
         f"{stakeholder_block}"
         f"REPORT OUTLINE (titles only, for coherence): "
         f"{json.dumps(prior_titles, ensure_ascii=False)}\n\n"
