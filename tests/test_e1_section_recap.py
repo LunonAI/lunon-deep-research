@@ -1,8 +1,24 @@
-"""Unit tests for P2-Wave-2.5-E1 — section-opening framework-recap directive.
+"""Unit tests for the section-opening prose-lead directive.
 
-Single-variable change replacing the bundled Wave 2.5 push. Verifies the
-rule is present in `writer_system()` output and the rule body names the
-calibration source (Qianfan methodology research).
+History:
+- v1 (early 2026-05-23): "framework recap" rule that assumed prose openings;
+  silently failed on table-first sections (id=91 pilot: 0/50 compliance).
+- v2 (2026-05-23): fixed the structural blind-spot by mandating prose-
+  before-table even when primary content is a table. Templates encouraged
+  "Building on §N..." style framework recaps with §N refs.
+- v3 (2026-05-26, gap-map §12.A): post-PR-31 fresh-corpus A/B retro
+  showed v2's "Calibrated against Qianfan #1" claim was BACKWARDS. Live
+  leaderboard #1 vintage uses the "Building on §N..." template at 0%
+  (vs Lunon's 77%); judge flagged the result as "repeated setup language"
+  and "forward references to missing sections". v3 keeps the prose-before-
+  table requirement but drops the recap templates, §N opening refs, and
+  meta-subject openings ("this section"). Opening templates are now
+  modeled on verified Qianfan chapter openers.
+
+The tests below pin BOTH the structural requirement that survived v3 AND
+the v3-specific antipattern bans, so any future regression to "Building
+on §X..." or "this section" openings fails loud locally before the
+writer ships it again.
 """
 
 from deep_research import writing_rules as wr
@@ -13,89 +29,150 @@ def _sys(monkeypatch) -> str:
     return wr.writer_system("compare", "default", "en", ["A", "B"])
 
 
-def test_section_recap_rule_present_in_writer_system(monkeypatch):
+# --- structural requirements preserved from v2 ---------------------------
+
+
+def test_prose_lead_rule_present_in_writer_system(monkeypatch):
     sys = _sys(monkeypatch)
-    assert "SECTION-OPENING FRAMEWORK RECAP" in sys
+    assert "SECTION-OPENING PROSE LEAD" in sys
 
 
-def test_recap_rule_names_calibration_source(monkeypatch):
+def test_rule_names_calibration_source(monkeypatch):
+    """The rule body must reference the gap-map section / wave tag so
+    future engineers can trace WHY this rule shipped in this form."""
     sys = _sys(monkeypatch)
-    # The body must reference the methodology research so future engineers
-    # can trace WHY this rule is shipped.
-    assert "framework" in sys
-    assert "P2-Wave-2.5-E1" in sys
+    assert "§12.A" in sys
+    assert "Qianfan" in sys
 
 
-def test_recap_rule_provides_both_en_and_zh_templates(monkeypatch):
+def test_rule_exempts_first_section(monkeypatch):
+    """The first section (article opener) is exempt from the topic-
+    restriction — it establishes the framework rather than diving into
+    a sub-topic. The prose-before-table requirement still applies."""
     sys = _sys(monkeypatch)
-    assert "Building on the framework introduced" in sys
-    assert "沿用第一节框架" in sys
-
-
-def test_recap_rule_exempts_first_section(monkeypatch):
-    sys = _sys(monkeypatch)
-    # The directive must explicitly carve out §1 (the framework-establishing
-    # section), otherwise the writer applies a recap to the article opener
-    # itself, creating a logic gap.
-    assert "first section" in sys.lower() or "first chapter" in sys.lower()
+    body = sys.lower()
+    assert "first section" in body or "first chapter" in body
     assert "EXEMPT" in sys
 
 
-def test_recap_rule_forbids_disconnected_topic_statements(monkeypatch):
+def test_rule_forbids_disconnected_topic_statements(monkeypatch):
+    """The FORBIDDEN list must name the failure mode (stating topic
+    with no substantive claim reads as disconnected exposition)."""
     sys = _sys(monkeypatch)
-    # The forbidden-pattern list must name the failure mode (stating topic
-    # with no framework link reads as disconnected exposition).
     assert "FORBIDDEN opening patterns" in sys
-    assert "disconnected exposition" in sys or "no link" in sys
+    assert "disconnected exposition" in sys
 
 
-def test_recap_rule_ordering_after_cleaning_rule(monkeypatch):
-    """The recap rule must appear AFTER the cleaning-resistant attribution
-    rule so the writer reads attribution discipline first, then layers the
-    rhetorical move on top."""
+def test_rule_ordering_after_cleaning_rule(monkeypatch):
+    """The prose-lead rule must appear AFTER the source-attribution
+    rule so the writer reads attribution discipline first, then layers
+    the rhetorical move on top."""
     sys = _sys(monkeypatch)
     idx_cleaning = sys.find("SOURCE ATTRIBUTION")
-    idx_recap = sys.find("SECTION-OPENING FRAMEWORK RECAP")
-    assert 0 < idx_cleaning < idx_recap
+    idx_lead = sys.find("SECTION-OPENING PROSE LEAD")
+    assert 0 < idx_cleaning < idx_lead
 
 
-# --- v2-specific: table-aware structural mandate ---------------------------
-
-
-def test_v2_mandates_prose_before_table(monkeypatch):
-    """v1's compliance failure mode on id=91 (0/50) was table-first sections
-    with no prose lead. v2 must explicitly mandate prose-paragraph-then-table."""
+def test_mandates_prose_before_table(monkeypatch):
+    """v1's compliance failure mode on id=91 (0/50) was table-first
+    sections with no prose lead. v2 mandated prose-paragraph-then-table.
+    v3 preserves this requirement — it's the part of v2 that worked."""
     sys = _sys(monkeypatch)
     body = sys.lower()
-    assert "prose-paragraph-then-table" in body or ("prose paragraph" in body and "before any data block" in body)
+    assert "prose-paragraph-then-data" in body or ("prose paragraph" in body and "before any data block" in body)
 
 
-def test_v2_forbids_table_first_openings(monkeypatch):
+def test_forbids_table_first_openings(monkeypatch):
     """The forbidden list must explicitly name 'opening with a markdown
-    table' as a failure mode so the writer knows the structural rule isn't
-    optional or interpretive."""
+    table' as a failure mode so the writer knows the structural rule
+    isn't optional or interpretive."""
     sys = _sys(monkeypatch)
-    assert "Opening with a markdown table" in sys or "markdown table" in sys.lower()
+    body = sys.lower()
+    assert "opening with a markdown table" in body
 
 
-def test_v2_narrows_section_number_reference_rule(monkeypatch):
-    """Bonus-audit narrowing: §N references are GOOD when paired with a
-    named artefact, BAD as bare temporal pointers. v2 must encode both
-    sides — the GOOD pattern (named artefact) and the BAD pattern
-    ('bare temporal pointers')."""
+# --- v3-specific: Qianfan-parity antipattern bans -----------------------
+
+
+def test_v3_marker_present(monkeypatch):
+    """Version marker pins the rule's iteration. A future revision that
+    forgets to bump the marker fails this test, surfacing the missing
+    audit trail."""
     sys = _sys(monkeypatch)
-    assert "named artefact" in sys.lower() or "named artifact" in sys.lower()
-    assert "bare temporal pointers" in sys.lower() or "as discussed in §" in sys
+    assert "P2-Wave-3-§12.A.v3" in sys
 
 
-def test_v2_marker_present(monkeypatch):
+def test_v3_forbids_building_on_template(monkeypatch):
+    """The 'Building on §X...' template fired ~77% in pre-v3 Lunon and 0%
+    in Qianfan #1; v3 forbids it explicitly in the antipattern list."""
     sys = _sys(monkeypatch)
-    assert "E1.v2" in sys
+    # The rule body must call this out by name in the forbidden list so a
+    # writer that emits 'Building on the framework introduced in §1...'
+    # has been told that exact phrasing is wrong.
+    forbidden_idx = sys.find("FORBIDDEN opening patterns")
+    assert forbidden_idx > 0
+    assert "'Building on [the framework" in sys[forbidden_idx:]
 
 
-def test_v2_template_demonstrates_prose_then_table(monkeypatch):
-    """Acceptable templates must SHOW the prose-then-table pattern via
-    concrete examples — not just abstractly mandate it. The writer copies
-    patterns it sees in the prompt; abstract mandates are weaker."""
+def test_v3_forbids_section_n_refs_in_openings(monkeypatch):
+    """§N refs in opening sentences was a v2 allowance that produced the
+    judge-flagged 'forward references to missing sections' bug. v3
+    forbids §N refs in openings entirely (still allowed in body text
+    per the unchanged narrowing)."""
     sys = _sys(monkeypatch)
-    assert "table below records" in sys or "matrix below" in sys or "table records" in sys
+    forbidden_idx = sys.find("FORBIDDEN opening patterns")
+    # The §N-in-openings antipattern must appear in the forbidden list AND
+    # the body narrowing must explicitly carve openings out of the
+    # 'named artefact OK' allowance.
+    assert "ANY '§N'" in sys[forbidden_idx:]
+    assert "OPENING-SENTENCE FORBIDDEN-§N RULE OVERRIDES" in sys
+
+
+def test_v3_forbids_this_section_meta_subject(monkeypatch):
+    """'This section/chapter/report' as the opening subject is meta-
+    narration; Qianfan opens with the substantive topic noun. v3 names
+    this as a forbidden antipattern."""
+    sys = _sys(monkeypatch)
+    forbidden_idx = sys.find("FORBIDDEN opening patterns")
+    section_of_rule = sys[forbidden_idx:]
+    assert "'This section'" in section_of_rule
+    assert "'This chapter'" in section_of_rule
+    assert "'This report'" in section_of_rule
+
+
+def test_v3_acceptable_templates_are_substantive_not_recap(monkeypatch):
+    """v2's acceptable templates were all 'Building on...' / 'Applied
+    to...' recap variants. v3 replaces them with subject-noun-first
+    openings modeled on verified Qianfan chapter openers — definition,
+    quantified-claim, factual-anchor, substantive-contextualisation."""
+    sys = _sys(monkeypatch)
+    acceptable_idx = sys.find("Acceptable opening patterns (EN")
+    assert acceptable_idx > 0
+    # Each of the four v3 EN templates must be named so future readers
+    # see the substantive shape of valid openings.
+    assert "Definition opening" in sys
+    assert "Quantified-claim opening" in sys
+    assert "Factual-anchor opening" in sys
+    assert "Substantive-contextualisation opening" in sys
+
+
+def test_v3_provides_both_en_and_zh_acceptable_templates(monkeypatch):
+    """Bilingual coverage preserved: v3 must offer both EN templates
+    (modeled on verified Qianfan EN samples) and ZH templates (modeled
+    on Qianfan ZH samples)."""
+    sys = _sys(monkeypatch)
+    assert "Acceptable opening patterns (EN" in sys
+    assert "Acceptable opening patterns (ZH" in sys
+    # At least one ZH template token must appear so the bilingual
+    # coverage isn't an empty header.
+    assert "主题名词" in sys
+
+
+def test_v3_body_narrowing_preserved_for_named_artefacts(monkeypatch):
+    """The v2 body-text narrowing — §N refs in BODY are GOOD when paired
+    with a named artefact, BAD as bare temporal pointers — is preserved
+    by v3. Only OPENING-sentence §N refs are newly forbidden."""
+    sys = _sys(monkeypatch)
+    body = sys.lower()
+    assert "named artefact" in body
+    assert "bare temporal pointers" in body
