@@ -168,3 +168,161 @@ def test_normalize_handles_malformed_tiers_field():
     architect._normalize(plan, archetype="predict")
     tr = plan["tier_ranking"]
     assert tr["tiers"] == []
+
+
+# --------------------------------------------------------------------------
+# Greptile PR #43 round-2 — non-list entity_matrix.entities must not falsely
+# trigger tier_ranking requirement, and the perturbation_pp constant must
+# have runtime enforcement (not just dead documentation).
+# --------------------------------------------------------------------------
+
+
+def test_normalize_predict_with_string_entities_does_not_trigger_tier_ranking():
+    """Greptile PR #43 round-2: if the LLM emits `entity_matrix.entities` as
+    a comma-separated string (`"E1, E2, E3, E4, E5"`) instead of a list, the
+    `or []` guard previously let it through and `len()` returned the
+    character count (18), spuriously triggering `tr_is_required=True` for
+    "predict" plans where entity_matrix normalization doesn't run pre-tier.
+    The fix is an explicit isinstance(list) check: a non-list value yields
+    `em_entities=[]`, `len()=0`, `tr_is_required=False`."""
+    plan = _bare_plan_with_tr()
+    plan["entity_matrix"]["entities"] = "E1, E2, E3, E4, E5, E6, E7"  # string, not list
+    plan.pop("tier_ranking")
+    architect._normalize(plan, archetype="predict")
+    audit = plan["_outline_audit"]
+    tr_sf = [s for s in audit["shortfalls"] if "tier_ranking=missing" in s]
+    assert tr_sf == [], f"non-list entities should not trigger tier_ranking requirement; got {tr_sf}"
+
+
+def test_normalize_predict_with_dict_entities_does_not_trigger_tier_ranking():
+    """Symmetric guard: dict-valued entities (another plausible LLM
+    malformation) must also fall through to `em_entities=[]`."""
+    plan = _bare_plan_with_tr()
+    plan["entity_matrix"]["entities"] = {"E1": 1, "E2": 2}  # dict, not list
+    plan.pop("tier_ranking")
+    architect._normalize(plan, archetype="predict")
+    audit = plan["_outline_audit"]
+    tr_sf = [s for s in audit["shortfalls"] if "tier_ranking=missing" in s]
+    assert tr_sf == []
+
+
+def test_normalize_predict_with_none_entity_matrix_does_not_trigger_tier_ranking():
+    """Pin the original pre-fix `or []` behavior is preserved when
+    `entity_matrix` itself is None (the case the original guard targeted)."""
+    plan = _bare_plan_with_tr()
+    plan["entity_matrix"] = None
+    plan.pop("tier_ranking")
+    architect._normalize(plan, archetype="predict")
+    audit = plan["_outline_audit"]
+    tr_sf = [s for s in audit["shortfalls"] if "tier_ranking=missing" in s]
+    assert tr_sf == []
+
+
+def test_normalize_perturbation_pp_constants_pinned():
+    """Greptile PR #43 round-2: the band constants must be pinned so a
+    future tweak that widens them is a deliberate test edit, not silent
+    behavior drift."""
+    assert architect._TIER_RANKING_PERTURBATION_PP_MIN == 5
+    assert architect._TIER_RANKING_PERTURBATION_PP_MAX == 20
+    # Default still must lie within the band — sanity check that wiring
+    # the constant to validation didn't create a contradiction.
+    assert (
+        architect._TIER_RANKING_PERTURBATION_PP_MIN
+        <= architect._TIER_RANKING_DEFAULT_PERTURBATION_PP
+        <= architect._TIER_RANKING_PERTURBATION_PP_MAX
+    )
+
+
+def test_normalize_sensitivity_check_perturbation_default_passes():
+    """The default (10pp) is within the accepted band and emits no shortfall."""
+    plan = _bare_plan_with_tr()  # default fixture uses perturbation_pp=10
+    architect._normalize(plan, archetype="predict")
+    audit = plan["_outline_audit"]
+    pp_sf = [s for s in audit["shortfalls"] if "perturbation_pp" in s]
+    assert pp_sf == [], f"default 10pp must not flag; got {pp_sf}"
+    assert audit["tier_ranking_sensitivity_perturbation_pp"] == 10
+
+
+def test_normalize_sensitivity_check_perturbation_in_band_passes():
+    """Values inside [5, 20] (e.g., 7pp, 15pp) are accepted without flag."""
+    for value in (5, 7, 15, 20):
+        plan = _bare_plan_with_tr(sensitivity_check={"perturbation_pp": value, "report": "x"})
+        architect._normalize(plan, archetype="predict")
+        audit = plan["_outline_audit"]
+        pp_sf = [s for s in audit["shortfalls"] if "perturbation_pp" in s]
+        assert pp_sf == [], f"perturbation_pp={value} is in-band; got {pp_sf}"
+        assert audit["tier_ranking_sensitivity_perturbation_pp"] == value
+
+
+def test_normalize_sensitivity_check_perturbation_below_min_flagged():
+    """A perturbation of 1pp is technically a sensitivity check but too
+    trivial to surface real rank instability — flagged."""
+    plan = _bare_plan_with_tr(sensitivity_check={"perturbation_pp": 1, "report": "x"})
+    architect._normalize(plan, archetype="predict")
+    audit = plan["_outline_audit"]
+    pp_sf = [s for s in audit["shortfalls"] if "perturbation_pp=1" in s]
+    assert pp_sf, f"perturbation_pp=1 should flag; got {audit['shortfalls']}"
+    assert audit["tier_ranking_sensitivity_perturbation_pp"] == 1
+
+
+def test_normalize_sensitivity_check_perturbation_above_max_flagged():
+    """A perturbation of 50pp is no longer "sensitivity" so much as
+    re-weighting — flagged."""
+    plan = _bare_plan_with_tr(sensitivity_check={"perturbation_pp": 50, "report": "x"})
+    architect._normalize(plan, archetype="predict")
+    audit = plan["_outline_audit"]
+    pp_sf = [s for s in audit["shortfalls"] if "perturbation_pp=50" in s]
+    assert pp_sf, f"perturbation_pp=50 should flag; got {audit['shortfalls']}"
+
+
+def test_normalize_sensitivity_check_missing_perturbation_backfilled():
+    """When `sensitivity_check` exists as a dict but lacks `perturbation_pp`
+    (or has a non-numeric value), the default constant is backfilled in-place
+    AND a shortfall is recorded so the audit trail surfaces the LLM
+    omission. This is the wire-in that makes the constant load-bearing."""
+    plan = _bare_plan_with_tr(sensitivity_check={"report": "rank_stability"})  # missing pp
+    architect._normalize(plan, archetype="predict")
+    audit = plan["_outline_audit"]
+    # Backfill happened in-place.
+    assert plan["tier_ranking"]["sensitivity_check"]["perturbation_pp"] == (
+        architect._TIER_RANKING_DEFAULT_PERTURBATION_PP
+    )
+    # Shortfall recorded.
+    pp_sf = [s for s in audit["shortfalls"] if "perturbation_pp=missing" in s]
+    assert pp_sf, f"missing perturbation_pp should flag; got {audit['shortfalls']}"
+    assert "backfilled-to-10" in pp_sf[0]
+    # Audit field surfaces the backfilled value (not None).
+    assert audit["tier_ranking_sensitivity_perturbation_pp"] == 10
+
+
+def test_normalize_sensitivity_check_string_perturbation_backfilled():
+    """Non-numeric `perturbation_pp` (e.g., the LLM emitted "10pp" as a
+    string) → backfilled. bool is excluded from numeric to prevent
+    True/False slipping through as 1/0."""
+    for bad_value in ("10pp", "ten", None, True, False, [10]):
+        plan = _bare_plan_with_tr(sensitivity_check={"perturbation_pp": bad_value, "report": "x"})
+        architect._normalize(plan, archetype="predict")
+        audit = plan["_outline_audit"]
+        assert plan["tier_ranking"]["sensitivity_check"]["perturbation_pp"] == 10, (
+            f"non-numeric perturbation_pp={bad_value!r} should backfill to 10"
+        )
+        pp_sf = [s for s in audit["shortfalls"] if "perturbation_pp=missing" in s]
+        assert pp_sf, f"perturbation_pp={bad_value!r} should flag; got {audit['shortfalls']}"
+
+
+def test_normalize_perturbation_default_constant_actually_referenced():
+    """Greptile PR #43 round-2 root concern: prove the
+    `_TIER_RANKING_DEFAULT_PERTURBATION_PP` constant is now load-bearing
+    by temporarily monkey-patching it and verifying the runtime backfill
+    follows the new value. Pre-fix the constant was dead documentation —
+    a change to it would silently have no effect."""
+    original = architect._TIER_RANKING_DEFAULT_PERTURBATION_PP
+    try:
+        architect._TIER_RANKING_DEFAULT_PERTURBATION_PP = 12
+        plan = _bare_plan_with_tr(sensitivity_check={"report": "x"})  # missing pp
+        architect._normalize(plan, archetype="predict")
+        assert plan["tier_ranking"]["sensitivity_check"]["perturbation_pp"] == 12, (
+            "backfill must follow _TIER_RANKING_DEFAULT_PERTURBATION_PP at runtime"
+        )
+    finally:
+        architect._TIER_RANKING_DEFAULT_PERTURBATION_PP = original
