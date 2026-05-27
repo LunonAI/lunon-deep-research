@@ -30,6 +30,49 @@ _FAIL_LOG = pathlib.Path(__file__).resolve().parent.parent.parent / "p1_artifact
 _FAIL_LOG.parent.mkdir(parents=True, exist_ok=True)
 _TOK = 4  # ~chars-per-token heuristic; cheap, scoring uses the harness cleaner
 
+# Greptile PR #42 round-8 issue #1: extracted as module-level constant so
+# the value is visible + tuneable. Body extraction in
+# `_validate_stakeholder_overlap` falls back to this cap when no
+# subsequent heading is found (e.g., for the trailing stakeholder of a
+# closing chapter at end-of-article). For long stakeholder blocks —
+# routine in deep-research articles where individual blocks can run
+# 6-12k chars — only the first N chars enter the Jaccard computation.
+# Truncation in opposite directions across two sections can produce
+# either inflated similarity (shared boilerplate within cap, divergence
+# past it) or missed overlap (sections share content only in second
+# halves). When the cap fires, the stakeholder's id is recorded in
+# `truncated_bodies` so the audit trail is honest about which bodies
+# were truncated (parallel to the `short_pairs` fallback signal).
+_STAKEHOLDER_BODY_MAX_CHARS = 5000
+
+# Greptile PR #42 round-8 issue #2: extended CJK character ranges. The
+# prior `"一" <= c <= "鿿"` heuristic covered ONLY CJK Unified Ideographs
+# (U+4E00-U+9FFF) and missed CJK Extension A (U+3400-U+4DBF), CJK
+# Compatibility Ideographs (U+F900-U+FAFF), Kangxi Radicals
+# (U+2F00-U+2FDF), and CJK Extension B (U+20000+). Additionally the
+# prior scan window `text[:200]` would miss CJK detection when a heading
+# opened with a non-CJK prefix (`"1. 投资者建议"`, `"§ 投资者"`), silently
+# triggering word-tokenized n-grams on ZH bodies and yielding an empty
+# overlap set. Centralized as a module-level regex so a future range
+# adjustment touches a single source of truth.
+_CJK_TEXT_RE = re.compile(r"[㐀-䶿一-鿿豈-﫿⼀-⿟]|[\U00020000-\U0002a6df]")
+
+
+def _is_cjk_text(text: str) -> bool:
+    """True when `text` contains at least one character in any of the
+    common CJK blocks (Unified, Ext A, Ext B, Compat, Kangxi Radicals).
+
+    Used by `_validate_framing_chapter` and `_validate_stakeholder_overlap`
+    to decide between CJK-character n-gram tokenization and EN word
+    tokenization. Scans the entire string (not a 200-char prefix) so a
+    heading like `"1. 投资者建议"` is correctly classified — the prior
+    prefix-only scan silently produced false-negatives on numbered ZH
+    headings.
+    """
+    if not text:
+        return False
+    return _CJK_TEXT_RE.search(text) is not None
+
 
 @dataclass
 class ValidationInput:
@@ -217,6 +260,28 @@ def run(inp: ValidationInput) -> ValidationOutput:
     fc_reuse = _validate_framing_chapter(inp.article, inp.plan.get("framing_chapter"))
     if fc_reuse is not None:
         counts["framing_chapter_reuse"] = fc_reuse
+
+    # 9. STAKEHOLDER CHAPTER OVERLAP (P3-W6; Greptile PR #42 round-2 wiring).
+    # When the architect populated `plan["stakeholder_chapter"]` because the
+    # prompt signaled plural audience, each stakeholder sub-section must
+    # carry NON-OVERLAPPING content. Pairwise Jaccard on n-grams; pairs
+    # above 0.20 fail. Returns None when no chapter is present (single-
+    # audience prompts), so the check is silent in that case.
+    sc_audit = _validate_stakeholder_overlap(inp.article, inp.plan.get("stakeholder_chapter"))
+    if sc_audit is not None:
+        counts["stakeholder_chapter"] = sc_audit
+        if sc_audit["overlap_pairs"]:
+            failures.append(
+                {
+                    "check": "stakeholder_overlap",
+                    "severity": "medium",
+                    "detail": (
+                        f"{len(sc_audit['overlap_pairs'])} stakeholder pair(s) above 0.20 "
+                        f"Jaccard (max={sc_audit['max_pair_overlap']}); each block must address "
+                        f"its audience with disjoint advice: {sc_audit['overlap_pairs']}"
+                    ),
+                }
+            )
 
     ok = not failures
 
@@ -426,8 +491,11 @@ def _validate_framing_chapter(article: str, framing_chapter) -> dict | None:
     body = article[skip_chars:]
     vocab_counts: dict[str, int] = {}
     for term in vocab:
-        if any("一" <= c <= "鿿" for c in term):
-            # CJK: case is meaningless; count verbatim.
+        if _is_cjk_text(term):
+            # CJK: case is meaningless; count verbatim. Greptile PR #42
+            # round-8: routed through `_is_cjk_text` so the same extended
+            # CJK ranges (Ext A/B, Compat, Kangxi) apply here as in the
+            # stakeholder-overlap audit's n-gram tokenizer.
             vocab_counts[term] = body.count(term)
         else:
             # EN: case-insensitive (writers may de-capitalize mid-sentence).
@@ -443,6 +511,208 @@ def _validate_framing_chapter(article: str, framing_chapter) -> dict | None:
         "vocabulary_reuse_rate": round(vocab_reused / len(vocab), 3) if vocab else 0.0,
         "rubric_items_referenced": rubric_counts,
         "rubric_reference_rate": round(rubric_referenced / len(rubric), 3) if rubric else 0.0,
+    }
+
+
+def _validate_stakeholder_overlap(article: str, stakeholder_chapter) -> dict | None:
+    """P3-W6 (2026-05-27): pairwise content-overlap audit on stakeholder chapter.
+
+    Returns None when no stakeholder_chapter is active. Otherwise:
+      {
+        "n_stakeholders_declared": int,
+        "n_stakeholders_audited": int,
+        "max_pair_overlap": float,
+        "overlap_pairs": [(stakeholder_id_a, stakeholder_id_b, jaccard)],
+        "short_pairs": [(stakeholder_id_a, stakeholder_id_b, n_used)],
+        "missing_labels": [stakeholder_id, ...],
+      }
+
+    For each pair of stakeholder sub-sections, compute Jaccard similarity
+    on 4-gram tokens (word 4-grams for EN; char 4-grams for ZH). Pairs
+    with similarity > 0.20 are flagged in `overlap_pairs`. Qianfan's
+    stakeholder sub-sections in q23/q3/q14 are nearly content-disjoint.
+
+    Greptile PR #42 round-2: short bodies (EN <4 words or ZH <4 chars)
+    previously produced empty 4-gram sets and were silently skipped,
+    creating false-negatives. Now the function falls back to 3-grams
+    then 2-grams when 4-grams are empty for either side of the pair —
+    the `n_used` value in `short_pairs` records when fallback fired so
+    short stakeholder bodies remain observable in the audit output.
+
+    Greptile PR #42 round-3 — body extraction now anchors to a markdown
+    heading line containing the label (`r"#{2,4}\\s+...label..."`) instead
+    of `str.find(label)`. The old approach matched the first occurrence
+    of the label string ANYWHERE in the article, so a cross-reference
+    like "...see the For Investors section below..." would land before
+    the actual heading and the extracted body would span the wrong
+    section — silent false-negatives on the overlap audit. The heading-
+    anchored regex matches only at line-start `#{2,4} ... label`, which
+    is the canonical section heading form.
+
+    Greptile PR #42 round-3 — `n_stakeholders` previously counted every
+    DECLARED stakeholder (including those whose label was not found in
+    the article and so contributed an empty body). A reader of the audit
+    output seeing `n_stakeholders=5` would assume all five were compared,
+    but if 2 labels weren't present only 3 non-empty bodies entered the
+    pairwise comparison. Now the audit reports both
+    `n_stakeholders_declared` (total entries in the plan) and
+    `n_stakeholders_audited` (non-empty bodies that actually entered
+    the comparison) and lists `missing_labels` for visibility.
+    """
+    if not isinstance(stakeholder_chapter, dict):
+        return None
+    stakeholders = stakeholder_chapter.get("stakeholders") or []
+    if len(stakeholders) < 2:
+        return None
+    bodies: dict[str, str] = {}
+    missing_labels: list[str] = []
+    # Greptile PR #42 round-8 issue #1: sids whose body extraction hit
+    # the `_STAKEHOLDER_BODY_MAX_CHARS` cap (no subsequent heading found
+    # within N chars). Recorded as a diagnostic so downstream readers can
+    # correlate audit results with truncation risk.
+    truncated_bodies: list[str] = []
+    n_declared = 0
+    for s in stakeholders:
+        if not isinstance(s, dict):
+            continue
+        sid = str(s.get("id", "")).strip()
+        label = str(s.get("label", "")).strip()
+        if not sid or not label:
+            continue
+        n_declared += 1
+        # Greptile PR #42 round-3: anchor to a markdown heading line
+        # (`## label`, `### label`, `#### label`) instead of any
+        # occurrence of the label string. Headings may carry leading
+        # numbering (`### 8.3 For Investors`) so we allow optional
+        # `\d+(?:\.\d+)*\s+` between the hashes and the label.
+        #
+        # Greptile PR #42 round-4: case-insensitive. The writer LLM may
+        # de-capitalize headings (e.g. plan label `"For Investors"` →
+        # rendered `### for investors`), and the canonical English-only
+        # `re.IGNORECASE` flag matches the same casing tolerance already
+        # used by `_validate_framing_chapter` for vocabulary lookup
+        # (`body.lower().count(term.lower())`). Without this, a single
+        # casing drift dropped the stakeholder into `missing_labels` and
+        # silently excluded it from the pairwise audit.
+        #
+        # Greptile PR #42 round-7: anchor the label end. Pre-fix the
+        # pattern had no terminator, so a plan label `"For Industry"`
+        # silently matched a heading `### For Industry Practitioners` —
+        # the extracted body belonged to the wrong section, but the
+        # stakeholder was NOT added to `missing_labels` and
+        # `n_stakeholders_audited` counted it as found (audit looks
+        # complete while comparing the wrong content). Naive `(?!\w)`
+        # would NOT fix this because after "Industry" comes a SPACE
+        # (non-word) — the lookahead would pass and still match the
+        # longer heading. The correct anchor requires the label to be
+        # followed by optional whitespace then either end-of-line OR a
+        # terminator punctuation (`:`, `-`, `—`, `–`) that ends the
+        # heading label cleanly. This rejects `### For Industry
+        # Practitioners` while still accepting `### For Investors`,
+        # `### For Investors: Capital Allocation`, `### For Investors
+        # — Capital Allocation`, etc.
+        m = re.search(
+            r"(?m)^#{2,4}\s+(?:\d+(?:\.\d+)*\s+)?" + re.escape(label) + r"(?=\s*(?:$|[:\-—–]))",
+            article,
+            re.IGNORECASE,
+        )
+        if m is None:
+            bodies[sid] = ""
+            missing_labels.append(sid)
+            continue
+        # `m.end()` is just past the label; advance to the next line
+        # start so the body begins with section content, not the
+        # remainder of the heading line.
+        nl = article.find("\n", m.end())
+        start = nl + 1 if nl >= 0 else m.end()
+        # Greptile PR #42 round-5 fix: broadened `#{2,4}` → `#{1,4}` so
+        # level-1 chapter breaks (`# Appendix`, `# References`) are
+        # recognized as section boundaries. Pre-fix, a stakeholder block
+        # immediately followed by `# Appendix` would not see that boundary
+        # and the body would run to the 5000-char cap, pulling in
+        # unrelated content and inflating/deflating the Jaccard score.
+        # `#{1,4}` still excludes `#####` deep headers which the Qianfan
+        # corpus doesn't use.
+        next_heading = re.search(r"\n#{1,4}\s+", article[start:])
+        # Greptile PR #42 round-8 issue #1: use the module-level
+        # `_STAKEHOLDER_BODY_MAX_CHARS` constant + record truncation in
+        # `truncated_bodies` so the audit trail surfaces when the cap
+        # was binding. For long stakeholder blocks the cap can hide
+        # second-half divergence or convergence; this signal lets a
+        # downstream reader correlate audit results with truncation.
+        if next_heading is not None:
+            end = start + next_heading.start()
+        else:
+            end = start + _STAKEHOLDER_BODY_MAX_CHARS
+            if end < len(article):
+                truncated_bodies.append(sid)
+        bodies[sid] = article[start : min(end, len(article))]
+
+    def _ngrams(text: str, n: int) -> set:
+        text = text.strip()
+        if not text or n < 1:
+            return set()
+        # Greptile PR #42 round-8 issue #2: route through `_is_cjk_text`
+        # which scans the FULL text (not a 200-char prefix) and covers
+        # CJK Ext A / Ext B / Compat / Kangxi Radicals in addition to
+        # Unified Ideographs. Pre-fix a heading body opening with
+        # `"1. 投资者..."` (numeric prefix) would fall through to the
+        # EN word path because the first 200 chars contained no CJK
+        # match — yielding an empty EN word set on a ZH body and a
+        # silent skip in the pairwise comparison.
+        if _is_cjk_text(text):
+            if len(text) < n:
+                return set()
+            return {text[i : i + n] for i in range(len(text) - n + 1)}
+        words = [w.lower() for w in re.findall(r"[a-zA-Z0-9]+", text)]
+        if len(words) < n:
+            return set()
+        return {" ".join(words[i : i + n]) for i in range(len(words) - n + 1)}
+
+    overlap_pairs: list[tuple] = []
+    short_pairs: list[tuple] = []
+    max_overlap = 0.0
+    # Greptile PR #42 round-3: only audit bodies that were actually
+    # found in the article. Empty bodies (missing labels) are EXCLUDED
+    # from the pairwise comparison set so n_stakeholders_audited
+    # honestly reports the number that entered the comparison.
+    auditable_ids = [sid for sid, body in bodies.items() if body]
+    for i, a in enumerate(auditable_ids):
+        for b in auditable_ids[i + 1 :]:
+            # Progressive n-gram fallback: try 4-grams first (the canonical
+            # threshold-calibrated bound), then 3-grams, then 2-grams. The
+            # first n where BOTH bodies produce a non-empty set wins; if
+            # all three are empty for either side, skip with no false
+            # signal. Smaller n inflates accidental overlap, so we track
+            # the n used in `short_pairs` for diagnostic visibility.
+            sa: set = set()
+            sb: set = set()
+            n_used = 0
+            for n in (4, 3, 2):
+                sa = _ngrams(bodies[a], n)
+                sb = _ngrams(bodies[b], n)
+                if sa and sb:
+                    n_used = n
+                    break
+            if not sa or not sb:
+                continue
+            inter = len(sa & sb)
+            union = len(sa | sb)
+            jaccard = inter / union if union else 0.0
+            max_overlap = max(max_overlap, jaccard)
+            if jaccard > 0.20:
+                overlap_pairs.append((a, b, round(jaccard, 3)))
+            if n_used < 4:
+                short_pairs.append((a, b, n_used))
+
+    return {
+        "n_stakeholders_declared": n_declared,
+        "n_stakeholders_audited": len(auditable_ids),
+        "max_pair_overlap": round(max_overlap, 3),
+        "overlap_pairs": overlap_pairs,
+        "short_pairs": short_pairs,
+        "missing_labels": missing_labels,
+        "truncated_bodies": truncated_bodies,
     }
 
 
