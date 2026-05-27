@@ -143,6 +143,23 @@ def test_classify_causal_chain_avoids_false_positives_on_common_verbs():
         "The reform resulted in a 4% efficiency gain.",
         # Single-step "gives rise to" — same.
         "This rule gives rise to a familiar paradox.",
+        # Greptile PR #34 round-3 follow-up: ordinal `in turn` (sequential
+        # enumeration) pre-fix matched the same bare `\bin turn\b` regex
+        # used for the chain connector. When an ordinal `in turn` appeared
+        # alongside a single causal verb, the leaf scored 2 matches and
+        # was falsely classified as causal_chain. The fix narrowed
+        # `in turn` to chain-context only (which/that-prefixed or
+        # comma-bounded or sentence-initial). These cases pin the
+        # regression — each contains EXACTLY one genuine causal verb
+        # plus an ordinal `in turn`, so under the bare regex they would
+        # have fired with 2 matches.
+        "The team assessed each scenario in turn, which led to a consensus.",
+        "Members spoke in turn during the assembly debate, which resulted in a vote.",
+        "The reviewer addressed each amendment in turn, leading to broad approval.",
+        "Each principle was considered in turn before the panel produced its ruling.",
+        # Pure ordinal `in turn` with no causal verbs — fully clean.
+        "The senator addressed each amendment in turn.",
+        "The committee took the proposals up in turn before adjourning.",
     ]
     for s in false_positives:
         assert not _classify_leaf_elements(s)["causal_chain"], f"false positive: {s!r}"
