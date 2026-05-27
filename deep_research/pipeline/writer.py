@@ -461,9 +461,19 @@ def write_section(
         weights = {k: v for k, v in weights_raw.items() if isinstance(v, (int, float)) and not isinstance(v, bool)}
         tiers = [t for t in (tr.get("tiers") or []) if isinstance(t, dict) and t.get("name")]
         sensitivity = tr.get("sensitivity_check") if isinstance(tr.get("sensitivity_check"), dict) else {}
-        # Same bool-subclass guard on perturbation_pp.
+        # Greptile PR #47 round-2: bool-subclass guard on perturbation_pp,
+        # and also coerce float (e.g. `10.0` from a JSON deserializer
+        # that doesn't distinguish int from int-valued float) to int so
+        # the directive interpolates a clean `±10pp` rather than
+        # `±10.0pp`. Prior `isinstance(raw_pp, int)` silently rejected
+        # floats and fell back to the default 10 with no signal —
+        # callers who legitimately emitted `10.0` (e.g., from a JSON
+        # source) saw their value silently discarded.
         raw_pp = sensitivity.get("perturbation_pp") if isinstance(sensitivity, dict) else None
-        perturbation_pp = raw_pp if isinstance(raw_pp, int) and not isinstance(raw_pp, bool) else 10
+        if isinstance(raw_pp, bool) or not isinstance(raw_pp, (int, float)):
+            perturbation_pp = 10
+        else:
+            perturbation_pp = int(raw_pp)
         scoring_formula = tr.get("scoring_formula") or "S_final = Σ(weight_i × dim_i)"
         if weights and tiers:
             parts = [

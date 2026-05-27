@@ -812,19 +812,41 @@ def _validate_tier_ranking(article: str, plan: dict) -> dict | None:
     chapter_end = len(article)
     if title:
         # Allow h1 OR h2 OR h3 for the chapter heading (`# Tier Ranking`,
-        # `## 7 Tier Ranking`, `### 7.1 Tier Ranking` all match).
+        # `## 7 Tier Ranking`, `### 7.1 Tier Ranking` all match). Capture
+        # the hash run as group 1 so the chapter-end boundary can be
+        # built at the SAME level — see below.
+        #
+        # End-anchor `(?=\s*(?:$|[:\-—–]))` prevents the prefix-collision
+        # class fixed in `_validate_stakeholder_overlap` (PR #42 round-7
+        # commit `4d420a9`) from recurring here: without the anchor,
+        # title `"Tier Ranking"` would silently match a heading like
+        # `## 7 Tier Ranking Considerations`, extracting the wrong
+        # chapter's body. Accepts the title followed by end-of-line OR a
+        # known heading terminator (colon, dash, em-dash, en-dash).
         m = re.search(
-            r"(?m)^#{1,3}\s+(?:\d+(?:\.\d+)*\s+)?" + re.escape(title),
+            r"(?m)^(#{1,3})\s+(?:\d+(?:\.\d+)*\s+)?" + re.escape(title) + r"(?=\s*(?:$|[:\-—–]))",
             article,
             re.IGNORECASE,
         )
         if m is not None:
             chapter_start = m.end()
-            # End at the next h1 or h2 — NOT at the next h3, because the
-            # sensitivity sub-section is h3 INSIDE the chapter and must
-            # stay in the scanned region. Pre-fix used `#{1,3}` which
-            # truncated the chapter at its own sub-heading.
-            next_h = re.search(r"\n#{1,2}\s+", article[chapter_start:])
+            # Greptile PR #47 round-2: end the chapter scan at the next
+            # SIBLING-or-higher heading. The chapter's own sub-sections
+            # (e.g. the sensitivity sub-heading) sit ONE level deeper
+            # than the chapter heading itself, so ending at the chapter
+            # level keeps them inside the scanned region while preventing
+            # bleed into sibling chapters at the same level. The prior
+            # fixed `#{1,2}` boundary worked for h2 chapters but caused
+            # an h3 chapter (`### 7.3 Tier Ranking`) to absorb its h3
+            # siblings (`### 7.4 …`) — those siblings' tables and
+            # sensitivity headings then registered as passing for the
+            # actual (potentially empty) tier-ranking chapter, yielding
+            # false-positive drift telemetry.
+            chapter_hash_count = len(m.group(1))
+            next_h = re.search(
+                rf"\n#{{1,{chapter_hash_count}}}\s+",
+                article[chapter_start:],
+            )
             chapter_end = chapter_start + next_h.start() if next_h else len(article)
     chapter_body = article[chapter_start:chapter_end] if chapter_start >= 0 else ""
 
