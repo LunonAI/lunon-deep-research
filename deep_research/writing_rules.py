@@ -241,6 +241,57 @@ _SECTION_OPENING_PROSE_LEAD_RULE = (
 )
 
 
+# P3-W3 (2026-05-27): mid-paragraph cross-reference directive. the reference's
+# verified corpus-wide pattern (11/11 articles average 100-451 cross-chapter
+# refs per article) attaches xrefs MID-PARAGRAPH to factual claims, NOT as
+# chapter-opening templates. The Wave-3 §12.A rewrite (PR #32-#34) eliminated
+# the "Building on §X established in §Y" antipattern at chapter openings
+# (0% in the W3 smoke vs 80% in W2). P3-W3 installs the POSITIVE directive:
+# every chapter ≥5 mid-paragraph xrefs, attached to specific claims, with
+# acceptable / forbidden forms enumerated.
+_MID_PARAGRAPH_XREF_RULE = (
+    "MID-CHAPTER CROSS-REFERENCE DISCIPLINE (P3-W3, 2026-05-27):\n"
+    "Each H2 chapter (`## N Title`) must contain AT LEAST 5 cross-references "
+    "to other chapters/sections in the report, embedded MID-PARAGRAPH (not "
+    "as a chapter-opening template), each attached to a specific factual "
+    "or analytical claim. This is the reference's verified corpus-wide pattern "
+    "(11/11 articles, 100-451 cross-refs each) and the structural feature "
+    "that makes long articles feel coherent rather than survey-like.\n"
+    "\n"
+    "ACCEPTABLE forms (attached to a specific factual/analytical claim):\n"
+    "  EN: '(Section N.M)' parenthetical | 'as detailed in Chapter N' | "
+    "'Chapter N will return to this' | 'the {entity} introduced in §N' | "
+    "'(see §N below)'\n"
+    "  ZH: '（详见§N.M）' | '如第N章所述' | '第N章将进一步分析' | "
+    "'承接第N章关于{topic}的论述' | '（见第N章）'\n"
+    "\n"
+    "FORBIDDEN forms:\n"
+    "  - Chapter-opening template recapping the prior chapter "
+    "    ('Building on §X established in §Y, this section…'). Already "
+    "    eliminated by _SECTION_OPENING_PROSE_LEAD_RULE; this directive "
+    "    reinforces. A chapter MAY open with a substantive bridge that "
+    "    names the analytical role of THIS chapter relative to a sibling "
+    "    (e.g. 'If §2 covers X, §3 covers Y') — see _SECTION_OPENING_PROSE_"
+    "    LEAD_RULE for the prose-bridge form.\n"
+    "  - Generic 'as discussed earlier' / 'we will see below' WITHOUT a "
+    "    §N anchor — these are recap fillers, not callbacks.\n"
+    "  - Bare `§N` reference with no analytical claim attached.\n"
+    "\n"
+    "QUALITY TARGETS:\n"
+    "  - ≥40% of cross-refs are parenthetical `(Section N.M)` form — the "
+    "    densest, lowest-narrative-overhead form the reference uses to attach "
+    "    a fact to its prior-chapter source.\n"
+    "  - Forward-defer references ('§N below will detail') allowed but "
+    "    ≤30% of total — too many forward-defers signal the writer "
+    "    deferred substance rather than delivered it.\n"
+    "  - DO NOT use §N to reference sections that don't exist in the "
+    "    article's heading set; the post-write validator strips dangling "
+    "    forward-refs as drift entries (and may delete the offending "
+    "    sentence). When you forward-defer, the deferred chapter MUST "
+    "    appear in the report TOC."
+)
+
+
 # P3-W4 (2026-05-27): mermaid semantic-diagram directive. reference-verified
 # corpus pattern (10/11 articles, 1-19 mermaid blocks each, used semantically
 # for timelines / dependencies / decision trees / process flows). Lunon's
@@ -818,7 +869,15 @@ def writer_system(
     middle_rules = [_NUMBERING_RULE]
     if include_dedup:
         middle_rules.append(_DEDUP_RULE)
-    middle_rules.extend([_INSIGHT_MIN, CLEANING_RESISTANT_RULE, _SECTION_OPENING_PROSE_LEAD_RULE, _MERMAID_DIRECTIVE])
+    middle_rules.extend(
+        [
+            _INSIGHT_MIN,
+            CLEANING_RESISTANT_RULE,
+            _SECTION_OPENING_PROSE_LEAD_RULE,
+            _MID_PARAGRAPH_XREF_RULE,
+            _MERMAID_DIRECTIVE,
+        ]
+    )
     middle_block = "\n\n".join(middle_rules)
 
     # Wave 2 §1.2 follow-up: interpolate per-archetype outline bounds into
@@ -1110,6 +1169,298 @@ def citation_strip_audit(text: str) -> dict:
         "ok": has_inline_names and retention > 0.9,
         "retention": round(retention, 3),
         "has_inline_source_names": has_inline_names,
+    }
+
+
+def check_xref_quality(text: str) -> dict:
+    """P3-W3 (2026-05-27): post-write cross-reference quality audit.
+
+    Measures the contract `_MID_PARAGRAPH_XREF_RULE` imposes:
+      - per-chapter xref count (target ≥5 mid-paragraph references)
+      - opening-template antipattern count (target 0 — already enforced
+        by Wave-3 §12.A; this is a regression detector)
+      - dangling forward-refs (§N where N is not in the heading set)
+      - parenthetical-form ratio (target ≥40%)
+      - forward-defer ratio (target ≤30%)
+
+    Returns:
+      {
+        "ok": bool,
+        "n_chapters": int,
+        "per_chapter_xref_counts": {chapter_id: count},
+        "opening_template_violations": int,
+        "dangling_forward_refs": [str],
+        "n_parenthetical": int,
+        "n_total_xrefs": int,
+        "parenthetical_ratio": float,
+        "forward_defer_ratio": float,
+        "fail": [reason, ...],
+      }
+
+    The "ok" flag is advisory — same downgrade-to-telemetry pattern as
+    check_insight_minimums (post-W9 2026-05-21).
+    """
+    # Heading set: collect every "§N", "§N.M" target the article can
+    # legitimately cross-reference to. We accept the `## N Title` or
+    # `## N.M Title` numeric prefix in markdown headings as the legitimate
+    # set of §-targets — same convention `numbering_fix.renumber_headings`
+    # uses.
+    # Greptile PR #39 round-7 issue #2: collect heading_ids and mask
+    # heading lines uniformly across H2-H6. The prior `#{2,4}` bound
+    # left H5/H6 lines unmasked: a sub-sub-heading like
+    # `##### 5.1 Section 99 Subtopic` would have "Section 99" picked up
+    # by `generic_pattern` and "99" flagged as a dangling ref, even
+    # though it's title text. Widening to `#{2,6}` aligns the masked-
+    # text replacement, in-body mask in `_count_refs_in`, and this
+    # heading-id collection.
+    heading_ids: set[str] = set()
+    for m in re.finditer(r"(?m)^#{2,6}\s+([\d\.]+)\b", text):
+        hid = m.group(1).rstrip(".")
+        heading_ids.add(hid)
+
+    # All xref candidates in body. Classify into (paren, bare) WITHOUT
+    # double-counting: parenthetical refs are captured first, then bare
+    # refs are filtered to exclude any whose span is inside a paren
+    # match (avoids counting `(Section 2)` as both paren AND bare).
+    paren_pattern = re.compile(r"\((?:Section|§|Chapter|Sec\.)\s*([\d\.]+)\)", re.I)
+    generic_pattern = re.compile(r"(?:§\s*|(?:Section|Chapter|Sec\.)\s+)([\d\.]+)", re.I)
+    zh_pattern = re.compile(r"第\s*([一二三四五六七八九十0-9\.]+)\s*[节章]")
+
+    # Greptile PR #39 round-5: mask heading lines so the patterns don't
+    # pick up `Chapter N` / `Section N` / `第N章` in TITLE text. The
+    # `generic_pattern`'s `(?:Section|Chapter|Sec\.)\s+([\d\.]+)` alt
+    # matches title words like "Chapter 47" in `## 5 Chapter 47 Overview`,
+    # and "47" then lands in `dangling_forward_refs` even though it's
+    # naming the chapter, not navigating to it. This is the same class
+    # of bug `xref_repair._rewrite_body_only` addressed in round-4 — the
+    # auditor needed the same filter. The mask replaces heading lines
+    # with same-length space runs so character offsets in the masked
+    # text match offsets in the original `text` exactly (the
+    # forward-defer proximity windows below still index into `text`).
+    masked_text = re.sub(
+        r"(?m)^#{2,6}[^\n]*",
+        lambda m: " " * len(m.group(0)),
+        text,
+    )
+
+    paren_matches = list(paren_pattern.finditer(masked_text))
+    paren_refs = [m.group(1) for m in paren_matches]
+    paren_spans = [(m.start(), m.end()) for m in paren_matches]
+
+    def _in_paren(pos: int) -> bool:
+        return any(s <= pos < e for s, e in paren_spans)
+
+    raw_refs: list[str] = []
+    raw_ref_spans: list[tuple[int, int]] = []
+    for m in generic_pattern.finditer(masked_text):
+        if _in_paren(m.start()):
+            continue
+        raw_refs.append(m.group(1))
+        raw_ref_spans.append((m.start(), m.end()))
+    zh_ref_matches = list(zh_pattern.finditer(masked_text))
+    zh_refs = [m.group(1) for m in zh_ref_matches]
+    zh_ref_spans = [(m.start(), m.end()) for m in zh_ref_matches]
+    all_refs = list(paren_refs) + raw_refs + zh_refs
+
+    # Forward-defer detection: count XREFS that appear in a forward-defer
+    # CONTEXT, not raw phrase occurrences. The intent from
+    # `_MID_PARAGRAPH_XREF_RULE` is "≤30% of *xrefs* are forward-defer
+    # style"; Greptile PR #39 round-2 noted that the prior implementation
+    # divided raw phrase count (which fires on any "below" / "will return"
+    # in the document, including non-xref contexts) by xref count —
+    # numerator and denominator had incompatible units, and a document
+    # using "below" 6 times around 5 xrefs would score `forward_ratio =
+    # 1.2 > 0.30` and spuriously fail.
+    #
+    # New implementation: for each xref span, check whether a forward-
+    # defer phrase appears within an ±80-char window around it (a
+    # sentence-level proximity bound — captures "will return below
+    # (Section 5)" but rejects "below" 200 chars away from any xref).
+    forward_defer_pattern = re.compile(
+        r"(?:will\s+(?:return|cover|detail|address|examine)|below|下文|下面|后续|"
+        r"第\s*\d+\s*[节章]\s*将|see\s+(?:Section|§|Chapter)\s+\d[\d\.]*\s*(?:below|later))",
+        re.I,
+    )
+    all_xref_spans = list(paren_spans) + raw_ref_spans + zh_ref_spans
+    _XREF_DEFER_WINDOW = 80  # chars on each side — ~1 sentence of context
+    n_forward_defer = 0
+    for xstart, xend in all_xref_spans:
+        wstart = max(0, xstart - _XREF_DEFER_WINDOW)
+        wend = min(len(text), xend + _XREF_DEFER_WINDOW)
+        # Clamp at paragraph / heading boundaries. A "below" or "will
+        # return" in a prior paragraph (or chapter) is not semantically
+        # tied to this xref — readers parse sentences within paragraphs,
+        # not across them. Without this clamp, an isolated "below" 50
+        # chars away in the prior chapter would falsely fire.
+        #
+        # Greptile PR #39 round-2: `pre` is sliced from `text[wstart:xstart]`
+        # exactly once, so every `rfind` returns an index relative to the
+        # ORIGINAL wstart. Capture `pre_start = wstart` before the loop
+        # and use it as the base for absolute-position arithmetic — the
+        # prior `wstart + idx + len(sep)` used the in-place-mutated
+        # `wstart` as the base, inflating the offset by the previous
+        # iteration's clamp. Concrete failure: original wstart=100,
+        # `"\n\n"` at pre-idx 5 → wstart=107; then `"\n## "` at pre-idx 8
+        # produced 107+8+4=119, but the correct absolute position is
+        # 100+8+4=112 — a 7-char over-narrowing of the window that
+        # silently dropped forward-defer phrases past the inflated
+        # boundary.
+        pre = text[wstart:xstart]
+        pre_start = wstart
+        for sep in ("\n\n", "\n## ", "\n### ", "\n#### "):
+            idx = pre.rfind(sep)
+            if idx >= 0:
+                wstart = max(wstart, pre_start + idx + len(sep))
+        post = text[xend:wend]
+        for sep in ("\n\n", "\n## ", "\n### ", "\n#### "):
+            idx = post.find(sep)
+            if idx >= 0:
+                wend = min(wend, xend + idx)
+        # Greptile PR #39 round-6: search `masked_text`, not `text`. The
+        # pre-window clamp can land `wstart` past a `\n## ` boundary at
+        # the heading content itself (e.g. `"5 Section will return to §3
+        # below"`). If we searched the unmasked `text`, a heading title
+        # containing "will return" / "below" / another forward-defer
+        # phrase within 80 chars of an xref would inflate
+        # `n_forward_defer` — same heading-bleed class of bug round-5
+        # fixed for ref counting. `masked_text` preserves character
+        # offsets (same-length space substitution), so the clamped
+        # wstart/wend positions remain valid and no arithmetic changes.
+        if forward_defer_pattern.search(masked_text, wstart, wend):
+            n_forward_defer += 1
+
+    # Opening-template antipattern (P3-W3 regression detector for §12.A.v4).
+    opening_template_pattern = re.compile(r"(?m)^#{2}\s+[\d\.]*\s*\S.*\n+\s*Building on\b", re.I)
+    n_opening_templates = sum(1 for _ in opening_template_pattern.finditer(text))
+
+    # Dangling forward-refs: numeric §N that isn't in the heading set.
+    # Only check numeric forms — Chinese 第X章 numbers are looser semantics
+    # (chapter ordinals, not heading-id matches).
+    #
+    # A ref `N.M` is NOT dangling when its top-level chapter `N` exists
+    # in the heading set, even if `### N.M` isn't explicitly rendered:
+    # the writer may legitimately reference a sub-section of an existing
+    # chapter, and over-flagging here would force-rewrite legitimate
+    # navigational refs.
+    # Greptile PR #39 round-7 issue #1: dedupe by unique ref-id.
+    # The prior list accumulated one entry per OCCURRENCE of a dangling
+    # ref, so a doc that cited `(Section 47)` five times would produce
+    # `dangling_forward_refs=["47","47","47","47","47"]` and the fail
+    # entry would read `dangling_forward_refs=5` — a caller reading the
+    # audit output would reasonably interpret that as five distinct
+    # missing sections when there's only one. Order-preserving dedup
+    # via a `seen` set keeps the first-occurrence ordering stable for
+    # any downstream consumer that snapshots the list.
+    dangling_seen: set[str] = set()
+    dangling: list[str] = []
+    for ref in paren_refs + raw_refs:
+        ref_clean = (ref or "").rstrip(".")
+        if not ref_clean:
+            continue
+        if ref_clean in heading_ids:
+            continue
+        if any(h.startswith(f"{ref_clean}.") for h in heading_ids):
+            continue
+        # If `N.M` is the ref and `N` is in the heading set, accept it
+        # as a legitimate sub-section reference.
+        top = ref_clean.split(".", 1)[0]
+        if top in heading_ids:
+            continue
+        if ref_clean in dangling_seen:
+            continue
+        dangling_seen.add(ref_clean)
+        dangling.append(ref_clean)
+
+    # Per-chapter xref count. Split body on `## N` headings; count xrefs
+    # within each chapter window (paren + non-paren-generic + ZH).
+    #
+    # Greptile PR #39 round-5: the chapter-split removes `## N Title`
+    # lines as separators, but H3/H4 sub-headings (`### N.M`, `#### N.M.P`)
+    # remain in the body. A sub-heading like `### 5.1 Section 99 Subtopic`
+    # would contribute "99" via generic_pattern, inflating the chapter's
+    # xref count. Mask all heading lines before scanning, same logic as
+    # the article-level mask above.
+    def _count_refs_in(body: str) -> int:
+        masked_body = re.sub(
+            r"(?m)^#{2,6}[^\n]*",
+            lambda m: " " * len(m.group(0)),
+            body,
+        )
+        body_paren = list(paren_pattern.finditer(masked_body))
+        body_paren_spans = [(m.start(), m.end()) for m in body_paren]
+
+        def _bp(pos: int) -> bool:
+            return any(s <= pos < e for s, e in body_paren_spans)
+
+        bare = sum(1 for m in generic_pattern.finditer(masked_body) if not _bp(m.start()))
+        return len(body_paren) + bare + len(zh_pattern.findall(masked_body))
+
+    chapter_split = re.split(r"(?m)^(#{2}\s+[^\n]+)", text)
+    per_chapter: dict[str, int] = {}
+    cur_id = "preamble"
+    cur_body: list[str] = []
+    for piece in chapter_split:
+        if piece.startswith("## "):
+            # Save previous, start new chapter
+            if cur_body:
+                per_chapter[cur_id] = _count_refs_in("".join(cur_body))
+            m = re.match(r"##\s+([\d\.]+)?", piece)
+            cur_id = m.group(1).rstrip(".") if m and m.group(1) else piece[:30].strip()
+            cur_body = []
+        else:
+            cur_body.append(piece)
+    if cur_body:
+        per_chapter[cur_id] = _count_refs_in("".join(cur_body))
+    # Drop the preamble entry — it's not a real chapter
+    per_chapter.pop("preamble", None)
+
+    n_total = len(all_refs)
+    n_paren = len(paren_refs)
+    paren_ratio = round(n_paren / n_total, 3) if n_total else 0.0
+    forward_ratio = round(n_forward_defer / n_total, 3) if n_total else 0.0
+
+    fail: list[str] = []
+    chapters_below_floor = sum(1 for c in per_chapter.values() if c < 5)
+    # Tolerate up to ~20% of chapters under the ≥5 floor (e.g. very
+    # short chapters) but flag broader miss.
+    #
+    # Greptile PR #39 round-5: the prior `max(1, len(per_chapter) // 5)`
+    # formula computed `max(1, 0) = 1` for a single-chapter article,
+    # which meant `chapters_below_floor > 1` required ≥2 chapters to
+    # miss the floor — impossible with only 1 chapter. So a 1-chapter
+    # article with zero cross-references silently passed the audit.
+    # The 20% tolerance is intended for multi-chapter docs (allowing
+    # one or two short chapters to fall short); for a 1-chapter doc the
+    # tolerance must collapse to 0 — that single chapter IS the whole
+    # article and there's no peer chapter to dilute the miss against.
+    if len(per_chapter) <= 1:
+        # 0-chapter doc: chapters_below_floor is also 0 → never fires.
+        # 1-chapter doc: any below-floor chapter fires the fail entry.
+        tolerance = 0
+    else:
+        tolerance = max(1, len(per_chapter) // 5)
+    if chapters_below_floor > tolerance:
+        fail.append(f"chapters_below_5_xref_floor={chapters_below_floor}/{len(per_chapter)}")
+    if n_opening_templates > 0:
+        fail.append(f"opening_template_violations={n_opening_templates}")
+    if dangling:
+        fail.append(f"dangling_forward_refs={len(dangling)}")
+    if n_total >= 10 and paren_ratio < 0.40:
+        fail.append(f"parenthetical_ratio={paren_ratio:.2f}<0.40")
+    if n_total >= 10 and forward_ratio > 0.30:
+        fail.append(f"forward_defer_ratio={forward_ratio:.2f}>0.30")
+
+    return {
+        "ok": not fail,
+        "n_chapters": len(per_chapter),
+        "per_chapter_xref_counts": per_chapter,
+        "opening_template_violations": n_opening_templates,
+        "dangling_forward_refs": dangling,
+        "n_parenthetical": n_paren,
+        "n_total_xrefs": n_total,
+        "parenthetical_ratio": paren_ratio,
+        "forward_defer_ratio": forward_ratio,
+        "fail": fail,
     }
 
 
