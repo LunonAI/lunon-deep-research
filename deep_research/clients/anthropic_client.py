@@ -67,13 +67,35 @@ _RETRYABLE = (
 )
 
 
-def raw_call(model, user, system="", max_tokens=8000, think=False, effort="low", max_retries=3, note=""):
+def raw_call(
+    model,
+    user,
+    system="",
+    max_tokens=8000,
+    think=False,
+    effort="low",
+    max_retries=3,
+    note="",
+    cache_system=False,
+    cache_ttl="5m",
+):
     """Return (text_str, usage_dict). Raises RuntimeError after retries.
 
     Opus 4.7 API: reasoning is controlled by output_config.effort; think=True
     enables adaptive thinking (thinking.type='adaptive'). Default: plain (no
     thinking) to control cost. (The old thinking.type='enabled'+budget_tokens
     form is rejected by Opus 4.7.)
+
+    cache_system: when True and `system` is a non-empty string, attach an
+    Anthropic prompt-cache breakpoint to the system block. The model receives
+    byte-identical tokens whether cached or not — caching only changes cost
+    (cache_read bills at 0.1× input) and latency, never output. The writer's
+    27.5 KB system prompt is identical across every writer.sec call within a
+    task, so the first call pays cache_creation (1.25× input) and the rest
+    read at 0.1×. cache_ttl "5m" (default) uses the GA ephemeral form, which
+    Anthropic refreshes on each read — sufficient for the back-to-back writer
+    calls within a task. "1h" sets the extended-TTL field (heavier write
+    premium); left as a knob for callers who batch with longer idle gaps.
     """
     if not _KEY:
         raise RuntimeError("ANTHROPIC_API_KEY missing from .env")
@@ -83,7 +105,16 @@ def raw_call(model, user, system="", max_tokens=8000, think=False, effort="low",
         "messages": [{"role": "user", "content": user}],
     }
     if system:
-        kw["system"] = system
+        if cache_system and isinstance(system, str):
+            cc = {"type": "ephemeral"}
+            # Only attach the ttl field for the non-default 1h extended cache;
+            # the bare {"type": "ephemeral"} 5m form is GA and needs no beta
+            # header, avoiding a mid-run API rejection risk.
+            if cache_ttl and cache_ttl != "5m":
+                cc["ttl"] = cache_ttl
+            kw["system"] = [{"type": "text", "text": system, "cache_control": cc}]
+        else:
+            kw["system"] = system
     if think:
         kw["thinking"] = {"type": "adaptive"}
         kw["output_config"] = {"effort": effort}

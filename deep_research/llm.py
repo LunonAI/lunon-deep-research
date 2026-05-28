@@ -37,6 +37,8 @@ def call(
     note="",
     timeout=300,
     max_retries=3,
+    cache_system=None,
+    cache_ttl="5m",
 ):
     """Return assistant text for `role`. Auto-routes by model provider.
 
@@ -44,6 +46,17 @@ def call(
     reasoning_effort; anthropic maps it to output_config.effort (only when
     think=True); openrouter ignores it. `reasoning_effort` kept as a back-compat
     alias for openai callers.
+
+    cache_system: anthropic-only prompt-cache toggle. `None` (default) auto-
+    enables caching for the `writer` role — whose 27.5 KB system prompt is
+    byte-identical across every section write within a task, the one place
+    caching meaningfully pays off. Other roles have smaller, per-call-unique
+    system prompts. Caching is output-invariant (the model sees identical
+    tokens), so this never affects quality. Pass an explicit bool to override.
+    cache_ttl: anthropic cache lifetime — "5m" (GA default, refresh-on-use,
+    covers the back-to-back writer calls within a task) or "1h" (extended,
+    for callers that batch with longer idle gaps). Only used when caching
+    is active on the anthropic path.
     """
     model = config.model_for(role)
     if not model:
@@ -53,6 +66,7 @@ def call(
     prov = _provider(model)
     tag = note or role
     eff = reasoning_effort or effort
+    cache = cache_system if cache_system is not None else (role == "writer")
     if prov == "openai":
         text, _ = openai_client.raw_call(
             model,
@@ -76,6 +90,8 @@ def call(
             effort=eff,
             note=tag,
             max_retries=max_retries,
+            cache_system=cache,
+            cache_ttl=cache_ttl,
         )
         return text
     text, _ = openrouter_client.raw_call(
@@ -168,8 +184,16 @@ def call_json(
     retries=2,
     timeout=300,
     max_retries=3,
+    cache_system=None,
+    cache_ttl="5m",
 ):
-    """call() + JSON extraction with a light retry on parse failure."""
+    """call() + JSON extraction with a light retry on parse failure.
+
+    cache_system / cache_ttl mirror `call()` so callers using the JSON dispatch
+    surface have the same explicit prompt-cache control (e.g. opt a JSON role
+    out, or enable caching for a future JSON-returning role). `None` keeps the
+    role-based auto-enable in `call()`.
+    """
     last = None
     for _ in range(retries + 1):
         txt = call(
@@ -184,6 +208,8 @@ def call_json(
             note=note,
             timeout=timeout,
             max_retries=max_retries,
+            cache_system=cache_system,
+            cache_ttl=cache_ttl,
         )
         try:
             return extract_json(txt)
