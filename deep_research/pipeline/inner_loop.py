@@ -44,7 +44,9 @@ def _relevant_criteria(spec: dict) -> list:
     return out
 
 
-def score_section(section_text: str, spec: dict, language: str, section_title: str = "", note: str = "inner_loop") -> dict:
+def score_section(
+    section_text: str, spec: dict, language: str, section_title: str = "", note: str = "inner_loop"
+) -> dict:
     crits = _relevant_criteria(spec)
     user = (
         f"LANGUAGE: {language}\nSECTION TITLE: {section_title}\n\n"
