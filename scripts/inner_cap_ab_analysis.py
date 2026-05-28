@@ -128,9 +128,17 @@ def main() -> None:
         print("  VERDICT: no trajectory data — was this run produced post-OPT2?")
         sys.exit(1)
     if r["reached_idx2"] == 0:
-        print("  VERDICT: the 3rd pass NEVER ran in this sample — cap=2 would have been")
-        print("           behavior-identical here. Safe on this evidence, but the sample")
-        print("           may be too clean to be representative; confirm on a larger run.")
+        if r["degraded_idx2_excluded"] > 0:
+            # The 3rd pass DID run, but every i==2 entry was degraded (the
+            # inner-scorer LLM failed) — there's nothing judgeable. Don't claim
+            # "never ran"; flag scorer instability instead. (Greptile PR #50 r3.)
+            print("  VERDICT: the 3rd pass ran but ALL judgeable i==2 entries were degraded")
+            print("           (inner-scorer LLM failed). No verdict — investigate scorer")
+            print("           stability before deciding on cap=2.")
+        else:
+            print("  VERDICT: the 3rd pass NEVER ran in this sample — cap=2 would have been")
+            print("           behavior-identical here. Safe on this evidence, but the sample")
+            print("           may be too clean to be representative; confirm on a larger run.")
     elif r["cap2_safe"]:
         print(f"  VERDICT: cap=2 is EMPIRICALLY SAFE — <{BENEFIT_RATE_THRESHOLD * 100:.0f}% of the sections that")
         print(f"           ran a 3rd pass benefited from it, and mean gain <{SCORE_GAIN_THRESHOLD}.")
