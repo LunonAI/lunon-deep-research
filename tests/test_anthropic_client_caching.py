@@ -129,6 +129,7 @@ def _patch_raw_call(monkeypatch):
 
     def fake_raw_call(model, user, **kw):
         captured["cache_system"] = kw.get("cache_system")
+        captured["cache_ttl"] = kw.get("cache_ttl")
         return "text", {}
 
     monkeypatch.setattr(llm.anthropic_client, "raw_call", fake_raw_call)
@@ -145,6 +146,25 @@ def test_llm_call_writer_role_enables_cache(monkeypatch):
     captured = _patch_raw_call(monkeypatch)
     llm.call("writer", "u", system="SYS")
     assert captured["cache_system"] is True
+
+
+def test_llm_call_default_cache_ttl_is_5m(monkeypatch):
+    """cache_ttl defaults to '5m' and is forwarded to raw_call."""
+    from deep_research import llm
+
+    captured = _patch_raw_call(monkeypatch)
+    llm.call("writer", "u", system="SYS")
+    assert captured["cache_ttl"] == "5m"
+
+
+def test_llm_call_forwards_explicit_cache_ttl(monkeypatch):
+    """A caller can reach the 1h extended cache via llm.call (Greptile PR #50
+    — the knob was previously locked to 5m on the standard dispatch path)."""
+    from deep_research import llm
+
+    captured = _patch_raw_call(monkeypatch)
+    llm.call("writer", "u", system="SYS", cache_ttl="1h")
+    assert captured["cache_ttl"] == "1h"
 
 
 def test_llm_call_non_writer_role_disables_cache(monkeypatch):
