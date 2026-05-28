@@ -36,7 +36,7 @@ _CONTRA = re.compile(
     r"that said|nonetheless|yet,|but it is|critics?|skeptic|paradox)\b",
     re.I,
 )
-_EMDASH = re.compile(r"[—–]")
+_EMDASH = re.compile(r"[—]")  # em-dash only (U+2014); en-dash is for numeric ranges
 
 
 def _is_cjk(t: str) -> bool:

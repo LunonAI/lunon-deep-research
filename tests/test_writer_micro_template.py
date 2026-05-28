@@ -91,6 +91,8 @@ def test_prose_subheaders_mode_emits_reference_prose_directive(monkeypatch):
     # dimensions surfaced as themes, NOT as rigid bolded labels
     assert "Winning Logic" in user and "Team Combination" in user
     assert "**Winning Logic:**" not in user, "retired rigid bolded-label template still present"
+    # Guard the rename: the directive and its wrapper must agree on one label.
+    assert "MICRO-TEMPLATE" not in user, "stale MICRO-TEMPLATE label leaked into the prompt"
 
 
 def test_prose_subheaders_orders_themes_by_render_order(monkeypatch):
@@ -178,7 +180,7 @@ def test_writer_handles_null_min_axes_per_entity_without_crash(monkeypatch):
     # so the rendered floor is min(3, len(dims_sorted)) effectively 3,
     # which renders verbatim as "3 of the 1 axes" — the test only pins
     # that the writer did not crash and the directive emitted.)
-    assert "PER-ENTITY MICRO-TEMPLATE" in user, (
+    assert "PER-ENTITY TREATMENT" in user, (
         f"directive missing — writer may have crashed silently; got: {user[:2500]}"
     )
 
@@ -190,7 +192,7 @@ def test_writer_handles_null_min_axes_per_entity_without_crash(monkeypatch):
 
 def test_table_columns_only_mode_omits_micro_template(monkeypatch):
     """Legacy mode: ENTITY MATRIX section present but no
-    PER-ENTITY MICRO-TEMPLATE block."""
+    PER-ENTITY TREATMENT block."""
     em = {
         "entities": ["E1", "E2", "E3", "E4", "E5"],
         "dimensions": [
@@ -202,7 +204,7 @@ def test_table_columns_only_mode_omits_micro_template(monkeypatch):
     captured = _call_writer(monkeypatch, plan, archetype="list-all")
     user = captured[0]["user"]
     assert "ENTITY MATRIX" in user, "matrix block should still fire in legacy mode"
-    assert "PER-ENTITY MICRO-TEMPLATE" not in user, f"micro-template block fired in legacy mode: {user[:2000]}"
+    assert "PER-ENTITY TREATMENT" not in user, f"per-entity treatment block fired in legacy mode: {user[:2000]}"
 
 
 # --------------------------------------------------------------------------
@@ -224,7 +226,7 @@ def test_s1_section_gets_table_render_directive(monkeypatch):
 
 
 def test_non_s1_section_gets_reminder_not_render(monkeypatch):
-    """Non-§1 sections get the equal-depth reminder + micro-template, but
+    """Non-§1 sections get the equal-depth reminder + per-entity treatment, but
     NOT the "render as table" directive (else we'd get duplicate tables)."""
     em = {
         "entities": ["E1", "E2", "E3", "E4", "E5"],
@@ -236,7 +238,7 @@ def test_non_s1_section_gets_reminder_not_render(monkeypatch):
     user = captured[0]["user"]
     assert "ENTITY MATRIX REMINDER" in user
     assert "ENTITY MATRIX (article spine" not in user, "non-§1 should not render table"
-    assert "PER-ENTITY MICRO-TEMPLATE" in user
+    assert "PER-ENTITY TREATMENT" in user
 
 
 # --------------------------------------------------------------------------
@@ -290,7 +292,7 @@ def test_non_em_archetype_with_prose_subheaders_mode_still_fires(monkeypatch):
     captured = _call_writer(monkeypatch, plan, archetype="predict")
     user = captured[0]["user"]
     assert "ENTITY MATRIX" in user, f"predict-archetype prose_subheaders matrix should fire; got: {user[:2000]}"
-    assert "PER-ENTITY MICRO-TEMPLATE" in user
+    assert "PER-ENTITY TREATMENT" in user
 
 
 def test_non_em_archetype_with_legacy_mode_suppresses(monkeypatch):
