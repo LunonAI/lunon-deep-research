@@ -75,6 +75,14 @@ CLEANING_RESISTANT_RULE = (
     "`{section_id}-` scope prefix is REQUIRED on reused markers too — "
     "bare `[^N]` (no section scope) WILL be stripped as orphans by "
     "footnote_normalize, silently dropping every reused citation.\n"
+    "   TARGET DENSITY (P3b-opt2, reference-corpus-measured): roughly 6 "
+    "inline markers per 1,000 words for EN (~12/1k for ZH), each unique "
+    "source reused ~7×. The ~326-markers-per-article figure above is that "
+    "SAME restraint expressed on a ~52k-word article — it is a CEILING "
+    "reflecting the reference's discipline, NOT a floor to maximize. Do NOT "
+    "exceed ~8/1k: cite load-bearing claims, not every clause. Over-citing "
+    "every sentence (a measured ~3× over the reference rate) reads as "
+    "'citation salad' and the RACE judge penalizes it on Readability.\n"
     "4. Never place a fact, name, date, or figure ONLY inside a citation mark, "
     "footnote, or the reference list. The inline prose still carries the "
     "claim; footnotes are SUPPLEMENTARY URL citation, not the substantive "
@@ -612,8 +620,20 @@ _INSIGHT_MIN = (
     "requirements. A single leaf needs to carry AT LEAST ONE of (a)-(f); "
     "across all leaves in the section, the proportions track the per-"
     "archetype distribution targets in `_INSIGHT_DISTRIBUTION_BY_ARCHETYPE` "
-    "(some leaves carry causal_chain, others carry forward_looking, etc.). "
-    "Multiple elements can apply to ONE leaf — that's fine.\n"
+    "(some leaves carry causal_chain, others carry forward_looking, etc.).\n"
+    "\n"
+    "ONE INSIGHT ELEMENT PER PARAGRAPH (P3b-opt2 reconciliation with the "
+    "PER-ENTITY TREATMENT prose form): a leaf MAY carry more than one "
+    "element, but give each its OWN dense paragraph. NEVER stack two or "
+    "more analytical modes (e.g. contrarian + quantified-projection + "
+    "causal-chain) into a single paragraph — that is the 'internally "
+    "unstable' stacking the RACE judge explicitly penalizes. Distributional "
+    "coverage is achieved ACROSS paragraphs/leaves, not by cramming modes "
+    "together. A section that hits its band by spreading ONE mode per dense "
+    "paragraph scores higher than one that hits the same counts by stacking. "
+    "The per-archetype targets are BANDS (see the user-prompt block): land "
+    "at the lower bound rather than over-firing the easy elements to chase "
+    "the ceiling.\n"
     "\n"
     "AVOID FORMULAIC INSERTION: do NOT bolt a generic 'looking ahead...' or "
     "'further research is needed' onto every leaf. The six elements above "
@@ -816,6 +836,17 @@ _DEDUP_RULE = (
     "make it in section X and don't repeat it elsewhere. Reference it briefly "
     "if needed ('as covered in §2') but never restate it. Repeated framing "
     "across sections is the #1 reader-fatigue complaint."
+)
+
+# P3b-opt2 (2026-05-28): em-dash restraint. The gap-distance scorer flagged
+# em-dash over-use; the reference corpus trend is ~12.45/1k (EN). A deterministic
+# clamp (style_clamp) is the backstop; this states the trend so the writer
+# doesn't over-produce in the first place.
+_EMDASH_RULE = (
+    "EM-DASH RESTRAINT:\n"
+    "Use em-dashes (—) sparingly: roughly 12 per 1,000 words (the reference "
+    "corpus trend). Prefer commas, periods, colons, or parentheses for "
+    "asides. Do NOT chain multiple em-dash clauses within one sentence."
 )
 
 _ARCH_REFINE_EMPHASIS = {
@@ -1050,6 +1081,7 @@ def writer_system(
         [
             _INSIGHT_MIN,
             CLEANING_RESISTANT_RULE,
+            _EMDASH_RULE,
             _SECTION_OPENING_PROSE_LEAD_RULE,
             _MID_PARAGRAPH_XREF_RULE,
             _MERMAID_DIRECTIVE,
