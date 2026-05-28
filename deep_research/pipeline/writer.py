@@ -534,9 +534,8 @@ def write_section(
             # tier) — consistent, and the 2-decimal validator passes by
             # construction because we format every value as "X.XX" here.
             entities_scored = tr.get("entities_scored")
-            scored_ok = isinstance(entities_scored, list) and len(entities_scored) > 0
-            if scored_ok:
-                display = []
+            display = []
+            if isinstance(entities_scored, list):
                 for e in entities_scored:
                     if not isinstance(e, dict) or not e.get("name"):
                         continue
@@ -556,6 +555,11 @@ def write_section(
                             "tier": e.get("tier"),
                         }
                     )
+            # Gate on the FILTERED list: if every entry was malformed (e.g. a
+            # corrupt deserialized plan), display is empty and we fall through
+            # to the compute directive rather than emit "PRE-COMPUTED SCORES []"
+            # with a verbatim-render instruction. (Greptile PR #51 P2.)
+            if display:
                 parts.append(
                     "  PRE-COMPUTED SCORES — the scoring math is already done "
                     "for you. Render these EXACT values VERBATIM; do NOT "
