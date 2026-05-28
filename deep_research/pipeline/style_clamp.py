@@ -34,9 +34,6 @@ import re
 _INLINE_RE = re.compile(r"\[\^([A-Za-z0-9._-]+)\](?!:)")
 # Definition LINE (anchored), so we never count/touch the bibliography markers.
 _DEF_LINE_RE = re.compile(r"^[ \t]*\[\^[A-Za-z0-9._-]+\]:", re.MULTILINE)
-# A References heading (## References, optional numbering), any level — the
-# tail from the LAST such heading is the bibliography, never clamped.
-_REFS_HEADING_RE = re.compile(r"(?im)^#{1,6}[ \t]*\d*\.?[ \t]*references?\b")
 # Sentence terminator followed by whitespace/EOL (avoids splitting "3.5").
 _SENT_END_RE = re.compile(r"[.!?](?=\s|$)")
 # Common abbreviations whose trailing "." is NOT a sentence end — counting
@@ -99,16 +96,6 @@ def _words(t: str) -> int:
         latin = len(re.findall(r"[A-Za-z]+", t))
         return max(int(cjk / 1.6) + latin, 1)
     return max(len(t.split()), 1)
-
-
-def _split_references(article: str) -> tuple[str, str]:
-    """Split off the trailing bibliography (from the LAST References heading)
-    so the clamp never touches it. Returns (body, refs_suffix)."""
-    matches = list(_REFS_HEADING_RE.finditer(article))
-    if not matches:
-        return article, ""
-    cut = matches[-1].start()
-    return article[:cut], article[cut:]
 
 
 def _protected_ranges(body: str) -> list[tuple[int, int]]:
@@ -192,7 +179,12 @@ def clamp_citations(article: str, *, language: str = "en", max_per_1k: float | N
         return article, _zero_cite_stats(language)
     ceiling = max_per_1k if max_per_1k is not None else _CITE_CEIL.get(language, _CITE_CEIL["en"])
 
-    body, refs = _split_references(article)
+    # P3b-D2: process the WHOLE article — def lines, headings, tables and code
+    # are already protected by _protected_ranges, so a trailing References
+    # block is never edited. (The old _split_references over-cut on the first
+    # mid-article "references"-like heading, leaving ~74% of the article
+    # unclamped pre-footnote_normalize.)
+    body = article
     protected = _protected_ranges(body)
     sent_ends = _sentence_end_positions(body)
 
@@ -279,7 +271,7 @@ def clamp_citations(article: str, *, language: str = "en", max_per_1k: float | N
     pieces.append(_cleanup(new_body[cur:]))
     new_body = "".join(pieces)
 
-    new_article = new_body + refs
+    new_article = new_body
     markers_after = markers_before - len(remove)
     return new_article, {
         "markers_before": markers_before,
@@ -313,7 +305,7 @@ def clamp_emdash(article: str, *, language: str = "en", max_per_1k: float | None
         return article, zero
     ceiling = max_per_1k if max_per_1k is not None else _EMDASH_CEIL.get(language, _EMDASH_CEIL["en"])
 
-    body, refs = _split_references(article)
+    body = article  # whole article; protected spans cover any References block
     protected = _protected_ranges(body)
     words = _words(body)
     before = _emdash_count(body, protected)
@@ -349,7 +341,7 @@ def clamp_emdash(article: str, *, language: str = "en", max_per_1k: float | None
         return article, zero
 
     after = _emdash_count(new_body, _protected_ranges(new_body))
-    return new_body + refs, {
+    return new_body, {
         "emdash_before": before,
         "emdash_after": after,
         "pairs_converted": pairs,
