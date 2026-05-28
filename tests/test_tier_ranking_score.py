@@ -179,40 +179,43 @@ def test_writer_falls_back_when_all_scored_entries_malformed(monkeypatch):
 # ---------- architect integration ----------
 
 
-def test_architect_attaches_entities_scored(monkeypatch):
-    from deep_research.pipeline import architect
-
-    sentinel = [{"name": "Alpha", "dimension_scores": {"R-1": 8.0}, "S_final": 8.0, "tier": "Tier 1"}]
-    monkeypatch.setattr(architect.tier_ranking_score, "score_entities", lambda *a, **k: sentinel)
-    plan = {
+def _stub_llm_plan_with_tier():
+    """Minimal normalize-able plan (with a tier_ranking dict) for stubbing the
+    architect LLM, so build()'s real attachment path can fire."""
+    return {
+        "report_toc": [{"id": "S1", "title": "T", "subsections": [{"id": "S1.1", "title": "s", "depth_seeds": []}]}],
+        "acceptance_criteria": [],
+        "queries": [],
         "tier_ranking": {
             "title": "Tier Ranking",
             "weights": {"R-1": 1.0},
             "tiers": [{"name": "T1", "threshold": ">=8.0"}],
-        }
+        },
     }
-    # Exercise the enrichment branch directly (mirrors architect.build tail).
-    scored = architect.tier_ranking_score.score_entities(plan, "en")
-    if scored is not None and isinstance(plan.get("tier_ranking"), dict):
-        plan["tier_ranking"]["entities_scored"] = scored
-    assert plan["tier_ranking"]["entities_scored"] == sentinel
 
 
 def test_architect_survives_scorer_exception(monkeypatch):
+    """A scorer exception is swallowed by build()'s try/except — the REAL
+    build() still returns a valid plan with no entities_scored attached."""
     from deep_research.pipeline import architect
 
     def boom(*a, **k):
         raise RuntimeError("scorer crashed")
 
     monkeypatch.setattr(architect.tier_ranking_score, "score_entities", boom)
-    plan = {"tier_ranking": {"title": "Tier Ranking"}}
-    # The try/except in build must swallow this; emulate it here.
-    try:
-        scored = architect.tier_ranking_score.score_entities(plan, "en")
-        if scored is not None:
-            plan["tier_ranking"]["entities_scored"] = scored
-    except Exception:
-        pass
+    monkeypatch.setattr(architect.llm, "call_json", lambda *a, **k: _stub_llm_plan_with_tier())
+    plan = architect.build("p", "en", "predict", [], {}, [])
+    assert "entities_scored" not in plan["tier_ranking"]
+
+
+def test_architect_skips_attachment_when_scorer_returns_none(monkeypatch):
+    """Scorer returning None → REAL build() leaves tier_ranking without an
+    entities_scored key (writer then falls back to the compute directive)."""
+    from deep_research.pipeline import architect
+
+    monkeypatch.setattr(architect.tier_ranking_score, "score_entities", lambda *a, **k: None)
+    monkeypatch.setattr(architect.llm, "call_json", lambda *a, **k: _stub_llm_plan_with_tier())
+    plan = architect.build("p", "en", "predict", [], {}, [])
     assert "entities_scored" not in plan["tier_ranking"]
 
 
@@ -335,30 +338,23 @@ def test_writer_falls_back_when_all_entries_have_bad_s_final(monkeypatch):
     assert "TIER RANKING + SENSITIVITY CHECK CONTRACT" in user
 
 
-def test_build_forwards_task_id_to_scorer(monkeypatch):
-    """Greptile PR #51 round-2: build() forwards task_id to score_entities so
-    the scoring LLM call's ledger note is per-task traceable."""
+def test_build_forwards_task_id_and_attaches_scores(monkeypatch):
+    """Through the REAL build(): task_id is forwarded to score_entities (for the
+    per-task ledger note) AND the non-None result is attached to
+    plan['tier_ranking']['entities_scored']. Covers both the task_id plumbing
+    (Greptile #51 r2) and the attachment guard (Greptile #51 r3) in one shot —
+    a regression in either is caught because build() is actually invoked."""
     from deep_research.pipeline import architect
 
     captured = {}
+    sentinel = [{"name": "Alpha", "dimension_scores": {"R-1": 8.0}, "S_final": 8.0, "tier": "Tier 1"}]
 
     def fake_score(plan, language, task_id=None):
         captured["task_id"] = task_id
-        return None
+        return sentinel
 
     monkeypatch.setattr(architect.tier_ranking_score, "score_entities", fake_score)
-    # Stub the architect LLM so build() produces a normalize-able plan without
-    # a real call.
-    monkeypatch.setattr(
-        architect.llm,
-        "call_json",
-        lambda *a, **k: {
-            "report_toc": [
-                {"id": "S1", "title": "T", "subsections": [{"id": "S1.1", "title": "s", "depth_seeds": []}]}
-            ],
-            "acceptance_criteria": [],
-            "queries": [],
-        },
-    )
-    architect.build("p", "en", "predict", [], {}, [], task_id=42)
+    monkeypatch.setattr(architect.llm, "call_json", lambda *a, **k: _stub_llm_plan_with_tier())
+    plan = architect.build("p", "en", "predict", [], {}, [], task_id=42)
     assert captured["task_id"] == 42
+    assert plan["tier_ranking"]["entities_scored"] == sentinel
