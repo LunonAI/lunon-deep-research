@@ -12,6 +12,7 @@ import json
 import re
 
 from .. import llm
+from . import tier_ranking_score
 
 # query.type -> researcher specialist (1:1, per AI-Q + technique 16)
 TYPE_TO_SPECIALIST = {
@@ -544,7 +545,13 @@ def _coerce_to_dict(plan) -> dict:
 
 
 def build(
-    prompt: str, language: str, archetype: str, intents: list, landscape: dict, coverage_obligations: list
+    prompt: str,
+    language: str,
+    archetype: str,
+    intents: list,
+    landscape: dict,
+    coverage_obligations: list,
+    task_id: int | None = None,
 ) -> dict:
     emphasis = _ARCH_EMPHASIS.get(archetype, "")
     # Wave 2 §1.2: inject the per-archetype outline-shape preset into the
@@ -711,6 +718,18 @@ def build(
                 # shortfalls than the original — the old name fired on that
                 # path too, misleading anyone reading telemetry about WHY.
                 audit["retry_rejected"] = True
+
+    # P3b-OPT3 (2026-05-27): pre-compute per-entity tier-ranking scores so the
+    # writer renders deterministic numbers instead of hallucinating them. LLM
+    # judgment (per-dimension scores) + Python arithmetic (S_final + tier).
+    # Fail-soft: any problem returns None and the writer falls back to its
+    # prior compute-it-yourself directive — never breaks plan construction.
+    try:
+        scored = tier_ranking_score.score_entities(plan, language, task_id=task_id)
+        if scored is not None and isinstance(plan.get("tier_ranking"), dict):
+            plan["tier_ranking"]["entities_scored"] = scored
+    except Exception:  # noqa: BLE001 — scorer is best-effort enrichment
+        pass
 
     return plan
 

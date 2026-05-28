@@ -527,46 +527,139 @@ def write_section(
                 f"  Weights (mirror §1 framing-chapter rubric items by id): {json.dumps(weights, ensure_ascii=False)}"
             )
             parts.append(f"  Tiers and thresholds: {json.dumps(tiers, ensure_ascii=False)}")
-            parts.append(
-                "  REQUIRED chapter structure:\n"
-                "    1. Opening (~2 paragraphs): state the scoring formula "
-                "explicitly + cite §1 rubric items by id (R-1, R-2, ...) so "
-                "weights trace back to the published rubric.\n"
-                "    2. SCORING TABLE — markdown table:\n"
-                "       - Rows = entities (from §1 entity_matrix).\n"
-                "       - Columns = entity name + each rubric dimension score "
-                "+ S_final + tier.\n"
-                "       - ALL scores reported to 2 DECIMAL PLACES (e.g., "
-                "7.45, 6.32, 8.81 — NEVER 7.5 or 7, NEVER 7.452). Pin "
-                "precision to 2; the validator checks for ≥1 cell matching "
-                "`\\b\\d+\\.\\d{2}\\b` AND zero cells with 3+ decimals.\n"
-                "    3. TIER ASSIGNMENT: each entity placed in a tier per "
-                "the thresholds; 1-2 sentence rationale per entity naming "
-                "the DOMINANT dimension(s) driving the placement.\n"
-                f"    4. SENSITIVITY CHECK (sub-section heading must "
-                f"contain 'sensitivity' / '敏感性' / '±{perturbation_pp}pp'): "
-                f"re-rank under ±{perturbation_pp}pp perturbation of each "
-                "weight. For each perturbed weight, recompute S_final for "
-                "ALL entities and report:\n"
-                "       - Number of entities that change tier under the "
-                "perturbation.\n"
-                "       - The most-sensitive weight (whose perturbation "
-                "causes the highest tier-shift count).\n"
-                "       - A RANK-STABILITY TABLE: rows = scenarios (base / "
-                "each weight ±pp), columns = entities, cells = tier "
-                "assignment.\n"
-                "    Interpretation directive: rank stability across "
-                "±perturbation = robust findings; ≥3 tier shifts in any "
-                "perturbed scenario = sensitive ranking, acknowledge "
-                "explicitly that conclusions depend on weight choice.\n"
-                "  Sensitivity perturbation MUST be COMPUTATIONAL not "
-                "narrative — produce the ACTUAL recomputed S_final values "
-                "(2 decimals each), not a paragraph describing what would "
-                "happen if weights were perturbed. The Lunon writer has "
-                "historically hallucinated this sub-section as prose; the "
-                "validator checks for the table structure (2-decimal cells "
-                "+ sensitivity sub-heading)."
-            )
+            # P3b-OPT3 (2026-05-27): when the architect pre-computed per-entity
+            # scores (tier_ranking_score.score_entities), render them verbatim
+            # instead of asking the writer to invent them. Pre-computation is
+            # LLM judgment (dimension scores) + Python arithmetic (S_final +
+            # tier) — consistent, and the 2-decimal validator passes by
+            # construction because we format every value as "X.XX" here.
+            entities_scored = tr.get("entities_scored")
+            display = []
+            if isinstance(entities_scored, list):
+                for e in entities_scored:
+                    # Require a usable name AND a numeric S_final. An entry with
+                    # a non-numeric S_final (e.g. a plan whose entities_scored
+                    # came from a non-scorer path) would otherwise render as the
+                    # literal `null`, which the verbatim-render directive tells
+                    # the writer to copy — failing the 2-decimal validator. Skip
+                    # it; if that empties `display`, the if-display gate below
+                    # falls through to the compute directive. (Greptile #51 r2.)
+                    sf = e.get("S_final") if isinstance(e, dict) else None
+                    if (
+                        not isinstance(e, dict)
+                        or not e.get("name")
+                        or not (isinstance(sf, (int, float)) and not isinstance(sf, bool))
+                    ):
+                        continue
+                    dims = {
+                        k: f"{v:.2f}"
+                        for k, v in (e.get("dimension_scores") or {}).items()
+                        if isinstance(v, (int, float)) and not isinstance(v, bool)
+                    }
+                    display.append(
+                        {
+                            "name": e["name"],
+                            "dimension_scores": dims,
+                            "S_final": f"{sf:.2f}",
+                            "tier": e.get("tier"),
+                        }
+                    )
+            # Gate on the FILTERED list: if every entry was malformed (e.g. a
+            # corrupt deserialized plan), display is empty and we fall through
+            # to the compute directive rather than emit "PRE-COMPUTED SCORES []"
+            # with a verbatim-render instruction. (Greptile PR #51 P2.)
+            if display:
+                # The pre-computed S_final values were derived from weights
+                # renormalized to sum to 1.0 (tier_ranking_score._clean_weights).
+                # The sensitivity directive MUST hand the writer those same
+                # normalized weights — using the raw architect weights (which may
+                # not sum to 1.0, e.g. {R-1:5, R-2:3, R-3:2}) would give a
+                # sensitivity baseline inconsistent with the main table, the very
+                # inconsistency this PR removes. (Greptile PR #51 round-2.)
+                _w_total = sum(weights.values()) or 1.0
+                norm_weights = {k: round(v / _w_total, 6) for k, v in weights.items()}
+                parts.append(
+                    "  PRE-COMPUTED SCORES — the scoring math is already done "
+                    "for you. Render these EXACT values VERBATIM; do NOT "
+                    "recompute, round differently, or alter any number:\n"
+                    f"    {json.dumps(display, ensure_ascii=False)}"
+                )
+                parts.append(
+                    "  REQUIRED chapter structure:\n"
+                    "    1. Opening (~2 paragraphs): state the scoring formula "
+                    "explicitly + cite §1 rubric items by id (R-1, R-2, ...) so "
+                    "weights trace back to the published rubric.\n"
+                    "    2. SCORING TABLE — render the PRE-COMPUTED SCORES above "
+                    "as a markdown table: rows = entities, columns = entity name "
+                    "+ each dimension score + S_final + tier. Copy every number "
+                    "EXACTLY as given (they are already 2-decimal).\n"
+                    "    3. TIER ASSIGNMENT: 1-2 sentence rationale per entity "
+                    "naming the DOMINANT dimension(s) (highest dimension scores) "
+                    "that drove its placement — this is YOUR analysis prose.\n"
+                    f"    4. SENSITIVITY CHECK (sub-section heading must contain "
+                    f"'sensitivity' / '敏感性' / '±{perturbation_pp}pp'): using the "
+                    f"pre-computed dimension scores and these NORMALIZED weights "
+                    f"(they sum to 1.0 and match the pre-computed S_final baseline "
+                    f"— use THESE, not the raw weights above): "
+                    f"{json.dumps(norm_weights, ensure_ascii=False)}, "
+                    f"recompute S_final under ±{perturbation_pp}pp perturbation of "
+                    "each weight (the arithmetic is deterministic from the data "
+                    "above — do it precisely). Report:\n"
+                    "       - Number of entities that change tier under each "
+                    "perturbation.\n"
+                    "       - The most-sensitive weight (highest tier-shift "
+                    "count).\n"
+                    "       - A RANK-STABILITY TABLE: rows = scenarios (base / "
+                    "each weight ±pp), columns = entities, cells = tier.\n"
+                    "    Interpretation: stability across ±perturbation = robust; "
+                    "≥3 tier shifts in any scenario = sensitive ranking, "
+                    "acknowledge that conclusions depend on weight choice. "
+                    "Produce ACTUAL recomputed 2-decimal S_final values, not "
+                    "prose describing what would happen."
+                )
+            else:
+                # Fallback (scorer returned None / not yet run): the writer
+                # computes the table itself, as before this PR.
+                parts.append(
+                    "  REQUIRED chapter structure:\n"
+                    "    1. Opening (~2 paragraphs): state the scoring formula "
+                    "explicitly + cite §1 rubric items by id (R-1, R-2, ...) so "
+                    "weights trace back to the published rubric.\n"
+                    "    2. SCORING TABLE — markdown table:\n"
+                    "       - Rows = entities (from §1 entity_matrix).\n"
+                    "       - Columns = entity name + each rubric dimension score "
+                    "+ S_final + tier.\n"
+                    "       - ALL scores reported to 2 DECIMAL PLACES (e.g., "
+                    "7.45, 6.32, 8.81 — NEVER 7.5 or 7, NEVER 7.452). Pin "
+                    "precision to 2; the validator checks for ≥1 cell matching "
+                    "`\\b\\d+\\.\\d{2}\\b` AND zero cells with 3+ decimals.\n"
+                    "    3. TIER ASSIGNMENT: each entity placed in a tier per "
+                    "the thresholds; 1-2 sentence rationale per entity naming "
+                    "the DOMINANT dimension(s) driving the placement.\n"
+                    f"    4. SENSITIVITY CHECK (sub-section heading must "
+                    f"contain 'sensitivity' / '敏感性' / '±{perturbation_pp}pp'): "
+                    f"re-rank under ±{perturbation_pp}pp perturbation of each "
+                    "weight. For each perturbed weight, recompute S_final for "
+                    "ALL entities and report:\n"
+                    "       - Number of entities that change tier under the "
+                    "perturbation.\n"
+                    "       - The most-sensitive weight (whose perturbation "
+                    "causes the highest tier-shift count).\n"
+                    "       - A RANK-STABILITY TABLE: rows = scenarios (base / "
+                    "each weight ±pp), columns = entities, cells = tier "
+                    "assignment.\n"
+                    "    Interpretation directive: rank stability across "
+                    "±perturbation = robust findings; ≥3 tier shifts in any "
+                    "perturbed scenario = sensitive ranking, acknowledge "
+                    "explicitly that conclusions depend on weight choice.\n"
+                    "  Sensitivity perturbation MUST be COMPUTATIONAL not "
+                    "narrative — produce the ACTUAL recomputed S_final values "
+                    "(2 decimals each), not a paragraph describing what would "
+                    "happen if weights were perturbed. The Lunon writer has "
+                    "historically hallucinated this sub-section as prose; the "
+                    "validator checks for the table structure (2-decimal cells "
+                    "+ sensitivity sub-heading)."
+                )
             tier_ranking_block = "\n".join(parts) + "\n"
 
     # P3-W5.b (2026-05-27): LIMITATIONS CHAPTER CONTRACT injection.
