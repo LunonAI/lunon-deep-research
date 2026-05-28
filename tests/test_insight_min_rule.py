@@ -64,6 +64,29 @@ def test_insight_rule_rejects_formulaic_insertion():
     assert "pick a different depth_seed" not in _INSIGHT_MIN
 
 
+def test_insight_rule_has_one_element_per_paragraph_reconciliation():
+    """P3b-opt2: the insight rule must reconcile with the PER-ENTITY prose
+    form by forbidding multi-mode stacking in a single paragraph, and the
+    old stacking-permission ('Multiple elements can apply to ONE leaf —
+    that's fine') must be GONE (it green-lit the 'internally unstable'
+    stacking the RACE judge penalizes)."""
+    assert "ONE INSIGHT ELEMENT PER PARAGRAPH" in _INSIGHT_MIN
+    assert "NEVER stack" in _INSIGHT_MIN
+    assert "internally" in _INSIGHT_MIN and "unstable" in _INSIGHT_MIN
+    assert "BANDS" in _INSIGHT_MIN
+    # the old permissive sentence is amended away
+    assert "that's fine" not in _INSIGHT_MIN
+
+
+def test_emdash_restraint_rule_in_writer_system():
+    """P3b-opt2: the em-dash restraint clause is wired into every section's
+    system prompt (the deterministic clamp is the backstop; the directive
+    states the Qianfan trend so the writer doesn't over-produce)."""
+    sys = writer_system("list-all", "default", "en", ["A", "B"], task_id=None)
+    assert "EM-DASH RESTRAINT" in sys
+    assert "12 per 1,000 words" in sys
+
+
 def test_writer_system_includes_new_insight_rule_for_every_archetype():
     """Wired through writer_system() — the rule appears regardless of which
     archetype the caller passes. (Old rule was always included too, just

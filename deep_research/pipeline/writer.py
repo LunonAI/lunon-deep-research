@@ -969,6 +969,16 @@ _INLINE_MARKER_RE = re.compile(r"\[\^([A-Za-z0-9._-]+)\](?!:)")
 _DEF_LINE_RE = re.compile(r"^[ \t]*\[\^([A-Za-z0-9._-]+)\]:[ \t]*", re.MULTILINE)
 
 
+def _insight_band(lo: int) -> str:
+    """Floor→band (P3b-opt2): `lo` is the calibrated Qianfan-corpus floor —
+    NEVER lowered, so the Insight coverage that beats the reference (+1.08)
+    is preserved. `hi` adds an upper cap (≈1.5× lo, min spread 5pp, capped at
+    100) that forecloses the measured ~5-6× over-production the RACE judge
+    reads as 'internally unstable' stacking."""
+    hi = min(100, max(lo + 5, round(lo * 1.5)))
+    return f"{lo}–{hi}"
+
+
 def _insight_distribution_block(archetype: str | None) -> str:
     """Wave 2 §3.2 (2026-05-26): user-prompt mirror of the system-prompt
     `_INSIGHT_MIN` distribution targets with per-archetype interpolation.
@@ -984,13 +994,21 @@ def _insight_distribution_block(archetype: str | None) -> str:
         f"(archetype `{archetype}`, Wave 3 PR 2 — extended from 4 to 6 "
         f"elements to cover RACE Insight criteria 2 + 3):\n"
         f"Across all leaves in YOUR section, target this distribution of "
-        f"the six `_INSIGHT_MIN` elements:\n"
-        f"  • (a) FORWARD-LOOKING IMPLICATION:   aim ≥{d['forward_looking_min']}% of leaves\n"
-        f"  • (b) NAMED CONTRARIAN FRAMING:      aim ≥{d['contrarian_min']}% of leaves\n"
-        f"  • (c) QUANTIFIED PROJECTION:         aim ≥{d['quant_min']}% of leaves\n"
-        f"  • (d) NAMED-ALTERNATIVE COMPARISON:  aim ≥{d['alternative_min']}% of leaves\n"
-        f"  • (e) CAUSAL CHAIN (multi-link):     aim ≥{d['causal_chain_min']}% of leaves\n"
-        f"  • (f) PROBLEM-TRADEOFF:              aim ≥{d['problem_tradeoff_min']}% of leaves\n"
+        f"the six `_INSIGHT_MIN` elements (these are BANDS, not floors):\n"
+        f"  • (a) FORWARD-LOOKING IMPLICATION:   aim {_insight_band(d['forward_looking_min'])}% of leaves\n"
+        f"  • (b) NAMED CONTRARIAN FRAMING:      aim {_insight_band(d['contrarian_min'])}% of leaves\n"
+        f"  • (c) QUANTIFIED PROJECTION:         aim {_insight_band(d['quant_min'])}% of leaves\n"
+        f"  • (d) NAMED-ALTERNATIVE COMPARISON:  aim {_insight_band(d['alternative_min'])}% of leaves\n"
+        f"  • (e) CAUSAL CHAIN (multi-link):     aim {_insight_band(d['causal_chain_min'])}% of leaves\n"
+        f"  • (f) PROBLEM-TRADEOFF:              aim {_insight_band(d['problem_tradeoff_min'])}% of leaves\n"
+        f"P3b-opt2 (2026-05-28): the lower bound is the Qianfan-corpus-"
+        f"calibrated rate that ALREADY beats the reference on Insight "
+        f"(+1.08) — landing there is fully acceptable. Do NOT exceed the "
+        f"upper bound: over-firing the EASY elements (the measured ~5-6× "
+        f"quant/contrarian overshoot vs the Qianfan corpus) is what the "
+        f"RACE judge reads as 'internally unstable' multi-mode stacking. "
+        f"Give each element its OWN dense paragraph (one analytical theme "
+        f"per paragraph) — never stack two modes to hit a number.\n"
         f"Each element's full definition is in the system-prompt "
         f"`_INSIGHT_MIN` block. (e) and (f) are NEW in Wave 3 PR 2 and "
         f"target the two RACE Insight criteria (Causal Reasoning + "
