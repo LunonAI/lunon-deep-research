@@ -271,28 +271,48 @@ def test_insight_distribution_writer_prompt_mirrors_targets():
     Greptile PR #34 round-1 follow-up: causal_chain targets lowered
     across all archetypes after the detector was tightened to require
     ≥2 chain markers per leaf."""
-    from deep_research.pipeline.writer import _insight_distribution_block
+    from deep_research import writing_rules as wr
+    from deep_research.pipeline.writer import _insight_band, _insight_distribution_block
 
-    # predict archetype: Wave 3 calibration set forward_looking_min=70
-    # (Q observed 76% on id=3). causal_chain_min was 45 in the original
-    # Wave 3 PR 2; Greptile follow-up dropped it to 2 after the strict
-    # detector showed Q at 3%.
+    # P3b-opt2: floors are now BANDS. Lower bound = the calibrated the reference-
+    # corpus floor (NEVER lowered — preserves the +1.08 Insight win); upper
+    # bound caps the measured 5-6× over-production. predict forward=70 → 70–100.
     block = _insight_distribution_block("predict")
+    dp = wr.insight_distribution("predict")
     assert "INSIGHT DISTRIBUTION" in block
-    assert "≥70%" in block, "predict's recalibrated forward_looking target should appear"
+    assert _insight_band(70) == "70–100"  # pin the band math
+    assert _insight_band(dp["forward_looking_min"]) + "%" in block
     # list-all archetype: Wave 3 set alternative_min=60 (Q observed 76%).
     block_la = _insight_distribution_block("list-all")
+    dla = wr.insight_distribution("list-all")
     assert "INSIGHT DISTRIBUTION" in block_la
-    assert "≥60%" in block_la, "list-all's recalibrated alternative target should appear"
+    assert _insight_band(dla["alternative_min"]) + "%" in block_la
     # The 6-element naming must include the 2 new elements verbatim so
     # the writer sees what (e) and (f) are.
     assert "(e) CAUSAL CHAIN" in block
     assert "(f) PROBLEM-TRADEOFF" in block
-    # Per-element percentage strings must appear for ALL six elements
-    # on this archetype (predict targets fwd 70 / contr 5 / quant 25 /
-    # alt 35 / causal 2 / problem 5).
-    for pct in ("≥70%", "≥5%", "≥25%", "≥35%", "≥2%"):
-        assert pct in block, f"predict: missing target string {pct!r}"
+    # Every element's band LOWER bound equals its calibrated floor — the
+    # win-preserving invariant (lower bound is never reduced). Match each band
+    # on the SAME line as its element label: predict's contrarian_min and
+    # problem_tradeoff_min are both 5 → "5–10", so a block-wide substring check
+    # would still pass if the (f) line were dropped (the (b) line covers it).
+    element_labels = {
+        "forward_looking_min": "(a) FORWARD-LOOKING IMPLICATION",
+        "contrarian_min": "(b) NAMED CONTRARIAN FRAMING",
+        "quant_min": "(c) QUANTIFIED PROJECTION",
+        "alternative_min": "(d) NAMED-ALTERNATIVE COMPARISON",
+        "causal_chain_min": "(e) CAUSAL CHAIN",
+        "problem_tradeoff_min": "(f) PROBLEM-TRADEOFF",
+    }
+    block_lines = block.splitlines()
+    for key, label in element_labels.items():
+        line = next((ln for ln in block_lines if label in ln), None)
+        assert line is not None, f"predict: missing element line for {label}"
+        assert _insight_band(dp[key]) + "%" in line, f"predict: band for {key} not on its own line"
+    # Bands-not-floors framing + the no-stacking reconciliation must be stated.
+    assert "BANDS, not floors" in block
+    assert "Do NOT exceed" in block
+    assert "stacking" in block.lower()
     # The compliance scorer reference must be there so the writer
     # knows the targets are MEASURED downstream.
     assert "p2_writer_compliance.py" in block

@@ -83,6 +83,18 @@ def test_cleaning_resistant_rule_makes_footnotes_mandatory():
     )
 
 
+def test_cleaning_resistant_rule_has_citation_density_ceiling():
+    """P3b-opt2: rule 3 must state a per-1k density CEILING (not just the
+    mandatory-insertion framing) so the writer stops over-citing (~19.5/1k
+    measured vs the reference ~6.3/1k). The ~326-marker figure is reframed as a
+    ceiling, not a floor to maximize."""
+    rule = writing_rules.CLEANING_RESISTANT_RULE
+    assert "TARGET DENSITY" in rule
+    assert "per 1,000 words" in rule
+    assert "Do NOT" in rule and "8/1k" in rule
+    assert "citation salad" in rule.lower() or "salad" in rule.lower()
+
+
 def test_writer_section_user_prompt_carries_citation_contract():
     """The writer.write_section user-prompt evidence block was previously
     'cite by inline source NAME; you may also add a numeric [n]' — silent
