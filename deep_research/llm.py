@@ -184,8 +184,16 @@ def call_json(
     retries=2,
     timeout=300,
     max_retries=3,
+    cache_system=None,
+    cache_ttl="5m",
 ):
-    """call() + JSON extraction with a light retry on parse failure."""
+    """call() + JSON extraction with a light retry on parse failure.
+
+    cache_system / cache_ttl mirror `call()` so callers using the JSON dispatch
+    surface have the same explicit prompt-cache control (e.g. opt a JSON role
+    out, or enable caching for a future JSON-returning role). `None` keeps the
+    role-based auto-enable in `call()`.
+    """
     last = None
     for _ in range(retries + 1):
         txt = call(
@@ -200,6 +208,8 @@ def call_json(
             note=note,
             timeout=timeout,
             max_retries=max_retries,
+            cache_system=cache_system,
+            cache_ttl=cache_ttl,
         )
         try:
             return extract_json(txt)

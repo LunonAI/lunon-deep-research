@@ -185,3 +185,40 @@ def test_llm_call_explicit_override_wins(monkeypatch):
     captured = _patch_raw_call(monkeypatch)
     llm.call("architect", "u", system="SYS", cache_system=True)
     assert captured["cache_system"] is True
+
+
+def test_call_json_forwards_cache_params(monkeypatch):
+    """call_json mirrors call()'s cache_system/cache_ttl so the JSON dispatch
+    surface has the same explicit prompt-cache control (Greptile PR #50 r3 —
+    previously these were droppable only via call() directly)."""
+    from deep_research import llm
+
+    captured = {}
+
+    def fake_call(role, user, **kw):
+        captured["cache_system"] = kw.get("cache_system")
+        captured["cache_ttl"] = kw.get("cache_ttl")
+        return '{"ok": true}'
+
+    monkeypatch.setattr(llm, "call", fake_call)
+    llm.call_json("architect", "u", cache_system=True, cache_ttl="1h")
+    assert captured["cache_system"] is True
+    assert captured["cache_ttl"] == "1h"
+
+
+def test_call_json_default_cache_params_preserve_auto_enable(monkeypatch):
+    """call_json defaults (cache_system=None, ttl 5m) keep the role-based
+    auto-enable intact in call()."""
+    from deep_research import llm
+
+    captured = {}
+
+    def fake_call(role, user, **kw):
+        captured["cache_system"] = kw.get("cache_system")
+        captured["cache_ttl"] = kw.get("cache_ttl")
+        return '{"ok": true}'
+
+    monkeypatch.setattr(llm, "call", fake_call)
+    llm.call_json("writer", "u")
+    assert captured["cache_system"] is None  # → call() derives True for writer
+    assert captured["cache_ttl"] == "5m"
