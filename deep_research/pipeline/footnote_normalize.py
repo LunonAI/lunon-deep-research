@@ -44,14 +44,24 @@ _NAME_NORM_RE = re.compile(r"[^\w\s]", re.UNICODE)
 
 def _def_source_key(text: str) -> str:
     """Canonical dedup key for a definition's source: its normalized URL when
-    present, else its normalized source-name (so no-URL defs still merge)."""
+    the tail after the ` — ` separator is a real http(s) URL, else the
+    normalized FULL definition text.
+
+    The http(s) guard is required: ``_normalize_url`` returns a non-empty
+    pseudo-URL for ANY non-empty string (e.g. ``"See §4"`` → ``"https://see
+    §4"``), so without it the name fallback is dead code AND two different
+    sources sharing a coincidental non-URL tail would false-merge. Keying the
+    fallback on the FULL text (not just the head) preserves tail distinctions
+    like ``"Lebrun (1999) — vol 1"`` vs ``"… — vol 2"`` — conservative: only
+    byte-identical sources merge when no real URL is present."""
+    text = text.strip()
     if _DEF_SEP in text:
-        head, tail = text.rsplit(_DEF_SEP, 1)
-        u = _normalize_url(tail.strip())
-        if u:
-            return "u:" + u
-    name = text.split(_DEF_SEP, 1)[0]
-    return "n:" + re.sub(r"\s+", " ", _NAME_NORM_RE.sub("", name.lower())).strip()
+        tail = text.rsplit(_DEF_SEP, 1)[1].strip()
+        if tail.startswith(("http://", "https://")):
+            u = _normalize_url(tail)
+            if u:
+                return "u:" + u
+    return "n:" + re.sub(r"\s+", " ", _NAME_NORM_RE.sub("", text.lower())).strip()
 
 
 # Definition pattern: ``[^token]: definition text`` anchored to line start.
