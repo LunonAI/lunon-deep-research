@@ -138,9 +138,15 @@ def score_entities(plan: dict, language: str, task_id: int | None = None) -> lis
             v = raw.get(dim)
             if isinstance(v, (int, float)) and not isinstance(v, bool):
                 dim_scores[dim] = round(float(v), 2)
-        if not dim_scores:
+        # Every weight dimension must be present. A missing one in a partial
+        # LLM response would silently contribute 0.0 to the weighted sum —
+        # deflating S_final (possibly a whole tier) AND making the rendered
+        # table arithmetically inconsistent (visible columns wouldn't multiply
+        # out to S_final). Skip the entity instead (fail-soft, same contract as
+        # the other guards). Subsumes the empty-dim_scores case. (Greptile #51.)
+        if set(dim_scores) != set(weights):
             continue
-        s_final = round(sum(weights[d] * dim_scores.get(d, 0.0) for d in weights), 2)
+        s_final = round(sum(weights[d] * dim_scores[d] for d in weights), 2)
         scored.append(
             {
                 "name": ent,

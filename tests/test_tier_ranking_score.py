@@ -141,6 +141,41 @@ def test_threshold_parser():
     assert tier_ranking_score._parse_threshold("garbage") is None
 
 
+def test_entity_with_missing_dimension_is_skipped(monkeypatch):
+    """Greptile PR #51 P1: a partial LLM response missing a weight dimension
+    must NOT silently substitute 0.0 (which would deflate S_final and make the
+    table arithmetically inconsistent). The entity is skipped instead."""
+    _mock_scores(
+        monkeypatch,
+        {
+            "Alpha": {"R-1": 9.0, "R-2": 8.0, "R-3": 7.0},  # complete
+            "Beta": {"R-1": 9.0, "R-2": 8.0},  # missing R-3 → skip
+        },
+    )
+    out = tier_ranking_score.score_entities(_plan(entity_matrix={"entities": ["Alpha", "Beta"]}), "en")
+    names = [e["name"] for e in out]
+    assert names == ["Alpha"], f"Beta (missing R-3) should be skipped; got {names}"
+
+
+def test_all_entities_missing_dimensions_returns_none(monkeypatch):
+    """If every entity is partial, scored is empty → None (writer falls back)."""
+    _mock_scores(monkeypatch, {"Alpha": {"R-1": 9.0}, "Beta": {"R-2": 8.0}})
+    assert tier_ranking_score.score_entities(_plan(entity_matrix={"entities": ["Alpha", "Beta"]}), "en") is None
+
+
+def test_writer_falls_back_when_all_scored_entries_malformed(monkeypatch):
+    """Greptile PR #51 P2: a non-empty entities_scored whose entries are ALL
+    malformed (no usable name) must fall through to the compute directive, not
+    emit 'PRE-COMPUTED SCORES []' with a verbatim-render instruction."""
+    tr = _tr_with_scores()
+    tr["entities_scored"] = [{"bogus": 1}, {"name": ""}]  # all fail the inner guard
+    plan = _bare_plan_with_tier_ranking(tr)
+    user = _call_writer(monkeypatch, plan, "S7")[0]["user"]
+    assert "PRE-COMPUTED SCORES" not in user, "empty display must not emit the render directive"
+    assert "TIER RANKING + SENSITIVITY CHECK CONTRACT" in user
+    assert "2 DECIMAL PLACES" in user  # the compute fallback's precision rule
+
+
 # ---------- architect integration ----------
 
 
@@ -149,7 +184,13 @@ def test_architect_attaches_entities_scored(monkeypatch):
 
     sentinel = [{"name": "Alpha", "dimension_scores": {"R-1": 8.0}, "S_final": 8.0, "tier": "Tier 1"}]
     monkeypatch.setattr(architect.tier_ranking_score, "score_entities", lambda *a, **k: sentinel)
-    plan = {"tier_ranking": {"title": "Tier Ranking", "weights": {"R-1": 1.0}, "tiers": [{"name": "T1", "threshold": ">=8.0"}]}}
+    plan = {
+        "tier_ranking": {
+            "title": "Tier Ranking",
+            "weights": {"R-1": 1.0},
+            "tiers": [{"name": "T1", "threshold": ">=8.0"}],
+        }
+    }
     # Exercise the enrichment branch directly (mirrors architect.build tail).
     scored = architect.tier_ranking_score.score_entities(plan, "en")
     if scored is not None and isinstance(plan.get("tier_ranking"), dict):
@@ -235,7 +276,7 @@ def test_writer_renders_pre_scored_values_2dp(monkeypatch):
     assert "PRE-COMPUTED SCORES" in user
     assert "render" in user.lower() and "verbatim" in user.lower()
     # 8.5 (float) must be formatted to "8.50" so the 2-decimal validator passes.
-    assert "8.50" in user, f"S_final not formatted to 2dp; got prompt slice: {user[user.find('PRE-COMPUTED'):][:400]}"
+    assert "8.50" in user, f"S_final not formatted to 2dp; got prompt slice: {user[user.find('PRE-COMPUTED') :][:400]}"
     assert "9.00" in user  # dimension score 9.0 → "9.00"
 
 
