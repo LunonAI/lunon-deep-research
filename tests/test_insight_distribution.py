@@ -292,16 +292,23 @@ def test_insight_distribution_writer_prompt_mirrors_targets():
     assert "(e) CAUSAL CHAIN" in block
     assert "(f) PROBLEM-TRADEOFF" in block
     # Every element's band LOWER bound equals its calibrated floor — the
-    # win-preserving invariant (lower bound is never reduced).
-    for key in (
-        "forward_looking_min",
-        "contrarian_min",
-        "quant_min",
-        "alternative_min",
-        "causal_chain_min",
-        "problem_tradeoff_min",
-    ):
-        assert _insight_band(dp[key]) + "%" in block, f"predict: missing band for {key}"
+    # win-preserving invariant (lower bound is never reduced). Match each band
+    # on the SAME line as its element label: predict's contrarian_min and
+    # problem_tradeoff_min are both 5 → "5–10", so a block-wide substring check
+    # would still pass if the (f) line were dropped (the (b) line covers it).
+    element_labels = {
+        "forward_looking_min": "(a) FORWARD-LOOKING IMPLICATION",
+        "contrarian_min": "(b) NAMED CONTRARIAN FRAMING",
+        "quant_min": "(c) QUANTIFIED PROJECTION",
+        "alternative_min": "(d) NAMED-ALTERNATIVE COMPARISON",
+        "causal_chain_min": "(e) CAUSAL CHAIN",
+        "problem_tradeoff_min": "(f) PROBLEM-TRADEOFF",
+    }
+    block_lines = block.splitlines()
+    for key, label in element_labels.items():
+        line = next((ln for ln in block_lines if label in ln), None)
+        assert line is not None, f"predict: missing element line for {label}"
+        assert _insight_band(dp[key]) + "%" in line, f"predict: band for {key} not on its own line"
     # Bands-not-floors framing + the no-stacking reconciliation must be stated.
     assert "BANDS, not floors" in block
     assert "Do NOT exceed" in block
