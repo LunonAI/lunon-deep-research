@@ -1,20 +1,36 @@
-"""P3b-OPT2 (2026-05-27): inner-loop trajectory telemetry tests.
+"""P3b-OPT2: inner-loop trajectory telemetry tests.
 
-INNER_CAP stays at 3 (the W9 / 0.5229-baseline value). This PR only OBSERVES
-the loop — recording, per section per iteration, whether grounding passed and
-the inner-loop min_score — so scripts/inner_cap_ab_analysis.py can decide
-empirically whether the 2nd/3rd corrective pass earns its cost. These tests
-guard (a) the cap is NOT changed and (b) the trajectory is recorded + persisted.
+INNER_CAP now defaults to 2 (flipped from the W9 / 0.5229-baseline value of 3)
+after the id=91 graded smoke proved the 3rd corrective pass is wasteful. The
+loop still records, per section per iteration, whether grounding passed and the
+inner-loop min_score so scripts/inner_cap_ab_analysis.py can keep checking
+whether each corrective pass earns its cost. These tests guard (a) the cap
+defaults to 2 (honoring the DR_INNER_CAP override) and (b) the trajectory is
+recorded + persisted.
 """
 
 import deep_research.orchestrate as orchestrate
 from deep_research.pipeline import inner_loop
 
 
-def test_inner_cap_unchanged_at_3():
-    """Regression guard: this PR must NOT change INNER_CAP. The 0.5229
-    leaderboard baseline ran at 3; we measure before we ever consider 2."""
-    assert orchestrate.INNER_CAP == 3
+def test_inner_cap_default_is_2():
+    """P3b-opt2: default flipped 3→2 after the id=91 graded smoke proved the
+    3rd corrective pass is wasteful (49/51 sections reached it, 0 benefited,
+    mean gain 0.029)."""
+    assert orchestrate.INNER_CAP == 2
+
+
+def test_inner_cap_honors_env_override(monkeypatch):
+    """DR_INNER_CAP env override still works (e.g. to re-run at 3 for an A/B)."""
+    import importlib
+
+    monkeypatch.setenv("DR_INNER_CAP", "3")
+    importlib.reload(orchestrate)
+    try:
+        assert orchestrate.INNER_CAP == 3
+    finally:
+        monkeypatch.delenv("DR_INNER_CAP", raising=False)
+        importlib.reload(orchestrate)
 
 
 def test_score_section_accepts_note(monkeypatch):

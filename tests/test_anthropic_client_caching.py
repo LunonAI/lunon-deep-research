@@ -117,6 +117,87 @@ def test_raw_call_returns_cache_usage_fields(monkeypatch):
     assert "cache_read_input_tokens" in usage
 
 
+# ---------- per-section retry caching (cache_user / user_suffix) ----------
+
+
+def test_raw_call_cache_user_wraps_user_block(monkeypatch):
+    """cache_user=True → user becomes a cache_control text block; the per-retry
+    user_suffix is appended as a SEPARATE trailing UNCACHED block."""
+    captured = _patch_stream(monkeypatch)
+    anthropic_client.raw_call("claude-opus-4-7", "BIG_STABLE_USER", cache_user=True, user_suffix="FEEDBACK")
+    content = captured[0]["messages"][0]["content"]
+    assert isinstance(content, list) and len(content) == 2, (
+        f"expected [cached user, uncached feedback]; got {content!r}"
+    )
+    assert content[0]["text"] == "BIG_STABLE_USER"
+    assert content[0]["cache_control"]["type"] == "ephemeral"
+    assert content[1]["text"] == "FEEDBACK"
+    assert "cache_control" not in content[1], "feedback suffix must stay uncached"
+
+
+def test_raw_call_cache_user_no_suffix_single_block(monkeypatch):
+    """cache_user=True with empty suffix → one cached user block (first attempt,
+    no feedback yet)."""
+    captured = _patch_stream(monkeypatch)
+    anthropic_client.raw_call("claude-opus-4-7", "U", cache_user=True)
+    content = captured[0]["messages"][0]["content"]
+    assert isinstance(content, list) and len(content) == 1
+    assert content[0]["cache_control"]["type"] == "ephemeral"
+
+
+def test_raw_call_suffix_concatenated_when_cache_off(monkeypatch):
+    """cache_user=False but user_suffix given → concatenated string (identical
+    content to the old behavior; no cache block)."""
+    captured = _patch_stream(monkeypatch)
+    anthropic_client.raw_call("claude-opus-4-7", "U", cache_user=False, user_suffix="SUF")
+    assert captured[0]["messages"][0]["content"] == "USUF"
+
+
+def test_raw_call_default_plain_string_content(monkeypatch):
+    """Defaults (no cache_user, no suffix) → plain string content, unchanged."""
+    captured = _patch_stream(monkeypatch)
+    anthropic_client.raw_call("claude-opus-4-7", "U")
+    assert captured[0]["messages"][0]["content"] == "U"
+
+
+def test_llm_call_writer_auto_enables_cache_user_and_forwards_suffix(monkeypatch):
+    """role=='writer' auto-enables cache_user and forwards user_suffix to the
+    anthropic client."""
+    from deep_research import config, llm
+
+    captured = {}
+
+    def fake_raw_call(model, user, **kw):
+        captured["user"] = user
+        captured["cache_user"] = kw.get("cache_user")
+        captured["user_suffix"] = kw.get("user_suffix")
+        return "text", {}
+
+    monkeypatch.setattr(llm.anthropic_client, "raw_call", fake_raw_call)
+    monkeypatch.setattr(config, "model_for", lambda role: "claude-opus-4-7")
+    llm.call("writer", "BODY", system="SYS", user_suffix="FB")
+    assert captured["cache_user"] is True
+    assert captured["user"] == "BODY"
+    assert captured["user_suffix"] == "FB"
+
+
+def test_llm_call_non_writer_concatenates_suffix(monkeypatch):
+    """A non-writer role on a non-anthropic provider gets the suffix
+    concatenated (identical content), since only the anthropic client splits."""
+    from deep_research import config, llm
+
+    captured = {}
+
+    def fake_openai(model, user, **kw):
+        captured["user"] = user
+        return "text", {}
+
+    monkeypatch.setattr(llm.openai_client, "raw_call", fake_openai)
+    monkeypatch.setattr(config, "model_for", lambda role: "gpt-5.5")
+    llm.call("grounding", "BODY", user_suffix="FB")
+    assert captured["user"] == "BODYFB"
+
+
 # ---------- llm.call dispatch policy ----------
 
 
