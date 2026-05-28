@@ -159,6 +159,17 @@ class PipelineState:
     # writer output; non-zero stats let dev4 / W13 analysers quantify
     # how often the safety net fires.
     xref_repair_stats: dict = field(default_factory=dict)
+    # P3b-opt2 (2026-05-28): per-task deterministic style-clamp stats.
+    # clamp_citations: {markers_before, markers_after, salad_collapsed,
+    # removed, density_before, density_after, floor_exceeded, language};
+    # clamp_emdash: {emdash_before, emdash_after, pairs_converted,
+    # density_before, density_after, language}. Both run between
+    # mermaid_validate and footnote_normalize (so removed inline markers
+    # leave defs that footnote_normalize auto-drops); forwarded into drift
+    # so dev4/W13 analysers confirm the rendered rates match the reference
+    # corpus bands.
+    clamp_citations_stats: dict = field(default_factory=dict)
+    clamp_emdash_stats: dict = field(default_factory=dict)
     # P3b-OPT2 (2026-05-27): per-section inner-loop iteration trajectory.
     # One entry per section: {"section": sid, "iters": [{"i", "grounding_ok",
     # "scored", "score_ok", "min_score"}, ...]}. INNER_CAP is unchanged (3);
