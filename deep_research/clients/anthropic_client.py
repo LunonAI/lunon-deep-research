@@ -78,6 +78,8 @@ def raw_call(
     note="",
     cache_system=False,
     cache_ttl="5m",
+    cache_user=False,
+    user_suffix="",
 ):
     """Return (text_str, usage_dict). Raises RuntimeError after retries.
 
@@ -96,23 +98,42 @@ def raw_call(
     Anthropic refreshes on each read — sufficient for the back-to-back writer
     calls within a task. "1h" sets the extended-TTL field (heavier write
     premium); left as a knob for callers who batch with longer idle gaps.
+
+    cache_user / user_suffix: per-section retry caching (P3b-opt2). A section's
+    writer.sec retries rebuild a byte-identical `user` prompt (evidence + the
+    big citation contract) with only revision feedback differing. When
+    cache_user=True, `user` becomes a cache_control block and `user_suffix`
+    (the per-retry feedback) is appended as a SEPARATE trailing UNCACHED block —
+    so retries read the heavy stable prefix at 0.1× while the small varying
+    feedback stays uncached. Output-invariant (same tokens, same order).
     """
     if not _KEY:
         raise RuntimeError("ANTHROPIC_API_KEY missing from .env")
+
+    def _cc():
+        # Bare {"type": "ephemeral"} 5m form is GA (no beta header); only the
+        # non-default 1h extended cache needs the ttl field.
+        c = {"type": "ephemeral"}
+        if cache_ttl and cache_ttl != "5m":
+            c["ttl"] = cache_ttl
+        return c
+
+    if cache_user and isinstance(user, str):
+        content = [{"type": "text", "text": user, "cache_control": _cc()}]
+        if user_suffix:
+            content.append({"type": "text", "text": user_suffix})
+    elif user_suffix:
+        content = f"{user}{user_suffix}"
+    else:
+        content = user
     kw = {
         "model": model,
         "max_tokens": max_tokens,
-        "messages": [{"role": "user", "content": user}],
+        "messages": [{"role": "user", "content": content}],
     }
     if system:
         if cache_system and isinstance(system, str):
-            cc = {"type": "ephemeral"}
-            # Only attach the ttl field for the non-default 1h extended cache;
-            # the bare {"type": "ephemeral"} 5m form is GA and needs no beta
-            # header, avoiding a mid-run API rejection risk.
-            if cache_ttl and cache_ttl != "5m":
-                cc["ttl"] = cache_ttl
-            kw["system"] = [{"type": "text", "text": system, "cache_control": cc}]
+            kw["system"] = [{"type": "text", "text": system, "cache_control": _cc()}]
         else:
             kw["system"] = system
     if think:

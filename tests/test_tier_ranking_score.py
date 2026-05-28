@@ -238,7 +238,7 @@ def _bare_plan_with_tier_ranking(tr, *, sid="S7", title="Tier Ranking"):
 def _call_writer(monkeypatch, plan, sid):
     captured = []
 
-    def fake_llm_call(role, user, *, system, max_tokens, note):
+    def fake_llm_call(role, user, *, system, max_tokens, note, **kw):
         captured.append({"user": user})
         return "## body\n"
 

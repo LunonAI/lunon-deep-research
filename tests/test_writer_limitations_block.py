@@ -41,7 +41,7 @@ def _bare_plan_with_limitations(lc, *, lim_section_id="S3", lim_title="Limitatio
 def _capture_writer_call(monkeypatch):
     captured = []
 
-    def fake_llm_call(role, user, *, system, max_tokens, note):
+    def fake_llm_call(role, user, *, system, max_tokens, note, **kw):
         captured.append({"role": role, "user": user, "system": system})
         return "## body\n"
 

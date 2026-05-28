@@ -913,8 +913,14 @@ def write_section(
         f"{_insight_distribution_block(archetype)}"
         f"{capel_block}"
     )
-    if feedback:
-        user += f"\nREVISION FEEDBACK — fix these and integrate the cited evidence inline:\n{feedback}\n"
+    # P3b-opt2: keep the per-retry feedback OUT of `user` so the heavy stable
+    # prompt (evidence + citation contract) stays byte-identical across a
+    # section's retries and can be cached (cache_user). The feedback rides as
+    # user_suffix — a separate trailing UNCACHED block — so retries read the
+    # stable prefix at 0.1× while the small varying feedback is fresh.
+    feedback_block = (
+        f"\nREVISION FEEDBACK — fix these and integrate the cited evidence inline:\n{feedback}\n" if feedback else ""
+    )
     # Bumped from 7000 → 14000 to accommodate the deeper H3→H4 tree the
     # depth_seeds drive. This is the LLM-call upper bound; in production with
     # `DR_CAPEL_G=on` (the default) the per-section CAPEL countdown — driven
@@ -928,7 +934,7 @@ def write_section(
     # (more sections × more H3 × explicit depth_seeds payload) and (ii) the
     # length_ceiling 4.0× bump that lifts the per-section CAPEL target —
     # NOT primarily via this max_tokens headroom.
-    raw = llm.call("writer", user, system=sys, max_tokens=14000, note=f"writer.sec.{sid}")
+    raw = llm.call("writer", user, system=sys, max_tokens=14000, note=f"writer.sec.{sid}", user_suffix=feedback_block)
     if capel_active:
         text, stats = strip_capel_markers(raw)
     else:

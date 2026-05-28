@@ -39,6 +39,8 @@ def call(
     max_retries=3,
     cache_system=None,
     cache_ttl="5m",
+    cache_user=None,
+    user_suffix="",
 ):
     """Return assistant text for `role`. Auto-routes by model provider.
 
@@ -57,6 +59,10 @@ def call(
     covers the back-to-back writer calls within a task) or "1h" (extended,
     for callers that batch with longer idle gaps). Only used when caching
     is active on the anthropic path.
+    cache_user / user_suffix: per-section retry caching (anthropic only). `None`
+    auto-enables for the `writer` role. `user` becomes a cache block and
+    `user_suffix` (per-retry feedback) is appended uncached after it, so a
+    section's retries read the heavy stable prompt at 0.1×. Output-invariant.
     """
     model = config.model_for(role)
     if not model:
@@ -67,10 +73,15 @@ def call(
     tag = note or role
     eff = reasoning_effort or effort
     cache = cache_system if cache_system is not None else (role == "writer")
+    cache_u = cache_user if cache_user is not None else (role == "writer")
+    # Only the anthropic client supports the cached-user-block + uncached-suffix
+    # split. For other providers (and uncached anthropic), concatenate so the
+    # model sees identical content.
+    full_user = f"{user}{user_suffix}" if user_suffix else user
     if prov == "openai":
         text, _ = openai_client.raw_call(
             model,
-            user,
+            full_user,
             system=system,
             reasoning_effort=eff,
             max_completion_tokens=max_tokens,
@@ -92,11 +103,13 @@ def call(
             max_retries=max_retries,
             cache_system=cache,
             cache_ttl=cache_ttl,
+            cache_user=cache_u,
+            user_suffix=user_suffix,
         )
         return text
     text, _ = openrouter_client.raw_call(
         model,
-        user,
+        full_user,
         system=system,
         max_tokens=max_tokens,
         seed=seed,
@@ -186,13 +199,14 @@ def call_json(
     max_retries=3,
     cache_system=None,
     cache_ttl="5m",
+    cache_user=None,
+    user_suffix="",
 ):
     """call() + JSON extraction with a light retry on parse failure.
 
-    cache_system / cache_ttl mirror `call()` so callers using the JSON dispatch
-    surface have the same explicit prompt-cache control (e.g. opt a JSON role
-    out, or enable caching for a future JSON-returning role). `None` keeps the
-    role-based auto-enable in `call()`.
+    cache_system / cache_ttl / cache_user / user_suffix mirror `call()` so
+    callers using the JSON dispatch surface have the same explicit prompt-cache
+    control. `None` keeps the role-based auto-enable in `call()`.
     """
     last = None
     for _ in range(retries + 1):
@@ -210,6 +224,8 @@ def call_json(
             max_retries=max_retries,
             cache_system=cache_system,
             cache_ttl=cache_ttl,
+            cache_user=cache_user,
+            user_suffix=user_suffix,
         )
         try:
             return extract_json(txt)
