@@ -96,6 +96,25 @@ def test_prose_reasoning_tension_resolution_rate():
     assert pr["tension_resolution_rate"] == 0.5
 
 
+def test_prose_reasoning_flat_report_synthesis_not_deflated():
+    """A compliant flat report (one article-level `## Synthesis` over N entity
+    chapters) must NOT read as ~1/(N+1) per-chapter synthesis. The article-level
+    synthesis is excluded from both numerator and denominator and surfaced as
+    `article_synthesis` so the re-grade can distinguish the flat-report archetype
+    from non-adoption (PR #59)."""
+    chapters = "".join(
+        f"## {i} Entity{i}\n\nbody for entity {i}.\n\n" for i in range(1, 11)
+    )
+    art = chapters + "## Synthesis\n\nThese entities together establish the pattern.\n"
+    pr = _validate_prose_reasoning(art)
+    assert pr["h2_chapters"] == 11
+    assert pr["article_synthesis"] == 1
+    assert pr["synthesis_headings"] == 1
+    # No content chapter has a `###` synthesis subsection, so per-chapter rate is
+    # 0.0 (not 1/11) — the article-level synthesis is not double-counted.
+    assert pr["synthesis_per_chapter"] == 0.0
+
+
 def test_prose_reasoning_comparative_instead_not_counted_as_resolved():
     """A bare comparative `instead` must NOT mark a tension paragraph as
     resolved — it inflates the rate without any actual resolution (PR #59)."""
