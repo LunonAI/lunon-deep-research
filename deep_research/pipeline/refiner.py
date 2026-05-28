@@ -1,8 +1,8 @@
 """Post-hoc refiner (p1-checklist items 20, 26; technique 14b — highest-ROI).
 
 GPT-5.5 SINGLE pass, adapted from AI-Q rewrite_report.py REWRITE_PROMPT (10
-numbered expansion instructions). Archetype-aware. min-ratio 0.9 guard (revert
-to the input if the rewrite is < 90% of input length). Receives draft + per-
+numbered expansion instructions). Archetype-aware. min-ratio 0.70 guard (revert
+to the input if the rewrite is < 70% of input length). Receives draft + per-
 section criteria scores + failing-criterion rationales, NO raw evidence
 (item 26 context boundary). De-hedge pass folded in (judge penalizes hedging
 ~25.6% at equal content, v4 §2.9).
@@ -63,8 +63,28 @@ opening verbatim. Obey the source-attribution rule below.
     + wr.CLEANING_RESISTANT_RULE
 )
 
+# A whole-article rewrite must RETURN the whole article. The min-ratio<0.70
+# revert floor below means the smallest non-reverted output is 0.70×the draft;
+# if even that exceeds the output budget the model can only truncate/summarize
+# and the pass is a GUARANTEED revert — but still bills the full input + ~3.5min
+# (id=91 smoke: 65k words ≈ 97k out-tokens → paid $0.96 + 207s for a no-op).
+# Skip when 0.70×draft can't fit, so we only skip genuinely-doomed calls and
+# never one that could prune-to-fit. (Section-wise or deterministic dedupe is
+# the path to actually deduping Qianfan-length articles — deferred, evidence-gated.)
+_MAX_OUT_TOKENS = 32000
+_REVERT_RATIO = 0.70
+_TOK = 4  # ~chars-per-token heuristic (matches validation._TOK)
+
 
 def refine(draft: str, *, archetype: str, language: str, section_scores=None, failing_rationales=None) -> dict:
+    est_out_tokens = len(draft) // _TOK
+    if est_out_tokens * _REVERT_RATIO > _MAX_OUT_TOKENS:
+        return {
+            "article": draft,
+            "applied": False,
+            "ratio": 1.0,
+            "reason": f"skip: draft ~{est_out_tokens}tok exceeds rewrite output budget {_MAX_OUT_TOKENS}",
+        }
     emphasis = wr.refiner_emphasis(archetype)
     feedback = ""
     if section_scores:
@@ -92,7 +112,7 @@ def refine(draft: str, *, archetype: str, language: str, section_scores=None, fa
             "refiner",
             user,
             system=_SYSTEM,
-            max_tokens=32000,
+            max_tokens=_MAX_OUT_TOKENS,
             effort="medium",
             seed=None,
             note="refiner",
@@ -114,8 +134,8 @@ def refine(draft: str, *, archetype: str, language: str, section_scores=None, fa
     # worst losses cite "excessive length") proves the refiner SHOULD prune.
     # 0.70 floor still catches catastrophic refiner collapse but allows the
     # 10-30% pruning the judge wants.
-    if ratio < 0.70:
-        return {"article": draft, "applied": False, "ratio": round(ratio, 3), "reason": "min-ratio<0.70 revert"}
+    if ratio < _REVERT_RATIO:
+        return {"article": draft, "applied": False, "ratio": round(ratio, 3), "reason": f"min-ratio<{_REVERT_RATIO} revert"}
     return {"article": out, "applied": True, "ratio": round(ratio, 3), "reason": "ok"}
 
 
