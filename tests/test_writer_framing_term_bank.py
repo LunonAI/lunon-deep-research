@@ -29,7 +29,7 @@ def _bare_plan_with_framing(fc):
 def _capture_writer_call(monkeypatch):
     captured = []
 
-    def fake_llm_call(role, user, *, system, max_tokens, note):
+    def fake_llm_call(role, user, *, system, max_tokens, note, **kw):
         captured.append({"role": role, "user": user, "system": system})
         return "## body\n"
 
