@@ -1,8 +1,8 @@
 """Post-hoc refiner (p1-checklist items 20, 26; technique 14b — highest-ROI).
 
 GPT-5.5 SINGLE pass, adapted from AI-Q rewrite_report.py REWRITE_PROMPT (10
-numbered expansion instructions). Archetype-aware. min-ratio 0.9 guard (revert
-to the input if the rewrite is < 90% of input length). Receives draft + per-
+numbered expansion instructions). Archetype-aware. min-ratio 0.70 guard (revert
+to the input if the rewrite is < 70% of input length). Receives draft + per-
 section criteria scores + failing-criterion rationales, NO raw evidence
 (item 26 context boundary). De-hedge pass folded in (judge penalizes hedging
 ~25.6% at equal content, v4 §2.9).
@@ -135,7 +135,7 @@ def refine(draft: str, *, archetype: str, language: str, section_scores=None, fa
     # 0.70 floor still catches catastrophic refiner collapse but allows the
     # 10-30% pruning the judge wants.
     if ratio < _REVERT_RATIO:
-        return {"article": draft, "applied": False, "ratio": round(ratio, 3), "reason": "min-ratio<0.70 revert"}
+        return {"article": draft, "applied": False, "ratio": round(ratio, 3), "reason": f"min-ratio<{_REVERT_RATIO} revert"}
     return {"article": out, "applied": True, "ratio": round(ratio, 3), "reason": "ok"}
 
 
