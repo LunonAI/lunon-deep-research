@@ -317,3 +317,58 @@ def test_writer_refs_section_stops_at_h3_following_heading():
     # at the first `#+` heading regardless of depth.
     assert "#### 6.1.1 Deeper Leaf" in out.article
     assert "H4 content that must also survive" in out.article
+
+
+# --- P3b-D2: source-based dedup (number by SOURCE, not token) ---------------
+
+
+def test_dedup_same_url_across_sections_gets_one_number():
+    """The same source cited from two sections (different per-section tokens,
+    SAME url) collapses to ONE `[^1]`, cited twice."""
+    article = (
+        "# T\n\n## 1 A\n\nClaim one[^S1-1].\n\n[^S1-1]: Fandom — https://x.example/wiki/cloths\n\n"
+        "## 2 B\n\nClaim two[^S2-3].\n\n[^S2-3]: Fandom — https://x.example/wiki/cloths\n"
+    )
+    out = footnote_normalize.normalize(article)
+    assert out.n_definitions == 2  # two def lines seen
+    assert out.n_renumbered == 1  # ONE distinct source → one References entry
+    assert out.n_sources_merged == 1  # two used tokens collapsed to one source
+    assert out.article.count("[^1]:") == 1  # single References entry
+    assert out.article.count("[^1]") == 3  # 2 inline + 1 def line
+    assert "[^2]" not in out.article
+
+
+def test_dedup_no_url_same_source_name():
+    """No-URL defs with the same normalized source-name dedup too."""
+    article = (
+        "# T\n\n## 1 A\n\nx[^S1-1].\n\n[^S1-1]: Lebrun (1999)\n\n"
+        "## 2 B\n\ny[^S2-1].\n\n[^S2-1]: Lebrun (1999)\n"
+    )
+    out = footnote_normalize.normalize(article)
+    assert out.n_renumbered == 1
+    assert out.n_sources_merged == 1
+
+
+def test_dedup_distinct_urls_stay_separate():
+    """Different paths on the same host are different sources (path preserved
+    by _normalize_url) → NOT merged."""
+    article = (
+        "# T\n\n## 1 A\n\nx[^S1-1] y[^S1-2].\n\n"
+        "[^S1-1]: Src — https://x.example/wiki/aries\n"
+        "[^S1-2]: Src — https://x.example/wiki/taurus\n"
+    )
+    out = footnote_normalize.normalize(article)
+    assert out.n_renumbered == 2
+    assert out.n_sources_merged == 0
+
+
+def test_dedup_preserves_first_appearance_order():
+    """Numbering follows first inline appearance of each SOURCE."""
+    article = (
+        "# T\n\n## 1 A\n\nbeta[^S1-9] alpha[^S1-1].\n\n"
+        "[^S1-9]: B — https://x.example/b\n[^S1-1]: A — https://x.example/a\n"
+    )
+    out = footnote_normalize.normalize(article)
+    # B is cited first → [^1]; A second → [^2]
+    assert "[^1]: B" in out.article
+    assert "[^2]: A" in out.article
