@@ -358,17 +358,17 @@ def write_section(
             )
         else:
             template_block = ""
-        # Mention "PER-ENTITY MICRO-TEMPLATE" by name in the wrapper only
-        # when the directive itself is fired. Legacy mode (template_block
-        # is empty) keeps the wrapper text generic so the substring doesn't
-        # leak into prompts where the directive doesn't actually appear.
+        # Name the "PER-ENTITY TREATMENT" block in the wrapper only when the
+        # directive itself is fired. Legacy mode (template_block is empty)
+        # keeps the wrapper text generic so the substring doesn't leak into
+        # prompts where the directive doesn't actually appear.
         if template_block:
             s1_wrapper = (
                 "\nENTITY MATRIX (article spine for this archetype) — "
                 "render this as a markdown table at the top of THIS section "
                 "(immediately under the §1 heading; the executive opening "
                 "frame is written separately and must not duplicate the "
-                "table). Then apply the PER-ENTITY MICRO-TEMPLATE below to "
+                "table). Then apply the PER-ENTITY TREATMENT below to "
                 "every entity this section addresses:\n"
                 f"{json.dumps(em, ensure_ascii=False)}\n"
                 f"{template_block}"
@@ -376,7 +376,7 @@ def write_section(
             non_s1_wrapper = (
                 "\nENTITY MATRIX REMINDER — section §1 renders the canonical "
                 "table; THIS section must give EACH entity equal-depth "
-                "treatment using the PER-ENTITY MICRO-TEMPLATE below, and "
+                "treatment using the PER-ENTITY TREATMENT below, and "
                 "MUST NOT re-render the matrix table:\n"
                 f"{json.dumps(em, ensure_ascii=False)}\n"
                 f"{template_block}"
