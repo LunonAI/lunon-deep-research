@@ -39,6 +39,42 @@ _DEF_LINE_RE = re.compile(r"^[ \t]*\[\^[A-Za-z0-9._-]+\]:", re.MULTILINE)
 _REFS_HEADING_RE = re.compile(r"(?im)^#{1,6}[ \t]*\d*\.?[ \t]*references?\b")
 # Sentence terminator followed by whitespace/EOL (avoids splitting "3.5").
 _SENT_END_RE = re.compile(r"[.!?](?=\s|$)")
+# Common abbreviations whose trailing "." is NOT a sentence end — counting
+# them as boundaries would over-protect the marker after them from PASS 2
+# (the un-cite invariant still holds; this only sharpens density reduction in
+# abbreviation-heavy prose). Python's `re` forbids variable-width lookbehind,
+# so we post-filter in `_sentence_end_positions` instead of a lookbehind.
+_ABBREV = frozenset(
+    {
+        "mr",
+        "mrs",
+        "ms",
+        "dr",
+        "prof",
+        "st",
+        "jr",
+        "sr",
+        "fig",
+        "no",
+        "vol",
+        "pp",
+        "cf",
+        "al",
+        "vs",
+        "eg",
+        "ie",
+        "etc",
+        "inc",
+        "ltd",
+        "co",
+        "ca",
+        "approx",
+        "est",
+        "dept",
+        "univ",
+    }
+)
+_WORD_BEFORE_DOT_RE = re.compile(r"([A-Za-z]+)$")
 # U+2014 em-dash ONLY (never en-dash U+2013, which marks numeric ranges).
 _EMDASH = "—"
 # Paired parenthetical: "X — clause — Y" (spaced em-dashes, no nested dash or
@@ -118,6 +154,24 @@ def _count_before(sorted_positions: list[int], pos: int) -> int:
     return lo
 
 
+def _sentence_end_positions(text: str) -> list[int]:
+    """Positions of real sentence terminators, skipping abbreviation dots
+    ("Mr.", "Fig.", "etc.") and dotted abbreviations ("e.g.", "i.e.", "U.S.")
+    so PASS 2 doesn't over-protect the marker that follows them."""
+    out: list[int] = []
+    for m in _SENT_END_RE.finditer(text):
+        i = m.start()
+        if text[i] == ".":
+            # dotted abbreviation: the char two back is also a dot (e.g./U.S.)
+            if i >= 2 and text[i - 2] == ".":
+                continue
+            wm = _WORD_BEFORE_DOT_RE.search(text[:i])
+            if wm and wm.group(1).lower() in _ABBREV:
+                continue
+        out.append(i)
+    return out
+
+
 def _zero_cite_stats(language: str) -> dict:
     return {
         "markers_before": 0,
@@ -140,7 +194,7 @@ def clamp_citations(article: str, *, language: str = "en", max_per_1k: float | N
 
     body, refs = _split_references(article)
     protected = _protected_ranges(body)
-    sent_ends = [m.start() for m in _SENT_END_RE.finditer(body)]
+    sent_ends = _sentence_end_positions(body)
 
     # Candidate (non-protected) inline markers, in document order.
     cands = [(m.start(), m.end()) for m in _INLINE_RE.finditer(body) if not _in_ranges(m.start(), protected)]
@@ -166,7 +220,10 @@ def clamp_citations(article: str, *, language: str = "en", max_per_1k: float | N
 
     # PASS 2 — if still over the ceiling, drop non-first-per-sentence markers.
     floor_exceeded = False
-    target = int(ceiling * words / 1000)
+    # round (not truncate) and floor at 1: int() truncation can make a short
+    # body's target 0 (e.g. 142 words @ 7/1k → 0.99 → 0), over-removing even
+    # though one marker is already within band.
+    target = max(1, round(ceiling * words / 1000))
     if len(survivors) > target:
         # First survivor in each sentence is PROTECTED (never un-cite a claim).
         protected_first: set[int] = set()
@@ -202,10 +259,25 @@ def clamp_citations(article: str, *, language: str = "en", max_per_1k: float | N
         prev = b
     out.append(body[prev:])
     new_body = "".join(out)
+
     # Cleanup: collapse the space the removed marker left and drop space
-    # before punctuation (e.g. "word [^3]." → "word ." → "word.").
-    new_body = re.sub(r"[ \t]{2,}", " ", new_body)
-    new_body = re.sub(r"[ \t]+([.,;:!?)])", r"\1", new_body)
+    # before punctuation (e.g. "word [^3]." → "word ." → "word."). Scope it
+    # to NON-protected spans only, so code-fence indentation, mermaid blocks,
+    # tables, and definition lines are never disturbed (offsets recomputed on
+    # the rebuilt body).
+    def _cleanup(seg: str) -> str:
+        seg = re.sub(r"[ \t]{2,}", " ", seg)
+        return re.sub(r"[ \t]+([.,;:!?)])", r"\1", seg)
+
+    prot_after = sorted(_protected_ranges(new_body))
+    pieces: list[str] = []
+    cur = 0
+    for a, b in prot_after:
+        pieces.append(_cleanup(new_body[cur:a]))
+        pieces.append(new_body[a:b])  # protected span verbatim
+        cur = b
+    pieces.append(_cleanup(new_body[cur:]))
+    new_body = "".join(pieces)
 
     new_article = new_body + refs
     markers_after = markers_before - len(remove)
