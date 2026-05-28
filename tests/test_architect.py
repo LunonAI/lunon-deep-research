@@ -459,6 +459,10 @@ def test_build_skips_retry_when_first_plan_meets_bounds(monkeypatch):
         return _build_good_plan_obj()
 
     monkeypatch.setattr(architect.llm, "call_json", fake_call_json)
+    # P3b-OPT3: isolate this retry-logic assertion from the new architect-side
+    # tier-ranking scorer (which makes its own llm.call_json). Stub it to None
+    # so `calls` reflects only the plan-building + retry calls under test.
+    monkeypatch.setattr(architect.tier_ranking_score, "score_entities", lambda *a, **k: None)
     # Wave 2 §1.2: use `predict` archetype because it still uses the
     # default 8-12 / 3-6 / 2-4 outline bounds that `_build_good_plan_obj`'s
     # shape (9 × 3 × 2) satisfies. The `compare` archetype now uses
@@ -480,6 +484,10 @@ def test_build_triggers_retry_when_first_plan_has_shortfalls(monkeypatch):
         return next(responses)
 
     monkeypatch.setattr(architect.llm, "call_json", fake_call_json)
+    # P3b-OPT3: isolate this retry-logic assertion from the new architect-side
+    # tier-ranking scorer (which makes its own llm.call_json). Stub it to None
+    # so `calls` reflects only the plan-building + retry calls under test.
+    monkeypatch.setattr(architect.tier_ranking_score, "score_entities", lambda *a, **k: None)
     # Wave 2 §1.2: use `predict` archetype because it still uses the
     # default 8-12 / 3-6 / 2-4 outline bounds that `_build_good_plan_obj`'s
     # shape (9 × 3 × 2) satisfies. The `compare` archetype now uses
