@@ -174,17 +174,36 @@ def _section_present(text: str, title: str) -> bool:
 
 
 def _section_length_ok(text: str, title: str, expected_tok: int) -> tuple:
-    """Locate the section body and check len >= 0.7 × expected_length_tokens."""
+    """Locate the section body and check len >= 0.7 × expected_length_tokens.
+
+    A section's body spans from its heading to the next heading of the SAME or
+    SHALLOWER level, so a parent chapter rendered with nested sub-headings
+    (a ``##`` with ``###``/``####`` children) counts its whole subtree — not
+    just the intro before its first child. Measuring to the next heading of
+    *any* level miscounted hierarchically-rendered parents as "short" and
+    triggered wasteful corrective refiner passes on articles that were actually
+    complete (validation runs before the final numbering_fix flatten, so it
+    sees the nested H2/H3 shape).
+    """
     if not title:
         return True, 0
-    m = re.search(rf"^#+\s*[\d\.\sA-Z]*\s*{re.escape(title)}\s*$", text, re.IGNORECASE | re.MULTILINE)
-    if not m:
-        # try a looser match
+    level = None
+    m = re.search(rf"^(#+)\s*[\d\.\sA-Z]*\s*{re.escape(title)}\s*$", text, re.IGNORECASE | re.MULTILINE)
+    if m:
+        level = len(m.group(1))
+    else:
+        # title not on a heading line — fall back to a loose match; level unknown.
         m = re.search(re.escape(title), text, re.IGNORECASE)
         if not m:
             return False, 0
-    nxt = re.search(r"\n#+\s", text[m.end() :])
-    body = text[m.end() : m.end() + (nxt.start() if nxt else len(text))]
+    rest = text[m.end() :]
+    # Next heading at the same or shallower depth ends this section's body;
+    # deeper children (more #s) stay inside it. Loose match → any heading.
+    if level is not None:
+        nxt = re.search(rf"\n#{{1,{level}}}\s", rest)
+    else:
+        nxt = re.search(r"\n#+\s", rest)
+    body = rest[: nxt.start()] if nxt else rest
     body_tok = len(body) // _TOK
     return body_tok >= int(0.7 * expected_tok), body_tok
 
