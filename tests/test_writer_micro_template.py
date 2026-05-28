@@ -1,15 +1,13 @@
-"""Unit tests for P3-W1 — writer directive renders per-entity micro-template.
+"""Unit tests for the per-entity directive (P3b-opt2: retired the rigid W1
+micro-template in favor of the VERIFIED the reference prose form).
 
-When `entity_matrix.instantiation_mode == "prose_subheaders"` (the P3-W1
-default), the writer's user prompt must include the PER-ENTITY MICRO-
-TEMPLATE block listing each dimension's axis_name as a bolded sub-header
-in `render_order`, plus an enforcement RULES block. When mode is
-`table_columns_only` (legacy), the writer falls back to the pre-W1
-table-only directive.
-
-Tests pin both modes, language-aware colon selection (EN half-width vs
-ZH full-width), §1-vs-non-§1 placement of the canonical table render,
-and the suppression guard for empty matrices.
+When `entity_matrix.instantiation_mode == "prose_subheaders"`, the writer's
+user prompt must instruct the verified the reference q91 form: render EACH entity as
+a SINGLE FLAT `##` section (no `###`/`####` inside an entity) whose body is
+N dense single-theme paragraphs, each opened by a short descriptive bold
+lead-in, covering the matrix dimensions as paragraph THEMES in render_order
+(NOT as fixed bolded `**axis:**` labels — that rigid template was retired
+after the fresh q91 corpus showed the reference uses no such template).
 """
 
 from deep_research.pipeline import memory_bank, writer
@@ -69,10 +67,10 @@ def _call_writer(monkeypatch, plan, archetype, sid="S1", language="en"):
 # --------------------------------------------------------------------------
 
 
-def test_prose_subheaders_mode_emits_axis_subheaders(monkeypatch):
-    """When entity_matrix.instantiation_mode is prose_subheaders, the
-    writer user prompt must include each axis_name as a bolded sub-header
-    pattern in the PER-ENTITY MICRO-TEMPLATE block."""
+def test_prose_subheaders_mode_emits_reference_prose_directive(monkeypatch):
+    """prose_subheaders mode emits the verified the reference prose directive:
+    single flat section, dense single-theme paragraphs, dimensions surfaced
+    as paragraph THEMES (not rigid bolded `**axis:**` labels)."""
     em = {
         "entities": ["IBM", "Google", "Origin", "Microsoft", "Baidu"],
         "dimensions": [
@@ -87,17 +85,17 @@ def test_prose_subheaders_mode_emits_axis_subheaders(monkeypatch):
     plan = _bare_plan_with_em(em)
     captured = _call_writer(monkeypatch, plan, archetype="list-all", sid="S1")
     user = captured[0]["user"]
-    assert "PER-ENTITY MICRO-TEMPLATE" in user, f"directive missing; got: {user[:2000]}"
-    assert "**Winning Logic:**" in user, f"axis 1 missing; got: {user[:2000]}"
-    assert "**Stall Risk:**" in user
-    assert "**Time Window:**" in user
-    assert "**Team Combination:**" in user
+    assert "PER-ENTITY TREATMENT" in user, f"directive missing; got: {user[:2000]}"
+    assert "SINGLE FLAT section" in user
+    assert "ONE analytical theme per paragraph" in user
+    # dimensions surfaced as themes, NOT as rigid bolded labels
+    assert "Winning Logic" in user and "Team Combination" in user
+    assert "**Winning Logic:**" not in user, "retired rigid bolded-label template still present"
 
 
-def test_prose_subheaders_orders_axes_by_render_order(monkeypatch):
-    """Axes must appear in render_order, NOT in dict-insertion order. A
-    dimensions list emitted with render_order out-of-sequence must
-    still produce axes in order 1, 2, 3, 4 in the prompt."""
+def test_prose_subheaders_orders_themes_by_render_order(monkeypatch):
+    """Dimension themes appear in render_order in the 'cover these themes'
+    line, NOT in dict-insertion order."""
     em = {
         "entities": ["E1", "E2", "E3", "E4", "E5"],
         "dimensions": [
@@ -112,53 +110,37 @@ def test_prose_subheaders_orders_axes_by_render_order(monkeypatch):
     plan = _bare_plan_with_em(em)
     captured = _call_writer(monkeypatch, plan, archetype="list-all")
     user = captured[0]["user"]
-    # Find positions of each axis name in the prompt
-    p_first = user.find("**First:**")
-    p_second = user.find("**Second:**")
-    p_third = user.find("**Third:**")
-    p_fourth = user.find("**Fourth:**")
-    assert -1 < p_first < p_second < p_third < p_fourth, (
-        f"axes not in render_order: First@{p_first}, Second@{p_second}, Third@{p_third}, Fourth@{p_fourth}"
-    )
+    # The names also appear in the entity_matrix JSON dump (insertion order),
+    # so check order WITHIN the directive's "in this order:" themes line.
+    anchor = user.find("in this order:")
+    assert anchor != -1, f"themes line missing; got: {user[:2500]}"
+    themes_line = user[anchor : user.find("\n", anchor)]
+    p_first, p_second, p_third, p_fourth = (themes_line.find(n) for n in ("First", "Second", "Third", "Fourth"))
+    assert -1 < p_first < p_second < p_third < p_fourth, f"themes not in render_order: {themes_line!r}"
 
 
-def test_prose_subheaders_uses_fullwidth_colon_for_zh(monkeypatch):
-    """ZH-language tasks use the full-width colon (：) per the reference convention."""
-    em = {
-        "entities": ["E1", "E2", "E3", "E4", "E5"],
-        "dimensions": [
-            {"axis_name": "维度一", "render_order": 1, "content_template": "事实 + 分析"},
-            {"axis_name": "维度二", "render_order": 2, "content_template": "因果链"},
-        ],
-        "instantiation_mode": "prose_subheaders",
-        "min_axes_per_entity": 2,
-    }
-    plan = _bare_plan_with_em(em)
-    captured = _call_writer(monkeypatch, plan, archetype="list-all", language="zh")
-    user = captured[0]["user"]
-    assert "**维度一：**" in user, f"ZH full-width colon missing; got: {user[:2000]}"
-    assert "**维度二：**" in user
-
-
-def test_prose_subheaders_uses_halfwidth_colon_for_en(monkeypatch):
-    """EN-language tasks use the half-width colon (:)."""
+def test_prose_subheaders_forbids_nested_headings(monkeypatch):
+    """The reference-flat directive must forbid ###/#### sub-headings within an
+    entity (the bold lead-ins ARE the sub-structure)."""
     em = {
         "entities": ["E1", "E2", "E3", "E4", "E5"],
         "dimensions": [
             {"axis_name": "Dim One", "render_order": 1, "content_template": "tpl"},
+            {"axis_name": "Dim Two", "render_order": 2, "content_template": "tpl"},
         ],
         "instantiation_mode": "prose_subheaders",
     }
     plan = _bare_plan_with_em(em)
     captured = _call_writer(monkeypatch, plan, archetype="list-all", language="en")
     user = captured[0]["user"]
-    assert "**Dim One:**" in user
-    assert "**Dim One：**" not in user, "ZH full-width colon leaked into EN prompt"
+    assert "SINGLE FLAT section" in user
+    assert "do NOT" in user and "###" in user, f"flat-only rule missing; got: {user[:2500]}"
+    assert "descriptive bold" in user.lower() or "DESCRIPTIVE BOLD" in user
 
 
-def test_prose_subheaders_includes_min_axes_compliance_floor(monkeypatch):
-    """The micro-template RULES block must surface the min_axes_per_entity
-    floor so the writer knows the compliance bar."""
+def test_prose_subheaders_dense_paragraph_rule(monkeypatch):
+    """The directive must push DENSE single-theme paragraphs (the readability
+    one-idea-per-paragraph fix) — not stacked modes, not choppy."""
     em = {
         "entities": ["E1", "E2", "E3", "E4", "E5"],
         "dimensions": [{"axis_name": f"D{i}", "render_order": i, "content_template": "t"} for i in range(1, 6)],
@@ -168,7 +150,10 @@ def test_prose_subheaders_includes_min_axes_compliance_floor(monkeypatch):
     plan = _bare_plan_with_em(em)
     captured = _call_writer(monkeypatch, plan, archetype="list-all")
     user = captured[0]["user"]
-    assert "4 of the 5 axes must be populated" in user, f"compliance floor missing; got: {user[:2500]}"
+    # paragraph-count guidance derived from min_axes..len(dims): "4-5 DENSE paragraphs"
+    assert "4-5 DENSE paragraphs" in user, f"paragraph-count guidance missing; got: {user[:2500]}"
+    assert "internally unstable" in user  # the anti-stacking rationale
+    assert "EQUAL-DEPTH" in user
 
 
 def test_writer_handles_null_min_axes_per_entity_without_crash(monkeypatch):
