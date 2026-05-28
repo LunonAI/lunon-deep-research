@@ -87,6 +87,30 @@ def test_emdash_restraint_rule_in_writer_system():
     assert "12 per 1,000 words" in sys
 
 
+def test_insight_element_f_requires_resolution_clause():
+    """P3b-D1: element (f) PROBLEM-TRADEOFF now requires an explicit
+    resolution clause — a bare unresolved tension doesn't count (our weakest
+    RACE-Insight sub-criterion)."""
+    assert "RESOLUTION CLAUSE REQUIRED" in _INSIGHT_MIN
+    assert "Where one might expect" in _INSIGHT_MIN
+    assert "does NOT satisfy" in _INSIGHT_MIN
+
+
+def test_chapter_synthesis_rule_in_writer_system():
+    """P3b-D1: the end-of-chapter SYNTHESIS directive (highest-Insight move)
+    is wired into the system prompt for every archetype, with the word cap,
+    the no-new-entity constraint, the flat-report reshape, and the optional
+    'what remains unresolved' closer."""
+    for arche in ("list-all", "compare", "explain-mechanism", "predict"):
+        sys = writer_system(arche, "default", "en", ["A", "B"], task_id=None)
+        assert "END-OF-CHAPTER SYNTHESIS" in sys, f"missing for {arche}"
+        assert "profiles NO new entity" in sys
+        assert "180 words" in sys
+        assert "RE-ALLOCATE" in sys
+        assert "FLAT reports" in sys  # list-all reshape path
+        assert "What remains unresolved" in sys  # technique 4 (per-chapter limits)
+
+
 def test_writer_system_includes_new_insight_rule_for_every_archetype():
     """Wired through writer_system() — the rule appears regardless of which
     archetype the caller passes. (Old rule was always included too, just

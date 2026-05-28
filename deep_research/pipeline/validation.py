@@ -331,6 +331,16 @@ def run(inp: ValidationInput) -> ValidationOutput:
     counts["prose_form_choppy_frac"] = pf["choppy_frac"]
     counts["prose_form_h3_count"] = pf["h3_count"]
     counts["prose_form_h4_count"] = pf["h4_count"]
+    # P3b-D1: labeled-reasoning adoption telemetry (advisory) so the re-grade
+    # can attribute Insight movement to whether the directives landed.
+    pr = _validate_prose_reasoning(inp.article)
+    counts["prose_reasoning_synthesis_per_chapter"] = pr["synthesis_per_chapter"]
+    counts["prose_reasoning_synthesis_headings"] = pr["synthesis_headings"]
+    counts["prose_reasoning_article_synthesis"] = pr["article_synthesis"]
+    counts["prose_reasoning_h2_chapters"] = pr["h2_chapters"]
+    counts["prose_reasoning_tension_paras"] = pr["tension_paras"]
+    counts["prose_reasoning_tension_resolved"] = pr["tension_resolved"]
+    counts["prose_reasoning_tension_resolution_rate"] = pr["tension_resolution_rate"]
 
     # 9. P3-W2 (2026-05-27): framing-chapter downstream-reuse — telemetry
     # only. Measures whether §2+ chapters re-engage with §1's published
@@ -450,6 +460,55 @@ def _validate_prose_form(article: str) -> dict:
         "choppy_frac": round(choppy / max(len(paras), 1), 3),
         "h3_count": len(re.findall(r"^###\s", article, re.MULTILINE)),
         "h4_count": len(re.findall(r"^####\s", article, re.MULTILINE)),
+    }
+
+
+# P3b-D1 (2026-05-28): adoption telemetry for the labeled-reasoning directives
+# (end-of-chapter synthesis subsection + tension→resolution). Advisory only —
+# its purpose is to let the re-grade ATTRIBUTE any Insight movement to whether
+# the directives actually landed (the LLM-compliance risk), NOT to hard-fail.
+_SYNTHESIS_HEADING_RE = re.compile(r"(?im)^#{2,4}[ \t].*(?:synthesis|综合)")
+# A `##`-level synthesis heading is an ARTICLE-level synthesis chapter (the
+# flat-report archetype's directive: one top-level synthesis over N entity
+# chapters), distinct from a per-chapter `###`/`####` synthesis subsection.
+_ARTICLE_SYNTHESIS_RE = re.compile(r"(?im)^##[ \t].*(?:synthesis|综合)")
+_TENSION_RE = re.compile(r"(?i)\b(tension|paradox|trade-?off|at odds|in conflict)\b|悖论|矛盾")
+_RESOLUTION_RE = re.compile(r"(?i)\b(resolv\w+|reconcil\w+|where one might expect|the resolution)\b|从而化解")
+
+
+def _validate_prose_reasoning(article: str) -> dict:
+    """Coarse advisory signal of labeled-reasoning adoption (P3b-D1):
+    per-chapter synthesis-subsection density and tension→resolution
+    co-occurrence. No hard-fail; pre-flatten chapters are `##`.
+
+    `synthesis_per_chapter` counts only per-chapter (`###`/`####`) synthesis
+    subsections over CONTENT chapters, excluding any article-level (`##`)
+    synthesis chapter from BOTH numerator and denominator. Otherwise a
+    compliant flat-report archetype (one top-level `## Synthesis` over N
+    entity chapters) would read as ~1/(N+1) and be indistinguishable from
+    non-adoption. The article-level case is surfaced separately as
+    `article_synthesis` so the re-grade can tell the archetypes apart."""
+    n_synth = len(_SYNTHESIS_HEADING_RE.findall(article))
+    n_article_synth = len(_ARTICLE_SYNTHESIS_RE.findall(article))
+    n_subsection_synth = n_synth - n_article_synth
+    n_h2 = len(re.findall(r"^##[ \t]", article, re.MULTILINE))
+    content_chapters = n_h2 - n_article_synth
+    paras = [p for p in re.split(r"\n\s*\n", article) if p.strip() and not p.strip().startswith("#")]
+    tension = 0
+    resolved = 0
+    for p in paras:
+        if _TENSION_RE.search(p):
+            tension += 1
+            if _RESOLUTION_RE.search(p):
+                resolved += 1
+    return {
+        "synthesis_headings": n_synth,
+        "article_synthesis": n_article_synth,
+        "h2_chapters": n_h2,
+        "synthesis_per_chapter": round(n_subsection_synth / max(content_chapters, 1), 3),
+        "tension_paras": tension,
+        "tension_resolved": resolved,
+        "tension_resolution_rate": round(resolved / max(tension, 1), 3),
     }
 
 

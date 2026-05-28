@@ -6,7 +6,7 @@ paragraph density (vs the reference EN corpus median ~81 words) and heading
 flatness (corpus h4=0). Advisory only — these are counts, never a hard-fail.
 """
 
-from deep_research.pipeline.validation import _validate_prose_form
+from deep_research.pipeline.validation import _validate_prose_form, _validate_prose_reasoning
 
 
 def test_dense_paragraphs_high_median_no_choppy():
@@ -61,3 +61,69 @@ def test_mixed_density_median_is_robust():
     assert pf["para_median_words"] == 120
     assert pf["choppy_paras"] == 1
     assert pf["choppy_frac"] == 0.333  # round(1/3, 3)
+
+
+# --- P3b-D1: _validate_prose_reasoning (labeled-reasoning adoption) ---------
+
+
+def test_prose_reasoning_counts_synthesis_per_chapter():
+    art = (
+        "## 1 Alpha\n\nbody.\n\n### 1.4 Synthesis\n\nThese together establish X.\n\n"
+        "## 2 Beta\n\nbody.\n\n### 2.4 Synthesis\n\nThe set proves Y.\n"
+    )
+    pr = _validate_prose_reasoning(art)
+    assert pr["synthesis_headings"] == 2
+    assert pr["h2_chapters"] == 2
+    assert pr["synthesis_per_chapter"] == 1.0
+
+
+def test_prose_reasoning_zero_synthesis_when_absent():
+    art = "## 1 A\n\nplain body paragraph here.\n\n## 2 B\n\nanother body paragraph.\n"
+    pr = _validate_prose_reasoning(art)
+    assert pr["synthesis_headings"] == 0
+    assert pr["synthesis_per_chapter"] == 0.0
+
+
+def test_prose_reasoning_tension_resolution_rate():
+    art = (
+        "## 1 A\n\n"
+        "The apparent paradox here resolves once we see the deeper mechanism.\n\n"
+        "There is a clear tension between scale and speed in this design.\n"  # unresolved
+    )
+    pr = _validate_prose_reasoning(art)
+    assert pr["tension_paras"] == 2
+    assert pr["tension_resolved"] == 1
+    assert pr["tension_resolution_rate"] == 0.5
+
+
+def test_prose_reasoning_flat_report_synthesis_not_deflated():
+    """A compliant flat report (one article-level `## Synthesis` over N entity
+    chapters) must NOT read as ~1/(N+1) per-chapter synthesis. The article-level
+    synthesis is excluded from both numerator and denominator and surfaced as
+    `article_synthesis` so the re-grade can distinguish the flat-report archetype
+    from non-adoption (PR #59)."""
+    chapters = "".join(
+        f"## {i} Entity{i}\n\nbody for entity {i}.\n\n" for i in range(1, 11)
+    )
+    art = chapters + "## Synthesis\n\nThese entities together establish the pattern.\n"
+    pr = _validate_prose_reasoning(art)
+    assert pr["h2_chapters"] == 11
+    assert pr["article_synthesis"] == 1
+    assert pr["synthesis_headings"] == 1
+    # No content chapter has a `###` synthesis subsection, so per-chapter rate is
+    # 0.0 (not 1/11) — the article-level synthesis is not double-counted.
+    assert pr["synthesis_per_chapter"] == 0.0
+
+
+def test_prose_reasoning_comparative_instead_not_counted_as_resolved():
+    """A bare comparative `instead` must NOT mark a tension paragraph as
+    resolved — it inflates the rate without any actual resolution (PR #59)."""
+    art = (
+        "## 1 A\n\n"
+        "There is a trade-off here: we use batch processing instead of "
+        "online processing to keep costs down.\n"
+    )
+    pr = _validate_prose_reasoning(art)
+    assert pr["tension_paras"] == 1
+    assert pr["tension_resolved"] == 0
+    assert pr["tension_resolution_rate"] == 0.0

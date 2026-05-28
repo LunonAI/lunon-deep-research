@@ -609,6 +609,12 @@ _INSIGHT_MIN = (
     "      central issue / to address this / the resolution lies / "
     "      reconciles / 悖论 / 矛盾 / 挑战在于 / 关键问题'. NEW IN WAVE 3 "
     "      PR 2 — Lunon was structurally uncovered on RACE 3.\n"
+    "      RESOLUTION CLAUSE REQUIRED (P3b-D1): a flagged tension counts "
+    "      ONLY when followed by an explicit resolution. Use this shape: "
+    "      'Where one might expect X, the system instead resolves into Y because Z.' "
+    "      A bare unresolved tension does NOT satisfy (f) — name how it "
+    "      resolves or what constrains the resolution. This is our weakest "
+    "      RACE-Insight sub-criterion vs the reference; reasoning, not citations.\n"
     "\n"
     "GROUNDING RULE (unchanged from prior policy): every element above MUST "
     "be evidence-backed — name a source, cite a date or named work, or "
@@ -849,6 +855,35 @@ _EMDASH_RULE = (
     "asides. Do NOT chain multiple em-dash clauses within one sentence."
 )
 
+# P3b-D1 (2026-05-28): end-of-chapter SYNTHESIS subsection — the highest-
+# leverage Insight move from reading the reference's #1 articles (q56/q89/q91).
+# Their edge over us is LABELED REASONING (synthesis subsections, verdicts,
+# tension→resolution) where we spend words on cited description. This is a
+# RE-ALLOCATION of word budget, not additive (paired with the bands +
+# one-element-per-paragraph rule so it can't re-inflate the over-production
+# C1 fixed). Generalizable: confirmed across a math paper, a survey, fiction.
+_CHAPTER_SYNTHESIS_RULE = (
+    "END-OF-CHAPTER SYNTHESIS (highest-Insight move):\n"
+    "Every BODY chapter containing ≥2 leaves/sub-sections MUST close with "
+    "ONE short subsection (heading containing 'Synthesis' / '综合') that "
+    "profiles NO new entity. In ≤180 words it (a) aggregates THIS chapter's "
+    "findings into ONE structural claim about the whole set ('these N "
+    "together establish that…'), and (b) names the analytical role the NEXT "
+    "chapter plays. REASONING, not recap: do NOT re-cite atoms or re-describe "
+    "entities — state what the set PROVES. RE-ALLOCATE word budget into this "
+    "subsection (spend an existing leaf's words here); do NOT add length. "
+    "One analytical theme only (per the ONE-INSIGHT-ELEMENT-PER-PARAGRAPH "
+    "rule above).\n"
+    "FLAT reports (one entity per `##`, no sub-leaves — e.g. list-all): skip "
+    "per-chapter synthesis and instead close the ARTICLE with ONE overall "
+    "Synthesis chapter doing the same aggregation across all entities.\n"
+    "OPTIONAL per-chapter closer: a 2-3 sentence 'What remains unresolved' "
+    "micro-paragraph naming ONE specific open question this chapter cannot "
+    "settle, framed as the next research question (NOT a generic 'more "
+    "research is needed'). Skip it when the chapter has no genuine open "
+    "question — do NOT manufacture one (per AVOID FORMULAIC INSERTION)."
+)
+
 _ARCH_REFINE_EMPHASIS = {
     "list-all": "Maximize exhaustive coverage; one clearly-delimited unit per "
     "required item; comparison/inventory tables.",
@@ -1080,6 +1115,7 @@ def writer_system(
     middle_rules.extend(
         [
             _INSIGHT_MIN,
+            _CHAPTER_SYNTHESIS_RULE,
             CLEANING_RESISTANT_RULE,
             _EMDASH_RULE,
             _SECTION_OPENING_PROSE_LEAD_RULE,
