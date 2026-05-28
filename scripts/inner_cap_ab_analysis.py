@@ -11,9 +11,11 @@ writes into p1_artifacts/inner_loop_drift.jsonl. Run AFTER a cap=3 dev4:
 
     .venv/bin/python scripts/inner_cap_ab_analysis.py [path-to-drift.jsonl]
 
-Decision rule (printed at the end): if <5% of sections benefit from iteration
-index >=2 AND the mean min_score gain at index 2 is <0.2, cap=2 is empirically
-safe → ship the flip. Otherwise keep cap=3.
+Decision rule (printed at the end): of the sections that ACTUALLY reached the
+3rd pass (i==2), if <10% flipped to passing AND the mean min_score gain at
+index 2 is <0.2, cap=2 is empirically safe → ship the flip. Otherwise keep
+cap=3. (If no section ever reached i==2, cap=2 is behavior-identical on this
+sample — safe, but confirm on a larger run.)
 """
 
 from __future__ import annotations
