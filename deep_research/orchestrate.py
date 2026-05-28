@@ -101,6 +101,10 @@ def _persist_drift(s, language: str, query: str) -> None:
             # writer occasionally regresses to "Building on §X"
             # templates or hallucinates dangling forward-refs.
             "xref_repair": dict(getattr(s, "xref_repair_stats", {}) or {}),
+            # P3b-OPT2 (2026-05-27): per-section inner-loop trajectory so
+            # scripts/inner_cap_ab_analysis.py can measure whether the 2nd/3rd
+            # corrective pass (only reachable at INNER_CAP=3) earns its cost.
+            "inner_loop_trajectory": list(getattr(s, "inner_loop_trajectory", []) or []),
         }
         _DRIFT_PATH.parent.mkdir(parents=True, exist_ok=True)
         with _DRIFT_LOCK, _DRIFT_PATH.open("a", encoding="utf-8") as fh:
@@ -437,9 +441,28 @@ def _run_section_loop(s: PipelineState, query, language):
         )
         _accum(stats)
         last_scores = None
-        for _ in range(INNER_CAP):
+        # P3b-OPT2 (2026-05-27): per-iteration trajectory telemetry. INNER_CAP
+        # stays 3 (UNCHANGED — it is the value behind the W9/0.5229 baseline).
+        # We only OBSERVE the loop here: record, per iteration, whether
+        # grounding passed and what the inner-loop score was. A later analysis
+        # (scripts/inner_cap_ab_analysis.py) reads this to decide empirically
+        # whether the 2nd/3rd corrective pass earns its cost — i.e. whether
+        # cap=2 would have shipped a worse section. Pure observation, no
+        # behavior change.
+        traj = []
+        for iter_index in range(INNER_CAP):
             g = grounding.check(draft_s, ev, language, archetype=archetype)
             if not g["ok"]:
+                traj.append(
+                    {
+                        "i": iter_index,
+                        "grounding_ok": False,
+                        "scored": False,
+                        "score_ok": None,
+                        "min_score": None,
+                        "degraded": False,
+                    }
+                )
                 draft_s, stats = _write_with_guide(
                     u,
                     plan,
@@ -456,8 +479,23 @@ def _run_section_loop(s: PipelineState, query, language):
                 )
                 _accum(stats)
                 continue
-            r = inner_loop.score_section(draft_s, spec, language, u["title"])
+            r = inner_loop.score_section(draft_s, spec, language, u["title"], note=f"inner_loop.{sid}")
             last_scores = r
+            traj.append(
+                {
+                    "i": iter_index,
+                    "grounding_ok": True,
+                    "scored": True,
+                    "score_ok": bool(r.get("ok")),
+                    "min_score": r.get("min_score"),
+                    # score_section returns a synthetic ok=True / min_score=10.0
+                    # when the inner-scorer LLM call fails. Forward that flag so
+                    # the analysis script can exclude these from the cap=2
+                    # verdict — a degraded "pass" is not a genuine one and would
+                    # otherwise bias toward KEEP cap=3. (Greptile PR #50.)
+                    "degraded": bool(r.get("degraded")),
+                }
+            )
             if r["ok"]:
                 break
             draft_s, stats = _write_with_guide(
@@ -475,7 +513,7 @@ def _run_section_loop(s: PipelineState, query, language):
                 feedback=inner_loop.feedback_text(r),
             )
             _accum(stats)
-        return sid, u, draft_s, last_scores, agg_stats
+        return sid, u, draft_s, last_scores, agg_stats, traj
 
     order_ix = {u["id"]: i for i, u in enumerate(units)}
     sec_workers = int(os.environ.get("DR_SECTION_WORKERS", "4"))
@@ -484,8 +522,10 @@ def _run_section_loop(s: PipelineState, query, language):
     results.sort(key=lambda r: order_ix.get(r[0], 1e9))
 
     sections, score_summary, failing = [], [], []
-    for sid, u, draft_s, last, stats in results:
+    for sid, u, draft_s, last, stats, traj in results:
         sections.append(draft_s)
+        if traj:
+            s.inner_loop_trajectory.append({"section": sid, "iters": traj})
         if stats and (stats.get("n_markers_stripped") or stats.get("n_violations")):
             s.capel_stats[sid] = stats
         if last:
