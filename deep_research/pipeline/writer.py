@@ -323,7 +323,7 @@ def write_section(
         # tests, future caller). `dict.get(key, default)` returns the
         # stored None when the key is present-with-null, and int(None)
         # raises TypeError. Greptile PR #37 round-3 finding.
-        min_axes = int(em.get("min_axes_per_entity") or 3)
+        min_axes = min(int(em.get("min_axes_per_entity") or 3), len(dims_sorted))
         if mode == "prose_subheaders" and dims_sorted:
             # P3b-opt2 (2026-05-28): retire the rigid bolded-label micro-template
             # (built on a wrong read of the lossy corpus — the FRESH q91 output
