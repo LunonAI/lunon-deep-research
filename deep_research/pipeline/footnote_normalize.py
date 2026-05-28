@@ -28,6 +28,42 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from .evidence_dedup import _normalize_url
+
+# P3b-D2 (2026-05-28): the writer emits a fresh per-section token for the SAME
+# source in every section, so footnote_normalize used to assign that one source
+# N separate global numbers (e.g. one Fandom page → 35 `[^N]` entries; reuse
+# 1.4× vs Qianfan's 4.7–8.9×). We now number by SOURCE: tokens whose definition
+# resolves to the same source (URL via evidence_dedup._normalize_url, else the
+# normalized source-name) collapse to ONE number, every inline marker rewritten
+# to it. Deterministic, generalizes to every task, and matches Qianfan's
+# few-sources-reused-heavily citation shape.
+_DEF_SEP = " — "  # source-name — url separator emitted by CLEANING_RESISTANT_RULE
+_NAME_NORM_RE = re.compile(r"[^\w\s]", re.UNICODE)
+
+
+def _def_source_key(text: str) -> str:
+    """Canonical dedup key for a definition's source: its normalized URL when
+    the tail after the ` — ` separator is a real http(s) URL, else the
+    normalized FULL definition text.
+
+    The http(s) guard is required: ``_normalize_url`` returns a non-empty
+    pseudo-URL for ANY non-empty string (e.g. ``"See §4"`` → ``"https://see
+    §4"``), so without it the name fallback is dead code AND two different
+    sources sharing a coincidental non-URL tail would false-merge. Keying the
+    fallback on the FULL text (not just the head) preserves tail distinctions
+    like ``"Lebrun (1999) — vol 1"`` vs ``"… — vol 2"`` — conservative: only
+    byte-identical sources merge when no real URL is present."""
+    text = text.strip()
+    if _DEF_SEP in text:
+        tail = text.rsplit(_DEF_SEP, 1)[1].strip()
+        if tail.startswith(("http://", "https://")):
+            u = _normalize_url(tail)
+            if u:
+                return "u:" + u
+    return "n:" + re.sub(r"\s+", " ", _NAME_NORM_RE.sub("", text.lower())).strip()
+
+
 # Definition pattern: ``[^token]: definition text`` anchored to line start.
 # Token may include letters, digits, dots, hyphens, underscores — enough to
 # cover the architect's section_id shapes ("S1", "S1.1", "S3.2.4") and any
@@ -90,6 +126,11 @@ class FootnoteNormalizeOutput:
     n_orphans_stripped: int
     n_unused_dropped: int
     n_renumbered: int
+    # P3b-D2: how many used def-tokens collapsed into a smaller set of distinct
+    # sources (used_tokens − distinct_sources). High = the writer is creating a
+    # new token per citation of the same source; the dedup raises reuse toward
+    # Qianfan's range. 0 = every cited token was already a distinct source.
+    n_sources_merged: int = 0
     # Wave 1 §2.1a: count of writer-emitted ``## References`` sections
     # removed from the body before normalize processing. Non-zero means
     # the writer is inventing its own References blocks — a writer-side
@@ -167,9 +208,12 @@ def normalize(article: str, references_heading: str = "References") -> FootnoteN
             n_writer_refs_sections_stripped=n_writer_refs_stripped,
         )
 
-    # Step 2: walk article in document order, assign fresh global numbers
-    # to each unique token in order of first inline appearance.
-    token_to_n: dict[str, int] = {}
+    # Step 2: walk article in document order, assign global numbers by SOURCE
+    # (not token), in order of first inline appearance. Tokens whose definition
+    # resolves to the same source share one number (P3b-D2 dedup).
+    token_to_source: dict[str, str] = {tok: _def_source_key(text) for tok, text in definitions.items()}
+    source_to_n: dict[str, int] = {}
+    token_to_n: dict[str, int] = {}  # used tokens → their source's number
     n_seq = 0
     n_orphans = 0
     n_renum = 0
@@ -180,13 +224,16 @@ def normalize(article: str, references_heading: str = "References") -> FootnoteN
         if tok not in definitions:
             n_orphans += 1
             return ""  # strip orphan marker silently
-        if tok not in token_to_n:
+        src = token_to_source[tok]
+        if src not in source_to_n:
             n_seq += 1
-            token_to_n[tok] = n_seq
+            source_to_n[src] = n_seq
+        token_to_n[tok] = source_to_n[src]
         n_renum += 1
-        return f"[^{token_to_n[tok]}]"
+        return f"[^{source_to_n[src]}]"
 
     body_renum = _INLINE_RE.sub(repl, article)
+    n_sources_merged = len(token_to_n) - len(source_to_n)
 
     # Step 3: strip every original definition line from the (renumbered) body.
     # Re-scan because the substitution may have shifted line positions; we
@@ -216,12 +263,17 @@ def normalize(article: str, references_heading: str = "References") -> FootnoteN
             n_orphans_stripped=n_orphans,
             n_unused_dropped=n_unused,
             n_renumbered=0,
+            n_sources_merged=n_sources_merged,
             n_writer_refs_sections_stripped=n_writer_refs_stripped,
         )
     refs_lines = [f"## {references_heading}", ""]
-    # Iterate by N order, not insertion-into-token_to_n order, so the output
-    # is naturally sorted 1, 2, 3 even if dict ordering ever changes.
-    n_to_token = {n: tok for tok, n in token_to_n.items()}
+    # Iterate by N order, so the output is naturally sorted 1, 2, 3. Under
+    # source-dedup multiple tokens share a number; take the FIRST token (by
+    # first inline appearance) for the def text — all tokens at a number
+    # resolve to the same source, so any is correct, but first is deterministic.
+    n_to_token: dict[int, str] = {}
+    for tok, n in token_to_n.items():
+        n_to_token.setdefault(n, tok)
     for n in sorted(n_to_token):
         refs_lines.append(f"[^{n}]: {definitions[n_to_token[n]]}")
     refs_lines.append("")
@@ -237,6 +289,9 @@ def normalize(article: str, references_heading: str = "References") -> FootnoteN
         n_inline_markers=n_renum + n_orphans,
         n_orphans_stripped=n_orphans,
         n_unused_dropped=n_unused,
-        n_renumbered=len(token_to_n),
+        # Number of distinct global numbers = References entries. Under dedup
+        # this is the distinct-source count (≤ used-token count).
+        n_renumbered=len(source_to_n),
+        n_sources_merged=n_sources_merged,
         n_writer_refs_sections_stripped=n_writer_refs_stripped,
     )
