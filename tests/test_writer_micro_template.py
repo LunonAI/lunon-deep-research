@@ -176,13 +176,15 @@ def test_writer_handles_null_min_axes_per_entity_without_crash(monkeypatch):
     # Must not raise.
     captured = _call_writer(monkeypatch, plan, archetype="list-all")
     user = captured[0]["user"]
-    # Default of 3 applied — surfaced in the RULES block. (1 dim total,
-    # so the rendered floor is min(3, len(dims_sorted)) effectively 3,
-    # which renders verbatim as "3 of the 1 axes" — the test only pins
-    # that the writer did not crash and the directive emitted.)
     assert "PER-ENTITY TREATMENT" in user, (
         f"directive missing — writer may have crashed silently; got: {user[:2500]}"
     )
+    # Default of 3 is clamped to the dimension count (1 here), so the
+    # paragraph-count directive renders the valid range "1-1 DENSE
+    # paragraphs" — never the inverted "3-1" that the unclamped floor
+    # would have produced.
+    assert "1-1 DENSE paragraphs" in user
+    assert "3-1 DENSE paragraphs" not in user, "inverted min>max paragraph range leaked"
 
 
 # --------------------------------------------------------------------------
