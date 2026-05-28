@@ -135,7 +135,12 @@ def refine(draft: str, *, archetype: str, language: str, section_scores=None, fa
     # 0.70 floor still catches catastrophic refiner collapse but allows the
     # 10-30% pruning the judge wants.
     if ratio < _REVERT_RATIO:
-        return {"article": draft, "applied": False, "ratio": round(ratio, 3), "reason": f"min-ratio<{_REVERT_RATIO} revert"}
+        return {
+            "article": draft,
+            "applied": False,
+            "ratio": round(ratio, 3),
+            "reason": f"min-ratio<{_REVERT_RATIO} revert",
+        }
     return {"article": out, "applied": True, "ratio": round(ratio, 3), "reason": "ok"}
 
 
