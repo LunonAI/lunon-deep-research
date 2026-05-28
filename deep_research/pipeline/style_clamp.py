@@ -20,9 +20,10 @@ Two independent, fail-soft, idempotent clamps:
     lowest grammar-risk conversion. EN default ceiling = the corpus median,
     so it is a NO-OP on English (our body rate is already under it).
 
-Density basis: inline markers in the BODY (excluding the ``## References``
-block) over a CJK-aware word count (mirrors scripts/reference_style_profile.py
-so the band math matches what graders measure).
+Density basis: inline markers in the full article (def lines, headings, tables
+and code are excluded via ``_protected_ranges``) over a CJK-aware word count
+(mirrors scripts/reference_style_profile.py so the band math matches what graders
+measure).
 """
 
 from __future__ import annotations

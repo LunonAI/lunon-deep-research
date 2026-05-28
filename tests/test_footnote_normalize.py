@@ -372,3 +372,16 @@ def test_dedup_preserves_first_appearance_order():
     # B is cited first → [^1]; A second → [^2]
     assert "[^1]: B" in out.article
     assert "[^2]: A" in out.article
+
+
+def test_dedup_non_url_tail_does_not_false_merge():
+    """Greptile PR #60: _normalize_url returns a pseudo-URL for ANY non-empty
+    string, so a non-URL tail must NOT be treated as a URL key — two different
+    sources sharing a coincidental non-URL tail stay distinct."""
+    article = (
+        "# T\n\n## 1 A\n\nx[^S1-1] y[^S1-2].\n\n"
+        "[^S1-1]: Fandom — See §4\n[^S1-2]: Wikipedia — See §4\n"
+    )
+    out = footnote_normalize.normalize(article)
+    assert out.n_renumbered == 2  # distinct sources, NOT merged on the shared tail
+    assert out.n_sources_merged == 0
