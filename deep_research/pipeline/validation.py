@@ -331,6 +331,12 @@ def run(inp: ValidationInput) -> ValidationOutput:
     counts["prose_form_choppy_frac"] = pf["choppy_frac"]
     counts["prose_form_h3_count"] = pf["h3_count"]
     counts["prose_form_h4_count"] = pf["h4_count"]
+    # P3b-D1: labeled-reasoning adoption telemetry (advisory) so the re-grade
+    # can attribute Insight movement to whether the directives landed.
+    pr = _validate_prose_reasoning(inp.article)
+    counts["prose_reasoning_synthesis_per_chapter"] = pr["synthesis_per_chapter"]
+    counts["prose_reasoning_synthesis_headings"] = pr["synthesis_headings"]
+    counts["prose_reasoning_tension_resolution_rate"] = pr["tension_resolution_rate"]
 
     # 9. P3-W2 (2026-05-27): framing-chapter downstream-reuse — telemetry
     # only. Measures whether §2+ chapters re-engage with §1's published
@@ -450,6 +456,39 @@ def _validate_prose_form(article: str) -> dict:
         "choppy_frac": round(choppy / max(len(paras), 1), 3),
         "h3_count": len(re.findall(r"^###\s", article, re.MULTILINE)),
         "h4_count": len(re.findall(r"^####\s", article, re.MULTILINE)),
+    }
+
+
+# P3b-D1 (2026-05-28): adoption telemetry for the labeled-reasoning directives
+# (end-of-chapter synthesis subsection + tension→resolution). Advisory only —
+# its purpose is to let the re-grade ATTRIBUTE any Insight movement to whether
+# the directives actually landed (the LLM-compliance risk), NOT to hard-fail.
+_SYNTHESIS_HEADING_RE = re.compile(r"(?im)^#{2,4}[ \t].*(?:synthesis|综合)")
+_TENSION_RE = re.compile(r"(?i)\b(tension|paradox|trade-?off|at odds|in conflict)\b|悖论|矛盾")
+_RESOLUTION_RE = re.compile(r"(?i)\b(resolv\w+|reconcil\w+|where one might expect|instead\b|the resolution)\b|从而化解")
+
+
+def _validate_prose_reasoning(article: str) -> dict:
+    """Coarse advisory signal of labeled-reasoning adoption (P3b-D1):
+    synthesis-subsection density per chapter and tension→resolution
+    co-occurrence. No hard-fail; pre-flatten chapters are `##`."""
+    n_synth = len(_SYNTHESIS_HEADING_RE.findall(article))
+    n_h2 = len(re.findall(r"^##[ \t]", article, re.MULTILINE))
+    paras = [p for p in re.split(r"\n\s*\n", article) if p.strip() and not p.strip().startswith("#")]
+    tension = 0
+    resolved = 0
+    for p in paras:
+        if _TENSION_RE.search(p):
+            tension += 1
+            if _RESOLUTION_RE.search(p):
+                resolved += 1
+    return {
+        "synthesis_headings": n_synth,
+        "h2_chapters": n_h2,
+        "synthesis_per_chapter": round(n_synth / max(n_h2, 1), 3),
+        "tension_paras": tension,
+        "tension_resolved": resolved,
+        "tension_resolution_rate": round(resolved / max(tension, 1), 3),
     }
 
 
