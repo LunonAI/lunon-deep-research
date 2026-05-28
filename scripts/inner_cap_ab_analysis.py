@@ -87,10 +87,19 @@ def analyze(drift_path: Path) -> dict:
     benefit_rate = (benefited_idx2 / reached_idx2) if reached_idx2 else 0.0
     reached_fraction = (reached_idx2 / total_sections) if total_sections else 0.0
     mean_gain = (sum(score_gains) / len(score_gains)) if score_gains else 0.0
+    # Require actual score-dimension evidence. When sections reach i==2 but
+    # i==1 had a grounding failure (no min_score recorded), score_gains ends up
+    # empty and mean_gain defaults to 0.0 — which would TRIVIALLY pass the
+    # `mean_gain < threshold` check despite zero evidence. Demand
+    # has_score_evidence so an evidence-free run can't print EMPIRICALLY SAFE;
+    # main() surfaces this as a distinct INCONCLUSIVE verdict. (Greptile #50.)
+    has_score_evidence = len(score_gains) > 0
     # cap=2 is safe if the 3rd pass either NEVER runs, OR — when it runs —
-    # rarely flips a section to passing AND barely moves the score. Lean
-    # toward keeping cap=3 (the 0.5229 leaderboard-baseline value).
-    cap2_safe = reached_idx2 == 0 or (benefit_rate < BENEFIT_RATE_THRESHOLD and mean_gain < SCORE_GAIN_THRESHOLD)
+    # rarely flips a section to passing AND (with real score evidence) barely
+    # moves the score. Lean toward keeping cap=3 (the 0.5229 baseline value).
+    cap2_safe = reached_idx2 == 0 or (
+        benefit_rate < BENEFIT_RATE_THRESHOLD and has_score_evidence and mean_gain < SCORE_GAIN_THRESHOLD
+    )
 
     return {
         "total_sections": total_sections,
@@ -139,6 +148,14 @@ def main() -> None:
             print("  VERDICT: the 3rd pass NEVER ran in this sample — cap=2 would have been")
             print("           behavior-identical here. Safe on this evidence, but the sample")
             print("           may be too clean to be representative; confirm on a larger run.")
+    elif r["n_score_gain_samples"] == 0:
+        # Sections reached i==2 but no i==1↔i==2 score pairs were recorded
+        # (e.g. grounding failures at i==1). There's no score-dimension evidence
+        # to judge the 3rd pass, so don't claim "safe". (Greptile PR #50.)
+        print("  VERDICT: INCONCLUSIVE — sections reached the 3rd pass but no i==1↔i==2 score")
+        print(f"           pairs were recorded (benefit_rate {r['benefit_rate'] * 100:.1f}%, but n=0 score")
+        print("           samples — likely grounding failures at i==1). Keep cap=3 pending a")
+        print("           cleaner run with score evidence.")
     elif r["cap2_safe"]:
         print(f"  VERDICT: cap=2 is EMPIRICALLY SAFE — <{BENEFIT_RATE_THRESHOLD * 100:.0f}% of the sections that")
         print(f"           ran a 3rd pass benefited from it, and mean gain <{SCORE_GAIN_THRESHOLD}.")
