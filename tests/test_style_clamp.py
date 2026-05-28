@@ -139,6 +139,43 @@ def test_clamp_then_footnote_normalize_no_orphans():
     assert "[^1]" in fn.article and "[^2]" in fn.article
 
 
+# --- Greptile #57 fixes ----------------------------------------------------
+
+
+def test_code_fence_indentation_preserved_during_cleanup():
+    """Issue 1: the post-removal cleanup must NOT collapse indentation inside
+    a protected code/mermaid fence, even when PASS 1 collapses a salad run in
+    adjacent prose (which is what triggers the cleanup)."""
+    art = (
+        "# T\n\n## 1 A\n\n"
+        "Prose claim[^S1-1][^S1-2] with a salad run here.\n\n"
+        "```mermaid\ngraph TD\n    A --> B\n        C --> D\n```\n"
+    )
+    out, st = style_clamp.clamp_citations(art, language="en", max_per_1k=1000.0)
+    assert st["salad_collapsed"] == 1  # cleanup DID run
+    assert "    A --> B\n        C --> D" in out  # 4- and 8-space indents intact
+
+
+def test_sentence_end_positions_skips_abbreviations():
+    """Issue 2: abbreviation dots ('Fig.', 'Dr.', 'e.g.') are not counted as
+    sentence boundaries (so PASS 2 doesn't over-protect the next marker)."""
+    from deep_research.pipeline.style_clamp import _sentence_end_positions
+
+    text = "See Fig. 3 and Dr. Smith e.g. here. Real end."
+    # only "here." and "end." are real boundaries
+    assert len(_sentence_end_positions(text)) == 2
+
+
+def test_target_rounds_so_single_marker_short_body_is_in_band():
+    """Issue 3: round()+floor-1 — a short body whose single marker is within
+    the rounded band must NOT trip floor_exceeded (int() truncation set the
+    target to 0 and tripped it spuriously)."""
+    art = "# T\n\n## 1 A\n\nShort claim here[^S1-1] indeed today.\n"
+    out, st = style_clamp.clamp_citations(art, language="en", max_per_1k=7.0)
+    assert st["markers_after"] == 1
+    assert st["floor_exceeded"] is False
+
+
 # --- em-dash clamp ---------------------------------------------------------
 
 
