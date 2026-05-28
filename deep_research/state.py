@@ -159,3 +159,11 @@ class PipelineState:
     # writer output; non-zero stats let dev4 / W13 analysers quantify
     # how often the safety net fires.
     xref_repair_stats: dict = field(default_factory=dict)
+    # P3b-OPT2 (2026-05-27): per-section inner-loop iteration trajectory.
+    # One entry per section: {"section": sid, "iters": [{"i", "grounding_ok",
+    # "scored", "score_ok", "min_score"}, ...]}. INNER_CAP is unchanged (3);
+    # this records WHETHER the 2nd/3rd corrective pass flipped a section from
+    # failing to passing, so scripts/inner_cap_ab_analysis.py can decide
+    # empirically whether cap=2 is safe without a paired A/B run. Pure
+    # observation — no behavior change.
+    inner_loop_trajectory: list = field(default_factory=list)

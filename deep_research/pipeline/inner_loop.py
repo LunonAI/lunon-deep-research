@@ -44,7 +44,7 @@ def _relevant_criteria(spec: dict) -> list:
     return out
 
 
-def score_section(section_text: str, spec: dict, language: str, section_title: str = "") -> dict:
+def score_section(section_text: str, spec: dict, language: str, section_title: str = "", note: str = "inner_loop") -> dict:
     crits = _relevant_criteria(spec)
     user = (
         f"LANGUAGE: {language}\nSECTION TITLE: {section_title}\n\n"
@@ -53,7 +53,7 @@ def score_section(section_text: str, spec: dict, language: str, section_title: s
     )
     try:
         obj = llm.call_json(
-            "inner_scorer", user, system=_SYSTEM, max_tokens=7000, seed=_SEED, effort="medium", note="inner_loop"
+            "inner_scorer", user, system=_SYSTEM, max_tokens=7000, seed=_SEED, effort="medium", note=note
         )
     except Exception:  # noqa: BLE001
         return {"ok": True, "scores": [], "min_score": 10.0, "fail": [], "degraded": True}
