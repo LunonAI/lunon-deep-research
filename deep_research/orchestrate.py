@@ -360,12 +360,19 @@ def from_plan(ctx: dict, query: str, language: str, task_id: int | None = None) 
     # empty-section collapse, heading-tree renumber. NO LLM call. Closes the
     # bottom-10 cross-cutting judge complaints (inconsistent numbering, stage
     # directions, methodology meta-commentary leak).
-    nfo = _phase("numbering_fix", numbering_fix.run, s.article)
+    # P3b-opt2 (2026-05-28): Qianfan-verified flatten. list-all renders fully
+    # flat `##` (q91 has H3=H4=0); other archetypes cap at H3 (Qianfan's
+    # universal h4=0). Deterministic safety-net for when the writer ignores
+    # the flat-structure directive.
+    _arch_name = (s.archetype or {}).get("archetype", "") if isinstance(s.archetype, dict) else ""
+    _flat_depth = 2 if _arch_name == "list-all" else 3
+    nfo = _phase("numbering_fix", numbering_fix.run, s.article, flatten_max_depth=_flat_depth)
     s.article = nfo.article
     s.numbering_fix_stats = {
         "strips": nfo.stage_directions_removed,
         "collapsed": nfo.sections_collapsed,
         "renumbered": nfo.headings_renumbered,
+        "flattened": nfo.headings_flattened,
         "demoted": nfo.headings_demoted,
         "hash_normalized": nfo.headings_hash_normalized,
         "xref_rewritten": nfo.cross_refs_rewritten,
