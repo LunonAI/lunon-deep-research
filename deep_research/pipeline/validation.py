@@ -336,6 +336,9 @@ def run(inp: ValidationInput) -> ValidationOutput:
     pr = _validate_prose_reasoning(inp.article)
     counts["prose_reasoning_synthesis_per_chapter"] = pr["synthesis_per_chapter"]
     counts["prose_reasoning_synthesis_headings"] = pr["synthesis_headings"]
+    counts["prose_reasoning_h2_chapters"] = pr["h2_chapters"]
+    counts["prose_reasoning_tension_paras"] = pr["tension_paras"]
+    counts["prose_reasoning_tension_resolved"] = pr["tension_resolved"]
     counts["prose_reasoning_tension_resolution_rate"] = pr["tension_resolution_rate"]
 
     # 9. P3-W2 (2026-05-27): framing-chapter downstream-reuse — telemetry
@@ -465,7 +468,7 @@ def _validate_prose_form(article: str) -> dict:
 # the directives actually landed (the LLM-compliance risk), NOT to hard-fail.
 _SYNTHESIS_HEADING_RE = re.compile(r"(?im)^#{2,4}[ \t].*(?:synthesis|综合)")
 _TENSION_RE = re.compile(r"(?i)\b(tension|paradox|trade-?off|at odds|in conflict)\b|悖论|矛盾")
-_RESOLUTION_RE = re.compile(r"(?i)\b(resolv\w+|reconcil\w+|where one might expect|instead\b|the resolution)\b|从而化解")
+_RESOLUTION_RE = re.compile(r"(?i)\b(resolv\w+|reconcil\w+|where one might expect|the resolution)\b|从而化解")
 
 
 def _validate_prose_reasoning(article: str) -> dict:
