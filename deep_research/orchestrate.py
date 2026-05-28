@@ -140,7 +140,13 @@ from .pipeline import (
 from .retrieval import domain_routed
 from .state import PipelineState
 
-INNER_CAP = int(os.environ.get("DR_INNER_CAP", "3"))
+# P3b-opt2 (2026-05-28): default 3→2. The id=91 graded smoke's trajectory
+# telemetry (scripts/inner_cap_ab_analysis.py) proved the 3rd corrective pass
+# is wasteful — 49/51 sections reached it, 0 flipped to passing, mean min_score
+# gain 0.029. The 1st corrective pass (iter 0→1) still helps (+0.57 mean), so
+# cap=2 keeps the useful pass and drops the wasteful one. DR_INNER_CAP env
+# override preserved. Re-confirm across the full graded dev4 before W13.
+INNER_CAP = int(os.environ.get("DR_INNER_CAP", "2"))
 VALIDATION_CAP = 3  # loop limit; allows the documented max of 2 corrective
 # refiner passes (item 35). refiner_passes starts at 1 after the initial
 # refiner. The while loop iterates while refiner_passes <= VALIDATION_CAP,

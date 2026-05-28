@@ -253,7 +253,7 @@ def test_writer_includes_entity_matrix_block_for_listall(monkeypatch):
     JSON. Other archetypes don't see it."""
     captured_user: dict[str, str] = {}
 
-    def fake_call(_role, user, *, system, max_tokens, note):  # noqa: ARG001
+    def fake_call(_role, user, *, system, max_tokens, note, **kw):  # noqa: ARG001
         captured_user["text"] = user
         return "## 1 stub\n\nstub body."
 
@@ -316,7 +316,7 @@ def test_writer_render_directive_only_fires_on_s1(monkeypatch):
     the original PR #25 test suite only exercised S1."""
     captured_user: dict[str, str] = {}
 
-    def fake_call(_role, user, *, system, max_tokens, note):  # noqa: ARG001
+    def fake_call(_role, user, *, system, max_tokens, note, **kw):  # noqa: ARG001
         captured_user["text"] = user
         return "## 2.1 stub\n\nstub body."
 
@@ -380,7 +380,7 @@ def test_writer_omits_entity_matrix_for_other_archetypes(monkeypatch):
     be noise that wastes context."""
     captured_user: dict[str, str] = {}
 
-    def fake_call(_role, user, *, system, max_tokens, note):  # noqa: ARG001
+    def fake_call(_role, user, *, system, max_tokens, note, **kw):  # noqa: ARG001
         captured_user["text"] = user
         return "## 1 stub\n\nstub body."
 
@@ -440,7 +440,7 @@ def test_writer_suppresses_block_when_dimensions_missing_or_empty(monkeypatch):
     # Case 1: entities populated, dimensions empty list.
     captured: dict[str, str] = {}
 
-    def fake_call_a(_role, user, *, system, max_tokens, note):  # noqa: ARG001
+    def fake_call_a(_role, user, *, system, max_tokens, note, **kw):  # noqa: ARG001
         captured["a"] = user
         return "## 1 stub\n\nstub body."
 
@@ -464,7 +464,7 @@ def test_writer_suppresses_block_when_dimensions_missing_or_empty(monkeypatch):
     )
 
     # Case 2: entities populated, dimensions key missing entirely.
-    def fake_call_b(_role, user, *, system, max_tokens, note):  # noqa: ARG001
+    def fake_call_b(_role, user, *, system, max_tokens, note, **kw):  # noqa: ARG001
         captured["b"] = user
         return "## 1 stub\n\nstub body."
 
@@ -495,7 +495,7 @@ def test_writer_suppresses_block_when_dimensions_missing_or_empty(monkeypatch):
     # Case 3 (symmetry counter-check): dimensions populated, entities empty
     # — already covered by the pre-existing `em.get('entities')` guard,
     # but assert it here too so future refactors can't lose the symmetry.
-    def fake_call_c(_role, user, *, system, max_tokens, note):  # noqa: ARG001
+    def fake_call_c(_role, user, *, system, max_tokens, note, **kw):  # noqa: ARG001
         captured["c"] = user
         return "## 1 stub\n\nstub body."
 
@@ -524,7 +524,7 @@ def test_writer_handles_empty_entity_matrix_gracefully(monkeypatch):
     should not crash and should not emit a malformed ENTITY MATRIX block."""
     captured_user: dict[str, str] = {}
 
-    def fake_call(_role, user, *, system, max_tokens, note):  # noqa: ARG001
+    def fake_call(_role, user, *, system, max_tokens, note, **kw):  # noqa: ARG001
         captured_user["text"] = user
         return "## 1 stub\n\nstub body."
 

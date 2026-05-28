@@ -239,7 +239,7 @@ def test_writer_section_threads_archetype_bounds_into_system_prompt(monkeypatch)
     reference the same archetype-specific values."""
     captured_sys: list[str] = []
 
-    def fake_llm_call(role, user, *, system, max_tokens, note):
+    def fake_llm_call(role, user, *, system, max_tokens, note, **kw):
         captured_sys.append(system)
         return "synthetic body content"
 
