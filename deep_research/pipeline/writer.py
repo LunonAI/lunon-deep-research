@@ -537,21 +537,30 @@ def write_section(
             display = []
             if isinstance(entities_scored, list):
                 for e in entities_scored:
-                    if not isinstance(e, dict) or not e.get("name"):
+                    # Require a usable name AND a numeric S_final. An entry with
+                    # a non-numeric S_final (e.g. a plan whose entities_scored
+                    # came from a non-scorer path) would otherwise render as the
+                    # literal `null`, which the verbatim-render directive tells
+                    # the writer to copy — failing the 2-decimal validator. Skip
+                    # it; if that empties `display`, the if-display gate below
+                    # falls through to the compute directive. (Greptile #51 r2.)
+                    sf = e.get("S_final") if isinstance(e, dict) else None
+                    if (
+                        not isinstance(e, dict)
+                        or not e.get("name")
+                        or not (isinstance(sf, (int, float)) and not isinstance(sf, bool))
+                    ):
                         continue
                     dims = {
                         k: f"{v:.2f}"
                         for k, v in (e.get("dimension_scores") or {}).items()
                         if isinstance(v, (int, float)) and not isinstance(v, bool)
                     }
-                    sf = e.get("S_final")
                     display.append(
                         {
                             "name": e["name"],
                             "dimension_scores": dims,
-                            "S_final": f"{sf:.2f}"
-                            if isinstance(sf, (int, float)) and not isinstance(sf, bool)
-                            else None,
+                            "S_final": f"{sf:.2f}",
                             "tier": e.get("tier"),
                         }
                     )

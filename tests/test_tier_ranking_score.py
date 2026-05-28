@@ -306,6 +306,35 @@ def test_writer_sensitivity_uses_normalized_weights(monkeypatch):
     assert '"R-1": 0.5' in user and '"R-2": 0.5' in user
 
 
+def test_writer_skips_entry_with_non_numeric_s_final(monkeypatch):
+    """Greptile PR #51 round-2: an entry with a valid name but a non-numeric
+    S_final must be skipped, not rendered as literal `null` (which the verbatim
+    directive would tell the writer to copy, failing the 2-decimal validator).
+    With one good + one bad entry, only the good one reaches the prompt."""
+    tr = _tr_with_scores()
+    tr["entities_scored"] = [
+        {"name": "Alpha", "dimension_scores": {"R-1": 9.0, "R-2": 8.0}, "S_final": 8.5, "tier": "Tier 1"},
+        {"name": "Bad", "dimension_scores": {"R-1": 7.0}, "S_final": None, "tier": "Tier 2"},
+    ]
+    plan = _bare_plan_with_tier_ranking(tr)
+    user = _call_writer(monkeypatch, plan, "S7")[0]["user"]
+    assert "PRE-COMPUTED SCORES" in user  # Alpha is valid → render path fires
+    assert "8.50" in user and "Alpha" in user
+    assert "null" not in user, "non-numeric S_final must not reach the prompt as null"
+    assert '"name": "Bad"' not in user
+
+
+def test_writer_falls_back_when_all_entries_have_bad_s_final(monkeypatch):
+    """If every entry has a non-numeric S_final, display empties → the writer
+    falls through to the compute directive (no PRE-COMPUTED SCORES block)."""
+    tr = _tr_with_scores()
+    tr["entities_scored"] = [{"name": "Bad", "dimension_scores": {"R-1": 7.0}, "S_final": None, "tier": "Tier 2"}]
+    plan = _bare_plan_with_tier_ranking(tr)
+    user = _call_writer(monkeypatch, plan, "S7")[0]["user"]
+    assert "PRE-COMPUTED SCORES" not in user
+    assert "TIER RANKING + SENSITIVITY CHECK CONTRACT" in user
+
+
 def test_build_forwards_task_id_to_scorer(monkeypatch):
     """Greptile PR #51 round-2: build() forwards task_id to score_entities so
     the scoring LLM call's ledger note is per-task traceable."""
