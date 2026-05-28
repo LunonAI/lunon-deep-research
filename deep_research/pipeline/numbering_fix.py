@@ -522,9 +522,35 @@ class NumberingFixOutput:
     cross_refs_orphaned: int
     cap_violations: dict
     skipped_reason: str | None
+    headings_flattened: int = 0
 
 
-def run(article: str) -> NumberingFixOutput:
+def _flatten_depth(text: str, max_depth: int) -> tuple[str, int]:
+    """Demote any heading deeper than `max_depth` to `max_depth` markdown
+    level, preserving the heading text (incl. its `N.M` number).
+
+    P3b-opt2 (2026-05-28): matches the reference's verified flat render — q91 puts
+    every section at `## N.M Title` (H3=H4=0). For list-all `max_depth=2`
+    (fully flat `##`); other archetypes `max_depth=3` (cap H4 → the reference's
+    universal `h4=0`). The per-entity bold paragraph lead-ins carry the
+    sub-structure, so no information is lost. Runs LAST (after renumber), so
+    the assigned numbers + rewritten cross-refs are preserved — only the
+    markdown hash level changes. The first H1 (title, depth 1 < max_depth) is
+    never touched."""
+    n = 0
+
+    def repl(m: re.Match) -> str:
+        nonlocal n
+        hashes, title = m.group(1), m.group(2)
+        if len(hashes) > max_depth:
+            n += 1
+            return f"{'#' * max_depth} {title}"
+        return m.group(0)
+
+    return _HEADING_RE.sub(repl, text), n
+
+
+def run(article: str, flatten_max_depth: int | None = None) -> NumberingFixOutput:
     """Run the deterministic post-refiner cleanup in fixed order.
 
     Order (CRITICAL — see plan v3 §2a + P2-Option-A-#2):
@@ -543,6 +569,11 @@ def run(article: str) -> NumberingFixOutput:
     a, n_hashnorm = _normalize_hash_from_number(a)
     a, n_collapse = collapse_empty_sections(a)
     a, renum = renumber_headings(a)
+    # P3b-opt2: deterministic reference-flatten runs LAST so numbers + rewritten
+    # cross-refs survive — only the markdown hash level changes.
+    n_flat = 0
+    if flatten_max_depth is not None:
+        a, n_flat = _flatten_depth(a, flatten_max_depth)
     caps = cap_violations(a)
     return NumberingFixOutput(
         article=a,
@@ -556,4 +587,5 @@ def run(article: str) -> NumberingFixOutput:
         cross_refs_orphaned=renum.get("cross_refs_orphaned", 0),
         cap_violations=caps,
         skipped_reason=renum["skipped_reason"],
+        headings_flattened=n_flat,
     )

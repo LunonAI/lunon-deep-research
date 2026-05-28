@@ -7,6 +7,7 @@ scripts/p2_validate_f.py.
 """
 
 from deep_research.pipeline.numbering_fix import (
+    _flatten_depth,
     _normalize_hash_from_number,
     collapse_empty_sections,
     renumber_headings,
@@ -14,6 +15,50 @@ from deep_research.pipeline.numbering_fix import (
 from deep_research.pipeline.numbering_fix import (
     run as numbering_fix_run,
 )
+
+# --- P3b-opt2: reference-verified deterministic flatten ---------------------
+
+_NESTED = "# Title\n\n## 1 A\n\nbody a\n\n### 1.1 B\n\nbody b\n\n#### 1.1.1 C\n\nbody c\n"
+
+
+def test_flatten_depth_2_makes_fully_flat():
+    """max_depth=2 (list-all) → every section heading becomes `##`, numbers
+    preserved (matches the reference q91's flat `## N.M` render)."""
+    out, n = _flatten_depth(_NESTED, 2)
+    import re
+
+    assert re.findall(r"^### ", out, re.M) == []
+    assert re.findall(r"^#### ", out, re.M) == []
+    assert "## 1.1 B" in out and "## 1.1.1 C" in out  # numbers kept
+    assert "# Title" in out  # H1 title untouched
+    assert n == 2  # the H3 + H4 were demoted
+
+
+def test_flatten_depth_3_caps_h4_only():
+    """max_depth=3 (non-list-all) → H4 demoted to H3, H3 kept (the reference h4=0
+    is universal; deeper nesting only for list-all)."""
+    out, n = _flatten_depth(_NESTED, 3)
+    import re
+
+    assert re.findall(r"^#### ", out, re.M) == []
+    assert "### 1.1 B" in out  # H3 preserved
+    assert "### 1.1.1 C" in out  # H4 → H3, number kept
+    assert n == 1
+
+
+def test_run_no_flatten_is_default_unchanged():
+    """run() without flatten_max_depth preserves the legacy depth behavior."""
+    out = numbering_fix_run(_NESTED)
+    assert out.headings_flattened == 0
+
+
+def test_run_flatten_param_flattens_and_counts():
+    """run(article, flatten_max_depth=2) flattens + reports the count."""
+    out = numbering_fix_run(_NESTED, flatten_max_depth=2)
+    import re
+
+    assert re.findall(r"^#{3,} ", out.article, re.M) == []
+    assert out.headings_flattened >= 1
 
 
 def _extract_headings(text):
