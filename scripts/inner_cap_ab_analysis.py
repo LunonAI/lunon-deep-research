@@ -23,7 +23,9 @@ import sys
 from pathlib import Path
 
 DEFAULT_DRIFT = Path(__file__).resolve().parent.parent / "p1_artifacts" / "inner_loop_drift.jsonl"
-BENEFIT_FRACTION_THRESHOLD = 0.05  # <5% of sections benefiting → cap=2 safe
+# Of the sections that ACTUALLY reached the 3rd pass (i==2), fewer than this
+# fraction flipping to passing → the pass is mostly wasted → cap=2 safe.
+BENEFIT_RATE_THRESHOLD = 0.10
 SCORE_GAIN_THRESHOLD = 0.2  # mean min_score gain at index 2 below this → negligible
 
 
@@ -58,25 +60,34 @@ def analyze(drift_path: Path) -> dict:
         reached_idx2 += 1
         it2 = by_i[2]
         it1 = by_i.get(1)
-        # Benefit = the 3rd attempt (i==2) produced a pass that the prior
-        # attempt did not. Grounding flip OR score flip both count.
-        prior_ok = bool(it1 and (it1.get("score_ok") or (it1.get("grounding_ok") and it1.get("score_ok"))))
-        now_ok = bool(it2.get("score_ok"))
-        if now_ok and not prior_ok:
+        # A section reaches iteration index 2 ONLY because the earlier passes
+        # did not break the loop (the loop breaks on score_ok). So "reached
+        # i==2" already implies "not yet passing" — the benefit of the 3rd
+        # pass is simply whether the 3rd pass itself scored a pass. (No
+        # prior-state comparison needed; Greptile PR #50 P2.)
+        if it2.get("scored") and it2.get("score_ok"):
             benefited_idx2 += 1
         # Score gain when both i==1 and i==2 carried a numeric min_score.
         if it1 and it1.get("min_score") is not None and it2.get("min_score") is not None:
             score_gains.append(float(it2["min_score"]) - float(it1["min_score"]))
 
-    benefit_fraction = (benefited_idx2 / total_sections) if total_sections else 0.0
+    # Denominator is sections that ACTUALLY reached the 3rd pass — only those
+    # can benefit from it. Dividing by total_sections would make the verdict
+    # almost always "safe" since few sections reach i==2 (Greptile PR #50 P1).
+    benefit_rate = (benefited_idx2 / reached_idx2) if reached_idx2 else 0.0
+    reached_fraction = (reached_idx2 / total_sections) if total_sections else 0.0
     mean_gain = (sum(score_gains) / len(score_gains)) if score_gains else 0.0
-    cap2_safe = benefit_fraction < BENEFIT_FRACTION_THRESHOLD and mean_gain < SCORE_GAIN_THRESHOLD
+    # cap=2 is safe if the 3rd pass either NEVER runs, OR — when it runs —
+    # rarely flips a section to passing AND barely moves the score. Lean
+    # toward keeping cap=3 (the 0.5229 leaderboard-baseline value).
+    cap2_safe = reached_idx2 == 0 or (benefit_rate < BENEFIT_RATE_THRESHOLD and mean_gain < SCORE_GAIN_THRESHOLD)
 
     return {
         "total_sections": total_sections,
         "reached_idx2": reached_idx2,
+        "reached_fraction": round(reached_fraction, 4),
         "benefited_from_idx2": benefited_idx2,
-        "benefit_fraction": round(benefit_fraction, 4),
+        "benefit_rate": round(benefit_rate, 4),
         "mean_score_gain_at_idx2": round(mean_gain, 3),
         "n_score_gain_samples": len(score_gains),
         "cap2_safe": cap2_safe,
@@ -92,21 +103,31 @@ def main() -> None:
         sys.exit(1)
 
     r = analyze(drift_path)
-    print(f"  sections analyzed:            {r['total_sections']}")
-    print(f"  reached iteration idx>=2:     {r['reached_idx2']} (only possible at cap=3)")
-    print(f"  benefited from the 3rd pass:  {r['benefited_from_idx2']} ({r['benefit_fraction'] * 100:.1f}%)")
-    print(f"  mean min_score gain at idx2:  {r['mean_score_gain_at_idx2']} (n={r['n_score_gain_samples']})")
+    print(f"  sections analyzed:              {r['total_sections']}")
+    print(
+        f"  reached the 3rd pass (i>=2):    {r['reached_idx2']} ({r['reached_fraction'] * 100:.1f}% of all sections; only possible at cap=3)"
+    )
+    print(
+        f"  of those, benefited (flipped):  {r['benefited_from_idx2']} ({r['benefit_rate'] * 100:.1f}% of 3rd-pass sections)"
+    )
+    print(f"  mean min_score gain at idx2:    {r['mean_score_gain_at_idx2']} (n={r['n_score_gain_samples']})")
     print()
     if r["total_sections"] == 0:
         print("  VERDICT: no trajectory data — was this run produced post-OPT2?")
         sys.exit(1)
-    if r["cap2_safe"]:
-        print(f"  VERDICT: cap=2 is EMPIRICALLY SAFE — <{BENEFIT_FRACTION_THRESHOLD * 100:.0f}% of sections")
-        print(f"           benefited from the 3rd pass and mean gain <{SCORE_GAIN_THRESHOLD}.")
+    if r["reached_idx2"] == 0:
+        print("  VERDICT: the 3rd pass NEVER ran in this sample — cap=2 would have been")
+        print("           behavior-identical here. Safe on this evidence, but the sample")
+        print("           may be too clean to be representative; confirm on a larger run.")
+    elif r["cap2_safe"]:
+        print(f"  VERDICT: cap=2 is EMPIRICALLY SAFE — <{BENEFIT_RATE_THRESHOLD * 100:.0f}% of the sections that")
+        print(f"           ran a 3rd pass benefited from it, and mean gain <{SCORE_GAIN_THRESHOLD}.")
         print("           → ship PR-C to flip DR_INNER_CAP default to 2.")
     else:
         print("  VERDICT: KEEP cap=3 — the 3rd corrective pass is earning its cost")
-        print(f"           ({r['benefit_fraction'] * 100:.1f}% benefit, mean gain {r['mean_score_gain_at_idx2']}).")
+        print(
+            f"           ({r['benefit_rate'] * 100:.1f}% of 3rd-pass sections benefited, mean gain {r['mean_score_gain_at_idx2']})."
+        )
         print("           Do NOT flip to cap=2.")
 
 
