@@ -42,11 +42,13 @@ def test_headings_not_counted_as_paragraphs():
 
 
 def test_no_prose_is_all_zero():
-    art = "# Title\n\n## 1 A\n\n### 1.1 B\n"  # headings only, no body
+    art = "# Title\n\n## 1 A\n"  # headings only, no body, no nesting → all zero
     pf = _validate_prose_form(art)
     assert pf["para_count"] == 0
     assert pf["para_median_words"] == 0
     assert pf["choppy_frac"] == 0.0
+    assert pf["h3_count"] == 0
+    assert pf["h4_count"] == 0
 
 
 def test_mixed_density_median_is_robust():
@@ -58,3 +60,4 @@ def test_mixed_density_median_is_robust():
     assert pf["para_count"] == 3
     assert pf["para_median_words"] == 120
     assert pf["choppy_paras"] == 1
+    assert pf["choppy_frac"] == 0.333  # round(1/3, 3)
