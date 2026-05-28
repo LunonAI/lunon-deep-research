@@ -290,3 +290,46 @@ def test_writer_falls_back_to_compute_when_no_scores(monkeypatch):
     assert "PRE-COMPUTED SCORES" not in user
     assert "TIER RANKING + SENSITIVITY CHECK CONTRACT" in user
     assert "2 DECIMAL PLACES" in user  # the compute directive's precision rule
+
+
+def test_writer_sensitivity_uses_normalized_weights(monkeypatch):
+    """Greptile PR #51 round-2: in the pre-scored path the sensitivity directive
+    must hand the writer NORMALIZED weights (summing to 1.0), matching the
+    pre-computed S_final baseline — NOT the raw architect weights, which may not
+    sum to 1.0 and would reintroduce an inconsistent sensitivity baseline."""
+    tr = _tr_with_scores()
+    tr["weights"] = {"R-1": 5, "R-2": 5}  # raw, sum=10 → normalized 0.5/0.5
+    plan = _bare_plan_with_tier_ranking(tr)
+    user = _call_writer(monkeypatch, plan, "S7")[0]["user"]
+    assert "NORMALIZED weights" in user
+    # The normalized values (0.5/0.5) appear for the sensitivity baseline.
+    assert '"R-1": 0.5' in user and '"R-2": 0.5' in user
+
+
+def test_build_forwards_task_id_to_scorer(monkeypatch):
+    """Greptile PR #51 round-2: build() forwards task_id to score_entities so
+    the scoring LLM call's ledger note is per-task traceable."""
+    from deep_research.pipeline import architect
+
+    captured = {}
+
+    def fake_score(plan, language, task_id=None):
+        captured["task_id"] = task_id
+        return None
+
+    monkeypatch.setattr(architect.tier_ranking_score, "score_entities", fake_score)
+    # Stub the architect LLM so build() produces a normalize-able plan without
+    # a real call.
+    monkeypatch.setattr(
+        architect.llm,
+        "call_json",
+        lambda *a, **k: {
+            "report_toc": [
+                {"id": "S1", "title": "T", "subsections": [{"id": "S1.1", "title": "s", "depth_seeds": []}]}
+            ],
+            "acceptance_criteria": [],
+            "queries": [],
+        },
+    )
+    architect.build("p", "en", "predict", [], {}, [], task_id=42)
+    assert captured["task_id"] == 42
