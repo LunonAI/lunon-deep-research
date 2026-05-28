@@ -101,6 +101,13 @@ def _persist_drift(s, language: str, query: str) -> None:
             # writer occasionally regresses to "Building on §X"
             # templates or hallucinates dangling forward-refs.
             "xref_repair": dict(getattr(s, "xref_repair_stats", {}) or {}),
+            # P3b-opt2 (2026-05-28): deterministic style-clamp stats so dev4 /
+            # W13 analysers can confirm the rendered citation + em-dash rates
+            # land in the Qianfan-corpus bands (and flag `floor_exceeded`,
+            # which means a section cited so densely the clamp couldn't reach
+            # the band without un-citing claims — it never does).
+            "clamp_citations": dict(getattr(s, "clamp_citations_stats", {}) or {}),
+            "clamp_emdash": dict(getattr(s, "clamp_emdash_stats", {}) or {}),
             # P3b-OPT2 (2026-05-27): per-section inner-loop trajectory so
             # scripts/inner_cap_ab_analysis.py can measure whether the 2nd/3rd
             # corrective pass (only reachable at INNER_CAP=3) earns its cost.
@@ -132,6 +139,7 @@ from .pipeline import (
     refiner_gate,
     role_play,
     scout,
+    style_clamp,
     validation,
     writer,
     xref_repair,
@@ -337,6 +345,19 @@ def from_plan(ctx: dict, query: str, language: str, task_id: int | None = None) 
     repaired, mv_stats = _phase("mermaid_validate", mermaid_validate.repair, s.article)
     s.article = repaired
     s.mermaid_validate_stats = mv_stats
+
+    # P3b-opt2 (2026-05-28): deterministic style clamps. Run AFTER
+    # mermaid_validate (so any markers in node labels are already gone) and
+    # BEFORE footnote_normalize (markers are still per-section `[^Sx-N]` with
+    # inline defs, so a marker the clamp removes leaves an unused def that
+    # footnote_normalize auto-drops — no orphan/dangling refs). The writer
+    # ignores density directives; these ENFORCE the Qianfan-corpus bands.
+    clamped_c, cc_stats = _phase("clamp_citations", style_clamp.clamp_citations, s.article, language=language)
+    s.article = clamped_c
+    s.clamp_citations_stats = cc_stats
+    clamped_e, ce_stats = _phase("clamp_emdash", style_clamp.clamp_emdash, s.article, language=language)
+    s.article = clamped_e
+    s.clamp_emdash_stats = ce_stats
 
     # P2-Option-A-#6 (2026-05-23): footnote_normalize runs BEFORE
     # numbering_fix so the renumber step sees the final article shape
