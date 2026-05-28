@@ -94,3 +94,17 @@ def test_prose_reasoning_tension_resolution_rate():
     assert pr["tension_paras"] == 2
     assert pr["tension_resolved"] == 1
     assert pr["tension_resolution_rate"] == 0.5
+
+
+def test_prose_reasoning_comparative_instead_not_counted_as_resolved():
+    """A bare comparative `instead` must NOT mark a tension paragraph as
+    resolved — it inflates the rate without any actual resolution (PR #59)."""
+    art = (
+        "## 1 A\n\n"
+        "There is a trade-off here: we use batch processing instead of "
+        "online processing to keep costs down.\n"
+    )
+    pr = _validate_prose_reasoning(art)
+    assert pr["tension_paras"] == 1
+    assert pr["tension_resolved"] == 0
+    assert pr["tension_resolution_rate"] == 0.0
