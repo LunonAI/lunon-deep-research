@@ -545,7 +545,13 @@ def _coerce_to_dict(plan) -> dict:
 
 
 def build(
-    prompt: str, language: str, archetype: str, intents: list, landscape: dict, coverage_obligations: list
+    prompt: str,
+    language: str,
+    archetype: str,
+    intents: list,
+    landscape: dict,
+    coverage_obligations: list,
+    task_id: int | None = None,
 ) -> dict:
     emphasis = _ARCH_EMPHASIS.get(archetype, "")
     # Wave 2 §1.2: inject the per-archetype outline-shape preset into the
@@ -719,7 +725,7 @@ def build(
     # Fail-soft: any problem returns None and the writer falls back to its
     # prior compute-it-yourself directive — never breaks plan construction.
     try:
-        scored = tier_ranking_score.score_entities(plan, language)
+        scored = tier_ranking_score.score_entities(plan, language, task_id=task_id)
         if scored is not None and isinstance(plan.get("tier_ranking"), dict):
             plan["tier_ranking"]["entities_scored"] = scored
     except Exception:  # noqa: BLE001 — scorer is best-effort enrichment

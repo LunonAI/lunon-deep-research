@@ -155,7 +155,7 @@ def _phase(name: str, fn, *args, **kwargs):
 
 
 # ---- Phase 1: planning spine (existing + role_play insertion) ----
-def plan_only(query: str, language: str) -> dict:
+def plan_only(query: str, language: str, task_id: int | None = None) -> dict:
     assert_phase()
     arche = _phase("archetype", _arch.classify, query)
     domain = _phase("domain", domain_routed.classify_domain, query)
@@ -169,7 +169,7 @@ def plan_only(query: str, language: str) -> dict:
     spec = _phase("criteria_spec", criteria_spec.regenerate, query, language)
     cov = criteria_spec.as_coverage_obligations(spec)
     plan = _phase(
-        "architect", _build_plan_with_persona, query, language, arche["archetype"], intents, land, cov, persona
+        "architect", _build_plan_with_persona, query, language, arche["archetype"], intents, land, cov, persona, task_id
     )
     return {
         "archetype": arche,
@@ -182,16 +182,16 @@ def plan_only(query: str, language: str) -> dict:
     }
 
 
-def _build_plan_with_persona(query, language, archetype, intents, land, cov, persona):
+def _build_plan_with_persona(query, language, archetype, intents, land, cov, persona, task_id=None):
     """Architect call with the role_play persona prepended (item 32 wiring)."""
-    plan = architect.build(query, language, archetype, intents, land, cov)
+    plan = architect.build(query, language, archetype, intents, land, cov, task_id=task_id)
     plan["_persona"] = persona  # carry forward for downstream nodes
     return plan
 
 
 # ---- Phase 2: full pipeline (W2-W5 + new nodes) ----
 def pipeline(query: str, language: str, task_id: int | None = None) -> str:
-    return from_plan(plan_only(query, language), query, language, task_id=task_id)
+    return from_plan(plan_only(query, language, task_id=task_id), query, language, task_id=task_id)
 
 
 def from_plan(ctx: dict, query: str, language: str, task_id: int | None = None) -> str:

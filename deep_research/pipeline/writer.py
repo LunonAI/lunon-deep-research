@@ -560,6 +560,15 @@ def write_section(
             # to the compute directive rather than emit "PRE-COMPUTED SCORES []"
             # with a verbatim-render instruction. (Greptile PR #51 P2.)
             if display:
+                # The pre-computed S_final values were derived from weights
+                # renormalized to sum to 1.0 (tier_ranking_score._clean_weights).
+                # The sensitivity directive MUST hand the writer those same
+                # normalized weights — using the raw architect weights (which may
+                # not sum to 1.0, e.g. {R-1:5, R-2:3, R-3:2}) would give a
+                # sensitivity baseline inconsistent with the main table, the very
+                # inconsistency this PR removes. (Greptile PR #51 round-2.)
+                _w_total = sum(weights.values()) or 1.0
+                norm_weights = {k: round(v / _w_total, 6) for k, v in weights.items()}
                 parts.append(
                     "  PRE-COMPUTED SCORES — the scoring math is already done "
                     "for you. Render these EXACT values VERBATIM; do NOT "
@@ -580,7 +589,10 @@ def write_section(
                     "that drove its placement — this is YOUR analysis prose.\n"
                     f"    4. SENSITIVITY CHECK (sub-section heading must contain "
                     f"'sensitivity' / '敏感性' / '±{perturbation_pp}pp'): using the "
-                    f"published weights and the pre-computed dimension scores, "
+                    f"pre-computed dimension scores and these NORMALIZED weights "
+                    f"(they sum to 1.0 and match the pre-computed S_final baseline "
+                    f"— use THESE, not the raw weights above): "
+                    f"{json.dumps(norm_weights, ensure_ascii=False)}, "
                     f"recompute S_final under ±{perturbation_pp}pp perturbation of "
                     "each weight (the arithmetic is deterministic from the data "
                     "above — do it precisely). Report:\n"
