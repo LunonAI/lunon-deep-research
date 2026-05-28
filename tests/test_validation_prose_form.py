@@ -6,7 +6,7 @@ paragraph density (vs the reference EN corpus median ~81 words) and heading
 flatness (corpus h4=0). Advisory only — these are counts, never a hard-fail.
 """
 
-from deep_research.pipeline.validation import _validate_prose_form
+from deep_research.pipeline.validation import _validate_prose_form, _validate_prose_reasoning
 
 
 def test_dense_paragraphs_high_median_no_choppy():
@@ -61,3 +61,36 @@ def test_mixed_density_median_is_robust():
     assert pf["para_median_words"] == 120
     assert pf["choppy_paras"] == 1
     assert pf["choppy_frac"] == 0.333  # round(1/3, 3)
+
+
+# --- P3b-D1: _validate_prose_reasoning (labeled-reasoning adoption) ---------
+
+
+def test_prose_reasoning_counts_synthesis_per_chapter():
+    art = (
+        "## 1 Alpha\n\nbody.\n\n### 1.4 Synthesis\n\nThese together establish X.\n\n"
+        "## 2 Beta\n\nbody.\n\n### 2.4 Synthesis\n\nThe set proves Y.\n"
+    )
+    pr = _validate_prose_reasoning(art)
+    assert pr["synthesis_headings"] == 2
+    assert pr["h2_chapters"] == 2
+    assert pr["synthesis_per_chapter"] == 1.0
+
+
+def test_prose_reasoning_zero_synthesis_when_absent():
+    art = "## 1 A\n\nplain body paragraph here.\n\n## 2 B\n\nanother body paragraph.\n"
+    pr = _validate_prose_reasoning(art)
+    assert pr["synthesis_headings"] == 0
+    assert pr["synthesis_per_chapter"] == 0.0
+
+
+def test_prose_reasoning_tension_resolution_rate():
+    art = (
+        "## 1 A\n\n"
+        "The apparent paradox here resolves once we see the deeper mechanism.\n\n"
+        "There is a clear tension between scale and speed in this design.\n"  # unresolved
+    )
+    pr = _validate_prose_reasoning(art)
+    assert pr["tension_paras"] == 2
+    assert pr["tension_resolved"] == 1
+    assert pr["tension_resolution_rate"] == 0.5

@@ -93,6 +93,9 @@ def test_non_s1_section_receives_named_term_bank(monkeypatch):
     assert "NAMED TERM BANK" in user, f"term bank missing; got: {user[:2000]}"
     assert "axiom1" in user
     assert "R-1" in user
+    # P3b-D1: rubric directive is a COMPARATIVE VERDICT, not descriptive narration.
+    assert "COMPARATIVE VERDICT" in user
+    assert "cite the item" not in user  # old descriptive phrasing retired
 
 
 def test_non_s1_section_does_not_receive_framing_contract_directive(monkeypatch):
@@ -155,6 +158,7 @@ def test_vocab_only_no_rubric(monkeypatch):
     assert "axiom1" in user
     # The "Rubric items:" line should NOT appear because rubric is empty.
     assert "Rubric items:" not in user, f"rubric line shouldn't fire with empty rubric: {user}"
+    assert "COMPARATIVE VERDICT" not in user  # verdict directive is rubric-gated
 
 
 def test_rubric_only_no_vocab(monkeypatch):

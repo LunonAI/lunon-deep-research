@@ -464,10 +464,14 @@ def write_section(
                     rubric_summary = "; ".join(f"{r['id']}: {r.get('label', '')}" for r in rubric)
                     parts.append(f"  Rubric items: {rubric_summary}")
                     parts.append(
-                        "  When evaluating an entity against a rubric item, cite the item "
-                        'by `id` form (e.g. "Per R-2 (market-size criterion), this sector '
-                        'scores high…"). At least one rubric reference per chapter that '
-                        "applies a rubric item is the minimum compliance bar."
+                        "  When a section touches a rubric item, render a COMPARATIVE "
+                        'VERDICT, not descriptive narration: e.g. "Per the rubric this '
+                        'entity is strong on R-2, fails R-1/R-3, marginal on R-4" — a '
+                        "pass/fail/degree judgment per axis in ONE clause. Do NOT walk "
+                        'each axis descriptively ("on R-1 it does…; on R-2 it does…"). '
+                        "A verdict reads as judgment, not summary — the reference-verified "
+                        "Insight move. At least one such verdict per chapter that applies "
+                        "a rubric item is the minimum compliance bar."
                     )
                 framing_block = "\n".join(parts) + "\n"
 
@@ -1009,6 +1013,10 @@ def _insight_distribution_block(archetype: str | None) -> str:
         f"RACE judge reads as 'internally unstable' multi-mode stacking. "
         f"Give each element its OWN dense paragraph (one analytical theme "
         f"per paragraph) — never stack two modes to hit a number.\n"
+        f"(f) PROBLEM-TRADEOFF needs an explicit RESOLUTION clause ('Where "
+        f"one might expect X, the system resolves into Y because Z') — a "
+        f"bare unresolved tension does not count; this is our weakest "
+        f"Insight sub-criterion.\n"
         f"Each element's full definition is in the system-prompt "
         f"`_INSIGHT_MIN` block. (e) and (f) are NEW in Wave 3 PR 2 and "
         f"target the two RACE Insight criteria (Causal Reasoning + "
