@@ -447,14 +447,12 @@ def _run_section_loop(s: PipelineState, query, language):
         )
         _accum(stats)
         last_scores = None
-        # P3b-OPT2 (2026-05-27): per-iteration trajectory telemetry. INNER_CAP
-        # stays 3 (UNCHANGED — it is the value behind the W9/0.5229 baseline).
-        # We only OBSERVE the loop here: record, per iteration, whether
-        # grounding passed and what the inner-loop score was. A later analysis
-        # (scripts/inner_cap_ab_analysis.py) reads this to decide empirically
-        # whether the 2nd/3rd corrective pass earns its cost — i.e. whether
-        # cap=2 would have shipped a worse section. Pure observation, no
-        # behavior change.
+        # P3b-OPT2: per-iteration trajectory telemetry. INNER_CAP now defaults
+        # to 2 (see the definition above) after this telemetry proved the 3rd
+        # corrective pass is wasteful. We keep recording, per iteration, whether
+        # grounding passed and what the inner-loop score was so
+        # scripts/inner_cap_ab_analysis.py can re-confirm the cost/benefit of
+        # each corrective pass across future graded runs.
         traj = []
         for iter_index in range(INNER_CAP):
             g = grounding.check(draft_s, ev, language, archetype=archetype)

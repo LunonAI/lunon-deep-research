@@ -1,10 +1,12 @@
-"""P3b-OPT2 (2026-05-27): inner-loop trajectory telemetry tests.
+"""P3b-OPT2: inner-loop trajectory telemetry tests.
 
-INNER_CAP stays at 3 (the W9 / 0.5229-baseline value). This PR only OBSERVES
-the loop — recording, per section per iteration, whether grounding passed and
-the inner-loop min_score — so scripts/inner_cap_ab_analysis.py can decide
-empirically whether the 2nd/3rd corrective pass earns its cost. These tests
-guard (a) the cap is NOT changed and (b) the trajectory is recorded + persisted.
+INNER_CAP now defaults to 2 (flipped from the W9 / 0.5229-baseline value of 3)
+after the id=91 graded smoke proved the 3rd corrective pass is wasteful. The
+loop still records, per section per iteration, whether grounding passed and the
+inner-loop min_score so scripts/inner_cap_ab_analysis.py can keep checking
+whether each corrective pass earns its cost. These tests guard (a) the cap
+defaults to 2 (honoring the DR_INNER_CAP override) and (b) the trajectory is
+recorded + persisted.
 """
 
 import deep_research.orchestrate as orchestrate
