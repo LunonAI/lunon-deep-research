@@ -43,8 +43,11 @@ _PROTECT_RE = re.compile(
 
 # G7 sibling: leaked RACE scaffolding. Strip the `Per the rubric` connective
 # (with optional leading/trailing punctuation/space) — conservative: only the
-# scaffolding phrase is removed, the surrounding clause stays.
-_BOILERPLATE_RE = re.compile(r"\s*(?:[，,（(]\s*)?[Pp]er the rubric[,，]?\s*")
+# scaffolding phrase is removed, the surrounding clause stays. Greptile PR #66
+# round-2 (2026-05-29): the surrounding whitespace is matched as `[^\S\n]`
+# (horizontal only) so a phrase at a paragraph start can't swallow the
+# preceding newline and silently merge two paragraphs.
+_BOILERPLATE_RE = re.compile(r"[^\S\n]*(?:[，,（(][^\S\n]*)?[Pp]er the rubric[,，]?[^\S\n]*")
 
 
 def _strip_boilerplate(text: str) -> tuple[str, int]:
@@ -54,6 +57,11 @@ def _strip_boilerplate(text: str) -> tuple[str, int]:
         out = re.sub(r"[ \t]{2,}", " ", out)
         out = re.sub(r"\s+([.,;:!?])", r"\1", out)
     return out, n
+
+
+# Languages whose prose can carry CAPEL CJK spacing. A label outside this set
+# is treated as an explicit "skip the CJK scan" override (see despace()).
+_CJK_LANGS = frozenset({"zh", "ja", "ko"})
 
 
 def despace(text: str, language: str | None = None) -> tuple[str, dict]:
@@ -68,8 +76,13 @@ def despace(text: str, language: str | None = None) -> tuple[str, dict]:
     text, n_bp = _strip_boilerplate(text)
     stats["boilerplate_stripped"] = n_bp
 
-    # De-spacing only matters for CJK-bearing articles; cheap guard avoids the
-    # mask/restore cost on pure-EN output.
+    # De-spacing only matters for CJK-bearing articles. A confidently non-CJK
+    # `language` label (e.g. "en") is an explicit override that skips the scan;
+    # otherwise the Hanzi-count guard — robust to an absent/mislabeled label —
+    # is authoritative. (Greptile PR #66 round-2: makes `language` a real gate
+    # instead of an ignored parameter.)
+    if language is not None and language.split("-")[0].strip().lower() not in _CJK_LANGS:
+        return text, stats
     if len(re.findall(rf"[{_CJK}]", text)) < 50:
         return text, stats
 
