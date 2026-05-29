@@ -28,6 +28,14 @@ import re
 _CJK = r"一-鿿㐀-䶿"
 # Full-width CJK punctuation that legitimately abuts Hanzi with no space.
 _CJK_PUNCT = "，。、；：！？（）【】《》「」“”‘’—…·"
+# A3 (2026-05-29): the de-spacer originally only collapsed ASCII space/tab
+# (`[ \t]`), but the gemini judge still flagged "异常空格/不可见字符" between
+# Hanzi — the model emits NBSP (U+00A0), zero-width space (U+200B), BOM /
+# zero-width-no-break (U+FEFF), full-width space (U+3000), and the thin/figure/
+# narrow spaces (U+2000–U+200A, U+202F). Collapse all of them between CJK
+# boundaries. Scoped to inter-CJK only (via the lookbehind/lookahead), so
+# legitimate spacing elsewhere (incl. CJK↔Latin) is untouched.
+_ABNORMAL_WS = r" \t\u00a0\u200b\ufeff\u3000\u2000-\u200a\u202f"
 
 # Spans whose internal spaces are MEANINGFUL and must be protected from the
 # de-spacer: markdown/image links + their anchor text, footnote refs and
@@ -116,9 +124,12 @@ def despace(text: str, language: str | None = None) -> tuple[str, dict]:
     if len(re.findall(rf"[{_CJK}]", masked)) < 50:
         return _restore(masked), stats
 
-    # Collapse CJK↔CJK and CJK↔CJK-punct spaces on the masked prose.
-    masked, n1 = re.subn(rf"(?<=[{_CJK}])[ \t]+(?=[{_CJK}{_CJK_PUNCT}])", "", masked)
-    masked, n2 = re.subn(rf"(?<=[{_CJK_PUNCT}])[ \t]+(?=[{_CJK}])", "", masked)
+    # Collapse CJK↔CJK and CJK↔CJK-punct spaces on the masked prose. A3: the
+    # whitespace class is `_ABNORMAL_WS` (ASCII space/tab + NBSP/zero-width/
+    # BOM/full-width/thin/narrow) so the model's invisible-space artifacts
+    # between Hanzi are collapsed, not just ASCII spaces.
+    masked, n1 = re.subn(rf"(?<=[{_CJK}])[{_ABNORMAL_WS}]+(?=[{_CJK}{_CJK_PUNCT}])", "", masked)
+    masked, n2 = re.subn(rf"(?<=[{_CJK_PUNCT}])[{_ABNORMAL_WS}]+(?=[{_CJK}])", "", masked)
     stats["cjk_space_collapsed"] = n1 + n2
 
     return _restore(masked), stats
