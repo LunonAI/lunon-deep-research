@@ -43,6 +43,10 @@ LUNON_REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$LUNON_REPO"
 
 DRB_REPO="${DRB_REPO:-$HOME/dev/deep_research_bench}"
+if [ ! -d "$DRB_REPO" ]; then
+    echo "[p3b-v2-dev4] ERROR: DRB_REPO not found: $DRB_REPO (export DRB_REPO=... to override)" >&2
+    exit 1
+fi
 export DRB_REPO
 export DRB_PHASE="${DRB_PHASE:-P3}"
 # PR #61: keep specialists from being dropped under concurrent API load.
@@ -50,10 +54,11 @@ export DR_SPECIALIST_TIMEOUT_S="${DR_SPECIALIST_TIMEOUT_S:-600}"
 
 IDS="${IDS:-8,14,37,91}"
 WORKERS="${WORKERS:-4}"
-# A stable, collision-proof default tag. `date` is fine here (this is a shell
-# script, not a resumable workflow). Operator can override RUN_TAG to launch
-# parallel variants.
-RUN_TAG="${RUN_TAG:-lunon-p3b-v2-$(date -u +%Y%m%dT%H%M%SZ)}"
+# A collision-proof default tag: the UTC stamp is only second-precision, so two
+# invocations in the same second would share a tag and clobber each other's
+# outputs — appending $$ (the shell PID) makes the default unique per process.
+# Operator can override RUN_TAG to launch named parallel variants.
+RUN_TAG="${RUN_TAG:-lunon-p3b-v2-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
 
 PY="${PY:-$LUNON_REPO/.venv/bin/python}"
 if [ ! -x "$PY" ]; then
