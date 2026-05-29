@@ -363,6 +363,48 @@ def run(inp: ValidationInput) -> ValidationOutput:
     tr_audit = _validate_tier_ranking(inp.article, inp.plan)
     if tr_audit is not None:
         counts["tier_ranking"] = tr_audit
+        # G3 (2026-05-28): promote an UNCOMMITTED ranking to a HARD failure so
+        # the regen loop fixes it (the predict core payload). Both conditions are
+        # guarded by `entities_scored_present` so they fire ONLY when the architect
+        # actually computed scores — qualitative compare tiers and the fail-soft
+        # no-scores path never loop the regenerator. (a) requires a committed
+        # 2-decimal matrix; (b) fails a rendered-but-hedged ranking.
+        #
+        # Greptile PR #64 issue #1 (2026-05-28): (b) previously carried NO
+        # entities_scored_present guard, so any article whose tier-ranking chapter
+        # contained >2 deferral/placeholder tokens — including qualitative compare
+        # articles that discuss uncertainty inline — would hard-fail and loop the
+        # regenerator. Guarding (b) symmetrically with (a) matches the PR's stated
+        # loop-protection intent: the deferral gate is only meaningful when there
+        # ARE computed scores that the writer is hedging away from committing.
+        if tr_audit["entities_scored_present"] and (
+            not tr_audit["scoring_table_present"] or tr_audit["two_decimal_cells"] == 0
+        ):
+            failures.append(
+                {
+                    "check": "tier_ranking_uncommitted",
+                    "severity": "high",
+                    "detail": (
+                        "tier_ranking has computed scores (entities_scored populated) but the "
+                        f"chapter renders no committed numeric matrix (table_present="
+                        f"{tr_audit['scoring_table_present']}, two_decimal_cells="
+                        f"{tr_audit['two_decimal_cells']}). Render the per-entity S_final scores "
+                        "as a 2-decimal markdown table — do not defer to other sections."
+                    ),
+                }
+            )
+        if tr_audit["entities_scored_present"] and tr_audit["deferral_hits"] > _TIER_RANKING_DEFERRAL_MAX:
+            failures.append(
+                {
+                    "check": "tier_ranking_deferred",
+                    "severity": "high",
+                    "detail": (
+                        f"tier_ranking chapter contains {tr_audit['deferral_hits']} deferral/"
+                        "placeholder tokens (待…核实 / 未核实 / 证据缺口 / 占位); commit the "
+                        "ranking with concrete scores instead of deferring it."
+                    ),
+                }
+            )
 
     # 9. STAKEHOLDER CHAPTER OVERLAP (P3-W6; Greptile PR #42 round-2 wiring).
     # When the architect populated `plan["stakeholder_chapter"]` because the
@@ -402,6 +444,30 @@ def run(inp: ValidationInput) -> ValidationOutput:
     if lim_audit is not None:
         counts["limitations_chapter"] = lim_audit
 
+    # 11. MICRO-TEMPLATE LABEL CONSISTENCY (G5). When entity_matrix is in
+    # prose_subheaders mode, each axis must open its per-entity paragraph with
+    # ONE byte-identical bold label across all entities (q91 form). Severe
+    # fragmentation (canonical label covers <50% of entities) → medium failure
+    # so the regen loop re-pins the labels. Returns None for table_columns_only
+    # mode or <3 entities, so the check is silent there.
+    mt_audit = _validate_micro_template(inp.article, inp.plan.get("entity_matrix"))
+    if mt_audit is not None:
+        counts["micro_template"] = mt_audit
+        if mt_audit["min_axis_coverage"] < _MICRO_TEMPLATE_MIN_COVERAGE:
+            failures.append(
+                {
+                    "check": "micro_template_fragmented",
+                    "severity": "medium",
+                    "detail": (
+                        f"per-entity axis labels fragmented (min canonical coverage "
+                        f"{mt_audit['min_axis_coverage']:.2f} over {mt_audit['n_entities']} "
+                        f"entities; target ≥{_MICRO_TEMPLATE_MIN_COVERAGE:.2f}). Open each "
+                        f"entity's per-axis paragraph with the EXACT bold axis label, "
+                        f"byte-identical across entities: {json.dumps(mt_audit['axis_coverage'], ensure_ascii=False)}"
+                    ),
+                }
+            )
+
     ok = not failures
 
     # Build structured feedback for the refiner (NOT free-text)
@@ -419,14 +485,16 @@ def run(inp: ValidationInput) -> ValidationOutput:
 
 
 def _validate_prose_form(article: str) -> dict:
-    """P3b-opt2 (2026-05-28): advisory prose-form readability telemetry,
-    replacing the retired rigid micro-template compliance check. The prose
-    form merged in #53 uses descriptive entity-specific bold lead-ins, NOT
-    fixed `**axis:**` labels — so the old axis-label metric now reads ~0 and
-    is misleading. This measures what the Qianfan-verified prose form
-    actually targets:
+    """P3b-opt2 (2026-05-28): advisory prose-form readability telemetry.
+    This measures only the Qianfan-verified prose-form readability targets:
       - paragraph density (EN corpus median ~81 words; "choppy" = < 80 words)
       - heading flatness (Qianfan corpus h4_total = 0)
+
+    Axis-label consistency is NOT measured here. G5 (this PR) restored the
+    byte-identical pinned bold axis labels (`**axis:**` per entity), and that
+    coverage is audited separately by `_validate_micro_template`; this function
+    deliberately stays label-agnostic so it stands on every archetype, prose or
+    micro-template.
 
     Runs on every article; advisory only (no hard-fail). NOTE: validation
     runs BEFORE the numbering_fix flatten, so h3/h4 reflect the writer's RAW
@@ -833,6 +901,41 @@ _TIER_RANKING_SENSITIVITY_HEADING_RE = re.compile(
 # so `[^S7-2.45]` and `§7.45` don't false-positive the 2-decimal regex.
 _TIER_RANKING_NOISE_STRIP_RE = re.compile(r"\[\^[^\]]*\]|§\d+(?:\.\d+)*")
 
+# G3 (2026-05-28): deferral / placeholder tokens that signal an UNCOMMITTED
+# ranking. q14 §7.6 commits 30 teams with numeric S_final and ZERO deferral
+# vocab; dev4 id=14 rendered its multi-team tables with every score cell tagged
+# 待§2核实 / 未核实 / 占位 / 证据缺口 — a table-shaped chapter with no actual
+# predictions. These tokens are ~0 in the fresh #1 corpus and in Lunon's
+# non-predict dev4 articles (id8=1, id37=1, id91=0), so a low in-chapter ceiling
+# is regression-safe. `待…(核实|完成|验证|补充)` covers `待核实`, `待§2核实`, and
+# `待§2–§7完成`; the rest are literal placeholder markers.
+#
+# Greptile PR #64 issue #3 (2026-05-28): the trailing `占位` alternation carries a
+# negative lookahead `(?![置费])` so the placeholder sense (`占位`, `占位符`,
+# `占位说明`) is still counted while the unrelated compounds `占位置` ("occupy a
+# position") and `占位费` ("site/booth fee") are NOT — those two chars appearing as
+# a substring of a different word are false positives. Recall on the placeholder
+# sense and on the other tokens (`待…核实`, `未核实`, `证据缺口`) is unchanged.
+#
+# Greptile PR #64 round-2 (2026-05-29): the leading `待` alternation carries a
+# symmetric negative lookbehind `(?<![期对招款])` so hopeful compounds ending in
+# `待` — `期待` (look forward), `对待` (treat), `招待`/`款待` (entertain/host) —
+# do NOT contribute false-positive deferral hits (e.g. `期待完成` via `待完成`).
+# Genuine deferrals (`待核实`, `等待核实` — `等` is not in the exclusion set) still
+# match.
+_TIER_RANKING_DEFERRAL_RE = re.compile(
+    r"(?<![期对招款])待[^，。；、\n]{0,10}(?:核实|完成|验证|补充)|未核实|证据缺口|占位(?![置费])"
+)
+_TIER_RANKING_DEFERRAL_MAX = 2
+
+# G5 (2026-05-28): minimum per-axis canonical-label coverage for the
+# prose_subheaders micro-template. Below this, a canonical axis label appears
+# for fewer than half the entities → the writer fragmented into per-entity
+# variant phrasings (dev4 id=91: top form only 21-34% per axis) instead of the
+# pinned byte-identical label. 0.5 is deliberately lenient (severe fragmentation
+# only) to avoid firing when an article profiles some entities in groups.
+_MICRO_TEMPLATE_MIN_COVERAGE = 0.5
+
 
 def _validate_tier_ranking(article: str, plan: dict) -> dict | None:
     """P3-W7.b (2026-05-27): structural + precision + sensitivity audit
@@ -852,11 +955,16 @@ def _validate_tier_ranking(article: str, plan: dict) -> dict | None:
         "rubric_mismatch_keys": [str],  # tier_ranking.weights keys NOT in
                                         # framing_chapter.published_rubric_items
                                         # (cross-PR consistency check)
+        "entities_scored_present": bool,  # G3: architect computed numeric scores
+        "deferral_hits": int,           # G3: deferral/placeholder tokens in chapter
       }
 
-    Advisory severity — surfaced in `counts["tier_ranking"]` for drift
-    telemetry; does NOT block the validation gate. The corrective signal
-    is the (deferred) compliance scorer.
+    The structural/precision fields are advisory drift telemetry. G3
+    (2026-05-28): the CALLER promotes two conditions to HARD failures —
+    (a) entities_scored_present but no committed numeric matrix, and
+    (b) deferral_hits over `_TIER_RANKING_DEFERRAL_MAX` — so the regen loop
+    fixes an uncommitted/deferred ranking (the predict archetype's core
+    analytic payload).
     """
     tr = plan.get("tier_ranking")
     if not isinstance(tr, dict):
@@ -944,6 +1052,19 @@ def _validate_tier_ranking(article: str, plan: dict) -> dict | None:
 
     sensitivity_subsection_present = bool(_TIER_RANKING_SENSITIVITY_HEADING_RE.search(chapter_body))
 
+    # G3 (2026-05-28): did the architect actually compute numeric scores? When
+    # `entities_scored` is populated, the chapter MUST render them as a committed
+    # 2-decimal matrix; when it's absent (qualitative compare tiers, or the
+    # fail-soft None path when tier_ranking_score.score_entities times out) we do
+    # NOT require a numeric matrix — gating on this keeps the commitment failure
+    # off compare and off the no-scores path so it can't loop the regen.
+    entities_scored = tr.get("entities_scored")
+    entities_scored_present = isinstance(entities_scored, (list, dict)) and len(entities_scored) > 0
+    # Deferral / placeholder density INSIDE the ranking chapter (a rendered but
+    # hedged ranking). Chapter-scoped so legitimate uncertainty prose elsewhere
+    # (e.g. the limitations chapter) is not penalised.
+    deferral_hits = len(_TIER_RANKING_DEFERRAL_RE.findall(chapter_body))
+
     # Cross-PR consistency: tier_ranking.weights keys SHOULD mirror the
     # framing_chapter.published_rubric_items ids. When both are present
     # in the plan, any tier_ranking weight key NOT in the rubric is
@@ -969,6 +1090,65 @@ def _validate_tier_ranking(article: str, plan: dict) -> dict | None:
         "decimal_precision_ok": decimal_precision_ok,
         "sensitivity_subsection_present": sensitivity_subsection_present,
         "rubric_mismatch_keys": rubric_mismatch_keys,
+        "entities_scored_present": entities_scored_present,
+        "deferral_hits": deferral_hits,
+    }
+
+
+def _validate_micro_template(article: str, entity_matrix) -> dict | None:
+    """G5 (2026-05-28): per-axis canonical-label coverage for the
+    prose_subheaders micro-template.
+
+    Returns None unless `entity_matrix` is in prose_subheaders mode with ≥3
+    entities and ≥1 named axis. Otherwise, for each axis_name, count the
+    paragraphs it OPENS as a canonical bold lead-in (`**axis.**` / `**axis:**` /
+    `**axis**`, optional terminal `. : 。 ：`, at a line start) and divide by the
+    entity count
+    (capped at 1.0). The match is intentionally case-insensitive: casing-only
+    drift (e.g. `**Signature Techniques**`) is treated as a canonical hit to
+    avoid false-positive fragmentation alerts, even though the writer is asked
+    for byte-identical labels. Coverage ~1.0 means the writer used ONE
+    canonical label per axis for every entity (the q91 form); low coverage
+    means the labels fragmented into per-entity variants (the dev4 id=91
+    failure — top form only 21-34% per axis).
+
+    Returns {axis_coverage: {axis: float}, min_axis_coverage: float,
+    n_entities: int, n_axes: int}. Advisory; the caller promotes a severe
+    shortfall (< _MICRO_TEMPLATE_MIN_COVERAGE) to a medium failure.
+    """
+    if not isinstance(entity_matrix, dict):
+        return None
+    if entity_matrix.get("instantiation_mode") != "prose_subheaders":
+        return None
+    entities = entity_matrix.get("entities")
+    dims = entity_matrix.get("dimensions") or []
+    axis_names = [str(d.get("axis_name")).strip() for d in dims if isinstance(d, dict) and d.get("axis_name")]
+    n_entities = len(entities) if isinstance(entities, list) else 0
+    if n_entities < 3 or not axis_names:
+        return None
+    axis_coverage: dict[str, float] = {}
+    for name in axis_names:
+        # Canonical bold lead-in: `**name**` with an optional terminal
+        # period/colon (EN or ZH) inside or just before the closing `**`.
+        # Case-insensitive: we treat wrong capitalisation as canonical to
+        # avoid false-positive fragmentation alerts on casing-only drift.
+        #
+        # Greptile PR #64 round-3 (2026-05-29): anchor to a paragraph LEAD-IN
+        # (`(?m)^[ \t]*`) so only labels that OPEN a line count. entity_matrix
+        # carries no chapter title to slice on, so a framing/rubric sentence
+        # that names the axes inline (e.g. "...evaluates **Signature techniques.**
+        # and **Key arc appearances.**") would otherwise add out-of-section hits
+        # that inflate coverage and mask a fragmented entity section. The
+        # lead-in anchor errs toward firing the failure, never suppressing it.
+        pat = re.compile(r"(?m)^[ \t]*\*\*\s*" + re.escape(name) + r"\s*[.:。：]?\s*\*\*", re.IGNORECASE)
+        uses = len(pat.findall(article))
+        axis_coverage[name] = round(min(uses / n_entities, 1.0), 3)
+    min_cov = min(axis_coverage.values()) if axis_coverage else 0.0
+    return {
+        "axis_coverage": axis_coverage,
+        "min_axis_coverage": round(min_cov, 3),
+        "n_entities": n_entities,
+        "n_axes": len(axis_names),
     }
 
 

@@ -1,13 +1,14 @@
-"""Unit tests for the per-entity directive (P3b-opt2: retired the rigid W1
-micro-template in favor of the VERIFIED Qianfan prose form).
+"""Unit tests for the per-entity micro-template directive.
 
-When `entity_matrix.instantiation_mode == "prose_subheaders"`, the writer's
-user prompt must instruct the verified Qianfan q91 form: render EACH entity as
-a SINGLE FLAT `##` section (no `###`/`####` inside an entity) whose body is
-N dense single-theme paragraphs, each opened by a short descriptive bold
-lead-in, covering the matrix dimensions as paragraph THEMES in render_order
-(NOT as fixed bolded `**axis:**` labels — that rigid template was retired
-after the fresh q91 corpus showed Qianfan uses no such template).
+G5 (2026-05-28) RESTORED the byte-identical bolded-axis-label micro-template
+that P3b-opt2/#53 had retired on a MISREAD — the fresh q91 corpus DOES use a
+fixed-label template (`**Signature techniques.**` ×23 etc., canonical string
+~88% per axis). When `entity_matrix.instantiation_mode == "prose_subheaders"`,
+the writer must render EACH entity as a SINGLE FLAT `##` section (no
+`###`/`####` inside an entity) whose body is N dense single-theme paragraphs,
+each OPENED BY THE EXACT BOLD AXIS LABEL (byte-identical across every entity,
+in render_order). The complementary #53 readability rules (one-idea-per-
+paragraph, ~110-200 words, equal-depth, flat-only) are retained.
 """
 
 from deep_research.pipeline import memory_bank, writer
@@ -68,9 +69,9 @@ def _call_writer(monkeypatch, plan, archetype, sid="S1", language="en"):
 
 
 def test_prose_subheaders_mode_emits_qianfan_prose_directive(monkeypatch):
-    """prose_subheaders mode emits the verified Qianfan prose directive:
-    single flat section, dense single-theme paragraphs, dimensions surfaced
-    as paragraph THEMES (not rigid bolded `**axis:**` labels)."""
+    """prose_subheaders mode emits the verified Qianfan micro-template
+    directive: single flat section, dense single-theme paragraphs, each opened
+    by the EXACT byte-identical bold axis label (G5 — restored)."""
     em = {
         "entities": ["IBM", "Google", "Origin", "Microsoft", "Baidu"],
         "dimensions": [
@@ -88,16 +89,16 @@ def test_prose_subheaders_mode_emits_qianfan_prose_directive(monkeypatch):
     assert "PER-ENTITY TREATMENT" in user, f"directive missing; got: {user[:2000]}"
     assert "SINGLE FLAT section" in user
     assert "ONE analytical theme per paragraph" in user
-    # dimensions surfaced as themes, NOT as rigid bolded labels
+    # G5: dimensions surfaced as BYTE-IDENTICAL bold axis labels (pinned),
+    # the q91 form — reverses #53's "themes-not-labels" retirement.
     assert "Winning Logic" in user and "Team Combination" in user
-    assert "**Winning Logic:**" not in user, "retired rigid bolded-label template still present"
-    # Guard the rename: the directive and its wrapper must agree on one label.
-    assert "MICRO-TEMPLATE" not in user, "stale MICRO-TEMPLATE label leaked into the prompt"
+    assert "**Winning Logic.**" in user, "canonical bold axis label not pinned"
+    assert "BYTE-IDENTICAL" in user, "label-consistency rule missing"
 
 
-def test_prose_subheaders_orders_themes_by_render_order(monkeypatch):
-    """Dimension themes appear in render_order in the 'cover these themes'
-    line, NOT in dict-insertion order."""
+def test_prose_subheaders_orders_axis_labels_by_render_order(monkeypatch):
+    """The pinned bold axis labels appear in render_order in the label menu,
+    NOT in dict-insertion order."""
     em = {
         "entities": ["E1", "E2", "E3", "E4", "E5"],
         "dimensions": [
@@ -112,13 +113,16 @@ def test_prose_subheaders_orders_themes_by_render_order(monkeypatch):
     plan = _bare_plan_with_em(em)
     captured = _call_writer(monkeypatch, plan, archetype="list-all")
     user = captured[0]["user"]
-    # The names also appear in the entity_matrix JSON dump (insertion order),
-    # so check order WITHIN the directive's "in this order:" themes line.
-    anchor = user.find("in this order:")
-    assert anchor != -1, f"themes line missing; got: {user[:2500]}"
-    themes_line = user[anchor : user.find("\n", anchor)]
-    p_first, p_second, p_third, p_fourth = (themes_line.find(n) for n in ("First", "Second", "Third", "Fourth"))
-    assert -1 < p_first < p_second < p_third < p_fourth, f"themes not in render_order: {themes_line!r}"
+    # The pinned bold labels appear one-per-line in render_order in the label
+    # menu (`  **First.** …`). Names also appear in the entity_matrix JSON dump
+    # (insertion order), so check the position of the BOLD-LABEL form.
+    p_first = user.find("**First.**")
+    p_second = user.find("**Second.**")
+    p_third = user.find("**Third.**")
+    p_fourth = user.find("**Fourth.**")
+    assert -1 < p_first < p_second < p_third < p_fourth, (
+        f"labels not in render_order: {(p_first, p_second, p_third, p_fourth)}; got: {user[:2500]}"
+    )
 
 
 def test_prose_subheaders_forbids_nested_headings(monkeypatch):
@@ -137,7 +141,7 @@ def test_prose_subheaders_forbids_nested_headings(monkeypatch):
     user = captured[0]["user"]
     assert "SINGLE FLAT section" in user
     assert "do NOT" in user and "###" in user, f"flat-only rule missing; got: {user[:2500]}"
-    assert "descriptive bold" in user.lower() or "DESCRIPTIVE BOLD" in user
+    assert "BYTE-IDENTICAL" in user or "EXACT BOLD AXIS LABEL" in user
 
 
 def test_prose_subheaders_dense_paragraph_rule(monkeypatch):
