@@ -43,8 +43,36 @@ from .specialists import research
 # specialists that finish fine solo blow past 240s and get dropped —
 # silently degrading coverage. Such runs should export a higher value
 # rather than lower --workers.
+_SPECIALIST_TIMEOUT_DEFAULT_S = 240
+_SPECIALIST_TIMEOUT_MIN_S = 60
+_SPECIALIST_TIMEOUT_MAX_S = 3600
+
+
 def _specialist_timeout_from_env() -> int:
-    return int(os.environ.get("DR_SPECIALIST_TIMEOUT_S", "240"))
+    """Resolve the specialist wall-clock cap from DR_SPECIALIST_TIMEOUT_S.
+
+    Fail loud with a clear message on a misconfigured value rather than
+    letting a bare ``int()`` raise a cryptic ValueError at module-import
+    time. Guards the range so DR_SPECIALIST_TIMEOUT_S=0 / negative (every
+    specialist times out instantly) or an absurdly large value (effectively
+    unbounded — the hang the cap exists to prevent) can't slip through. The
+    [60, 3600] band still admits the recommended high-concurrency bumps
+    (e.g. 450, 1000)."""
+    raw = os.environ.get("DR_SPECIALIST_TIMEOUT_S")
+    if raw is None:
+        return _SPECIALIST_TIMEOUT_DEFAULT_S
+    try:
+        val = int(raw)
+    except ValueError:
+        raise ValueError(
+            f"DR_SPECIALIST_TIMEOUT_S must be an integer number of seconds; got {raw!r}"
+        ) from None
+    if not (_SPECIALIST_TIMEOUT_MIN_S <= val <= _SPECIALIST_TIMEOUT_MAX_S):
+        raise ValueError(
+            f"DR_SPECIALIST_TIMEOUT_S out of range "
+            f"[{_SPECIALIST_TIMEOUT_MIN_S}, {_SPECIALIST_TIMEOUT_MAX_S}]: {val}"
+        )
+    return val
 
 
 _SPECIALIST_TIMEOUT_S = _specialist_timeout_from_env()

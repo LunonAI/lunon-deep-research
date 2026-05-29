@@ -158,14 +158,15 @@ def test_orchestrator_run_returns_zero_timeouts_when_all_specialists_complete(mo
     assert result["n_specialist_timeouts"] == 0
 
 
-def test_specialist_timeout_constant_is_set_and_sane():
-    """Pin the _SPECIALIST_TIMEOUT_S default — must be set, must be in
-    a sane range (>= 60s to cover legitimate slow specialists, <= 600s
-    to avoid effectively-unbounded behavior the pre-fix code had). This
-    pins the DEFAULT (no DR_SPECIALIST_TIMEOUT_S in the CI env); a run may
-    deliberately override higher for high-concurrency."""
+def test_specialist_timeout_constant_is_set_and_sane(monkeypatch):
+    """Pin the _SPECIALIST_TIMEOUT_S default. Pins the DEFAULT explicitly via
+    the env helper (delenv first) so the assertion can't spuriously fail in a
+    dev shell that exported DR_SPECIALIST_TIMEOUT_S for a high-concurrency run
+    — exactly the workflow this feature encourages. A run may deliberately
+    override higher; the override path is covered separately below."""
+    monkeypatch.delenv("DR_SPECIALIST_TIMEOUT_S", raising=False)
     assert hasattr(orchestrator, "_SPECIALIST_TIMEOUT_S")
-    assert 60 <= orchestrator._SPECIALIST_TIMEOUT_S <= 600
+    assert orchestrator._specialist_timeout_from_env() == 240
 
 
 def test_specialist_timeout_reads_env_override(monkeypatch):
