@@ -20,7 +20,10 @@ These tests prove:
 """
 
 import concurrent.futures
+import re
 import time
+
+import pytest
 
 from deep_research.pipeline import orchestrator
 
@@ -178,6 +181,43 @@ def test_specialist_timeout_reads_env_override(monkeypatch):
     assert orchestrator._specialist_timeout_from_env() == 450
     monkeypatch.delenv("DR_SPECIALIST_TIMEOUT_S", raising=False)
     assert orchestrator._specialist_timeout_from_env() == 240
+
+
+@pytest.mark.parametrize("raw", ["600s", "", "ten minutes", "4.5", "0x10", "  "])
+def test_specialist_timeout_rejects_non_integer(monkeypatch, raw):
+    """A non-integer DR_SPECIALIST_TIMEOUT_S must fail loud at parse time with
+    the integer-required message rather than a bare/cryptic int() ValueError.
+    Pins the failure branch so a future refactor that swaps the explicit guard
+    for a bare int() (re-introducing the cryptic message) gets caught."""
+    monkeypatch.setenv("DR_SPECIALIST_TIMEOUT_S", raw)
+    with pytest.raises(ValueError, match="must be an integer number of seconds"):
+        orchestrator._specialist_timeout_from_env()
+
+
+@pytest.mark.parametrize("raw", ["59", "0", "-5", "3601", "99999"])
+def test_specialist_timeout_rejects_out_of_range(monkeypatch, raw):
+    """Values outside [_SPECIALIST_TIMEOUT_MIN_S, _SPECIALIST_TIMEOUT_MAX_S]
+    must fail loud — DR_SPECIALIST_TIMEOUT_S=0/negative (every specialist
+    times out instantly) and absurdly large values (effectively unbounded,
+    re-introducing the hang the cap exists to prevent) both reach this guard.
+    Spans below-min and above-max so a future one-sided check (e.g. dropping
+    the upper bound) is caught."""
+    monkeypatch.setenv("DR_SPECIALIST_TIMEOUT_S", raw)
+    with pytest.raises(ValueError, match="out of range"):
+        orchestrator._specialist_timeout_from_env()
+
+
+def test_specialist_timeout_out_of_range_message_names_band(monkeypatch):
+    """The out-of-range message must surface the actual [MIN, MAX] band so an
+    operator can self-correct without reading source. Asserts the full
+    rendered message (re.escape'd brackets) — pins the band to the constants."""
+    monkeypatch.setenv("DR_SPECIALIST_TIMEOUT_S", "59")
+    expected = (
+        f"DR_SPECIALIST_TIMEOUT_S out of range "
+        f"[{orchestrator._SPECIALIST_TIMEOUT_MIN_S}, {orchestrator._SPECIALIST_TIMEOUT_MAX_S}]: 59"
+    )
+    with pytest.raises(ValueError, match=re.escape(expected)):
+        orchestrator._specialist_timeout_from_env()
 
 
 def test_gap_fill_timeout_logs_to_stderr_and_digest(monkeypatch, capsys):
