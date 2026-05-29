@@ -220,14 +220,18 @@ def run(inp: ValidationInput) -> ValidationOutput:
         if not _section_present(inp.article, s.title):
             missing.append(s.section_id + ":" + s.title)
             continue
-        ok, body_tok = _section_length_ok(inp.article, s.title, s.expected_length_tokens)
+        # Greptile PR #69 round-2: read through ScaffoldSection.effective_length_tokens
+        # (the single-source-of-truth None/0→1200 fallback) so this length walk can
+        # never crash at `int(0.7 * …)` on an unset target — matching orchestrate's
+        # _expected_tok_for path.
+        ok, body_tok = _section_length_ok(inp.article, s.title, s.effective_length_tokens)
         if not ok:
             short.append(
                 {
                     "section": s.section_id,
                     "title": s.title,
                     "got_tok": body_tok,
-                    "min_tok": int(0.7 * s.expected_length_tokens),
+                    "min_tok": int(0.7 * s.effective_length_tokens),
                 }
             )
     counts["sections_missing"] = len(missing)
@@ -464,6 +468,29 @@ def run(inp: ValidationInput) -> ValidationOutput:
                         f"entities; target ≥{_MICRO_TEMPLATE_MIN_COVERAGE:.2f}). Open each "
                         f"entity's per-axis paragraph with the EXACT bold axis label, "
                         f"byte-identical across entities: {json.dumps(mt_audit['axis_coverage'], ensure_ascii=False)}"
+                    ),
+                }
+            )
+
+    # 11b. ENTITY COVERAGE (L3). Every declared entity must get its own body
+    # expansion, not just a §1 matrix row. A SEVERE collapse → medium failure so
+    # the regen expands the omitted entities (the reference head-to-head's biggest
+    # Comprehensiveness gap: id8 expanded 1 of 12 systems). Silent for
+    # table_columns_only / <3 entities.
+    ec_audit = _validate_entity_coverage(inp.article, inp.plan.get("entity_matrix"))
+    if ec_audit is not None:
+        counts["entity_coverage"] = ec_audit
+        if ec_audit["coverage"] < _ENTITY_COVERAGE_MIN_RATIO:
+            failures.append(
+                {
+                    "check": "entity_coverage_collapsed",
+                    "severity": "medium",
+                    "detail": (
+                        f"only {ec_audit['n_expanded']}/{ec_audit['n_entities']} declared "
+                        f"entities got their own body expansion (coverage {ec_audit['coverage']:.2f}, "
+                        f"target ≥{_ENTITY_COVERAGE_MIN_RATIO:.2f}). A §1 matrix row is NOT a "
+                        f"substitute — give EACH entity its own subsection with the full "
+                        f"per-entity treatment. Missing: {json.dumps(ec_audit['missing'], ensure_ascii=False)}"
                     ),
                 }
             )
@@ -936,6 +963,14 @@ _TIER_RANKING_DEFERRAL_MAX = 2
 # only) to avoid firing when an article profiles some entities in groups.
 _MICRO_TEMPLATE_MIN_COVERAGE = 0.5
 
+# L3 (2026-05-29): minimum fraction of entity_matrix entities that must get
+# their OWN body expansion (a heading), not just a §1 matrix row. The reference
+# head-to-head showed Lunon collapses coverage — id8 expanded 1 of 12 systems
+# (0.08), id14 ~4 of 15 teams (0.27) — a large Comprehensiveness loss. 0.5 fires
+# only on a SEVERE collapse, lenient enough that imperfect heading-name matching
+# on a near-complete article doesn't false-fire.
+_ENTITY_COVERAGE_MIN_RATIO = 0.5
+
 
 def _validate_tier_ranking(article: str, plan: dict) -> dict | None:
     """P3-W7.b (2026-05-27): structural + precision + sensitivity audit
@@ -1150,6 +1185,60 @@ def _validate_micro_template(article: str, entity_matrix) -> dict | None:
         "n_entities": n_entities,
         "n_axes": len(axis_names),
     }
+
+
+def _validate_entity_coverage(article: str, entity_matrix) -> dict | None:
+    """L3 (2026-05-29): every entity_matrix entity must get its OWN body
+    expansion (a heading), not just a §1 matrix row.
+
+    Returns None unless entity_matrix is prose_subheaders with ≥3 entities.
+    Otherwise an entity is 'expanded' if its name appears in a markdown heading
+    anywhere in the body (a per-entity section). Returns {n_entities, n_expanded,
+    coverage, missing}. The caller promotes a SEVERE collapse
+    (coverage < _ENTITY_COVERAGE_MIN_RATIO) to a medium failure — the reference
+    head-to-head's biggest Comprehensiveness gap (id8 expanded 1/12 systems).
+    """
+    if not isinstance(entity_matrix, dict):
+        return None
+    if entity_matrix.get("instantiation_mode") != "prose_subheaders":
+        return None
+    entities = entity_matrix.get("entities")
+    if not isinstance(entities, list) or len(entities) < 3:
+        return None
+    # All heading TEXT (H1-H6, so a deep per-entity section heading still counts;
+    # greptile regex-heading-coverage: cap at 6, not 4), so a per-entity section
+    # heading counts but a matrix table row (a `| ... |` line) does not.
+    heading_text = "\n".join(re.findall(r"(?m)^#{1,6}\s+(.+)$", article))
+    # Match each entity in the heading text, anchored on ASCII-alphanumeric word
+    # boundaries and case-insensitively. `missing` keeps original casing for
+    # readable telemetry.
+    #   - Greptile PR #69 round-1: re.IGNORECASE so a casing-only rewrite
+    #     ("IBM Quantum" -> heading "## IBM quantum") still counts — a cluster of
+    #     EN entities must not be pushed below _ENTITY_COVERAGE_MIN_RATIO and force
+    #     a needless regen. Mirrors the IGNORECASE axis-label match in _validate_micro_template.
+    #   - Greptile PR #69 round-3: the guards `(?<![A-Za-z0-9])…(?![A-Za-z0-9])`
+    #     stop a SHORT EN entity ("AI", "OS", "ML") from false-positive matching
+    #     INSIDE a larger word ("AI" in "SAIL", "OS" in "POSIX"), which would
+    #     silently mask a real coverage gap below the 0.5 threshold. The guards key
+    #     on [A-Za-z0-9] ONLY, so a CJK entity inside a longer CJK heading
+    #     ("量子计算" in "量子计算的发展") still matches — CJK is not ASCII-word-
+    #     delimited and a naive \b would wrongly miss it — and multi-word proper
+    #     nouns ("IBM Quantum") match verbatim. Same boundary technique as
+    #     cjk_despace._CJK_SCAFFOLD_RE.
+    n_expanded = 0
+    missing: list[str] = []
+    for ent in entities:
+        e = str(ent).strip()
+        if not e:
+            continue
+        pat = re.compile(r"(?<![A-Za-z0-9])" + re.escape(e) + r"(?![A-Za-z0-9])", re.IGNORECASE)
+        if pat.search(heading_text):
+            n_expanded += 1
+        else:
+            missing.append(e)
+    total = n_expanded + len(missing)
+    coverage = round(n_expanded / total, 3) if total else 1.0
+    return {"n_entities": total, "n_expanded": n_expanded, "coverage": coverage, "missing": missing[:20]}
 
 
 def _validate_limitations_chapter(article: str, limitations_chapter) -> dict | None:

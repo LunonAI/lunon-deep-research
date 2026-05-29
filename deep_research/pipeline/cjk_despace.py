@@ -28,6 +28,14 @@ import re
 _CJK = r"一-鿿㐀-䶿"
 # Full-width CJK punctuation that legitimately abuts Hanzi with no space.
 _CJK_PUNCT = "，。、；：！？（）【】《》「」“”‘’—…·"
+# A3 (2026-05-29): the de-spacer originally only collapsed ASCII space/tab
+# (`[ \t]`), but the gemini judge still flagged "异常空格/不可见字符" between
+# Hanzi — the model emits NBSP (U+00A0), zero-width space (U+200B), BOM /
+# zero-width-no-break (U+FEFF), full-width space (U+3000), and the thin/figure/
+# narrow spaces (U+2000–U+200A, U+202F). Collapse all of them between CJK
+# boundaries. Scoped to inter-CJK only (via the lookbehind/lookahead), so
+# legitimate spacing elsewhere (incl. CJK↔Latin) is untouched.
+_ABNORMAL_WS = r" \t\u00a0\u200b\ufeff\u3000\u2000-\u200a\u202f"
 
 # Spans whose internal spaces are MEANINGFUL and must be protected from the
 # de-spacer: markdown/image links + their anchor text, footnote refs and
@@ -65,16 +73,57 @@ def _strip_boilerplate(text: str) -> tuple[str, int]:
     return out, n
 
 
+# L5 (2026-05-29): leaked internal scaffolding tokens that the reference
+# head-to-head saw as reader-facing junk in CJK prose (本报告的契约, bare AC19/
+# R-1..R-6 rubric/criterion ids). Strip `本报告的契约` (always our literal
+# contract phrase) and bare AC\d / R-\d ONLY when adjacent to a CJK ideograph
+# (a CJK-prose leak). EN tier-ranking R-N (in tables / EN prose, never
+# CJK-adjacent) and legitimate "AC"/"R-2" usage are untouched — and it runs on
+# the MASKED text so links/footnotes/code are shielded.
+#
+# Greptile PR #69 round-1 (2026-05-29): this is CJK-gated, NOT strictly ZH. The
+# pass runs on any article that clears despace()'s CJK guard, and
+# `_CJK_LANGS = {zh, ja, ko}`, so JA/KO articles are de-scaffolded too. That is
+# intentional: an AC19/R-2 rubric id abutting a Han ideograph is a scaffolding
+# leak in Kanji/Hanja prose exactly as in Hanzi, and the ZH-only `本报告的契约`
+# literal simply never appears in JA/KO output (harmless there). The adjacency
+# class reuses `_CJK` (Unified Ideographs + Ext A) so it can never drift from the
+# de-spacer's own CJK definition — hence the rename from `_ZH_SCAFFOLD_RE`.
+#
+# `\b` can't be used as the token boundary here: CJK chars are word characters
+# in Unicode mode, so there is NO `\b` between a digit and an adjacent ideograph.
+# Use explicit non-alnum guards instead so a CJK-sandwiched AC19/R-2 matches
+# while EN tokens (preceded/followed by ASCII letters) are left intact.
+_CJK_SCAFFOLD_RE = re.compile(
+    r"本报告的契约"
+    r"|(?<=[" + _CJK + r"])[ \t]*(?:AC\d{1,3}|R-\d{1,2})(?![A-Za-z0-9])"
+    r"|(?<![A-Za-z0-9])(?:AC\d{1,3}|R-\d{1,2})[ \t]*(?=[" + _CJK + r"])"
+)
+
 # Languages whose prose can carry CAPEL CJK spacing. A label outside this set
 # is treated as an explicit "skip the CJK scan" override (see despace()).
 _CJK_LANGS = frozenset({"zh", "ja", "ko"})
+
+# Collapse abnormal whitespace on CJK↔CJK and CJK↔CJK-punct boundaries (both
+# directions). Compiled once and shared by the initial de-space pass AND the
+# gated post-L5 re-run, so the two can never drift apart.
+_CJK_GAP_RE = re.compile(rf"(?<=[{_CJK}])[{_ABNORMAL_WS}]+(?=[{_CJK}{_CJK_PUNCT}])")
+_CJK_PUNCT_GAP_RE = re.compile(rf"(?<=[{_CJK_PUNCT}])[{_ABNORMAL_WS}]+(?=[{_CJK}])")
+
+
+def _collapse_cjk_spaces(text: str) -> tuple[str, int]:
+    """Remove abnormal whitespace between adjacent CJK chars (and between a CJK
+    char and CJK punctuation). Returns (text, n_collapsed)."""
+    text, n1 = _CJK_GAP_RE.subn("", text)
+    text, n2 = _CJK_PUNCT_GAP_RE.subn("", text)
+    return text, n1 + n2
 
 
 def despace(text: str, language: str | None = None) -> tuple[str, dict]:
     """Collapse CAPEL-induced spaces between adjacent CJK chars (and between a
     CJK char and CJK punctuation), scoped to body prose. Also strips the
     `Per the rubric` scaffolding leak. Returns (text, stats)."""
-    stats = {"cjk_space_collapsed": 0, "boilerplate_stripped": 0}
+    stats = {"cjk_space_collapsed": 0, "boilerplate_stripped": 0, "scaffold_stripped": 0}
     if not isinstance(text, str) or not text:
         return text, stats
 
@@ -116,9 +165,23 @@ def despace(text: str, language: str | None = None) -> tuple[str, dict]:
     if len(re.findall(rf"[{_CJK}]", masked)) < 50:
         return _restore(masked), stats
 
-    # Collapse CJK↔CJK and CJK↔CJK-punct spaces on the masked prose.
-    masked, n1 = re.subn(rf"(?<=[{_CJK}])[ \t]+(?=[{_CJK}{_CJK_PUNCT}])", "", masked)
-    masked, n2 = re.subn(rf"(?<=[{_CJK_PUNCT}])[ \t]+(?=[{_CJK}])", "", masked)
-    stats["cjk_space_collapsed"] = n1 + n2
+    # Collapse CJK↔CJK and CJK↔CJK-punct spaces on the masked prose. A3: the
+    # whitespace class is `_ABNORMAL_WS` (ASCII space/tab + NBSP/zero-width/
+    # BOM/full-width/thin/narrow) so the model's invisible-space artifacts
+    # between Hanzi are collapsed, not just ASCII spaces.
+    masked, n_collapsed = _collapse_cjk_spaces(masked)
+    stats["cjk_space_collapsed"] = n_collapsed
+
+    # L5: strip leaked internal scaffolding tokens from CJK body prose (zh/ja/ko).
+    masked, n3 = _CJK_SCAFFOLD_RE.subn("", masked)
+    stats["scaffold_stripped"] = n3
+    # Greptile PR #69 round-3: the strip can EXPOSE a CJK↔CJK gap the de-spacer has
+    # already passed — e.g. `字AC19 意` keeps its `9 意` space (the de-spacer's
+    # lookbehind needs CJK on the left and `9` is not), so removing `AC19` leaves
+    # `字 意`. Re-run the collapse ONCE, gated on an actual strip (n3 > 0), to close
+    # any inter-CJK gap L5 opened; the de-spacer would otherwise never revisit it.
+    if n3:
+        masked, n_more = _collapse_cjk_spaces(masked)
+        stats["cjk_space_collapsed"] += n_more
 
     return _restore(masked), stats

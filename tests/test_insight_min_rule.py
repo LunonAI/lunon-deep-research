@@ -92,7 +92,12 @@ def test_insight_element_f_requires_resolution_clause():
     resolution clause — a bare unresolved tension doesn't count (our weakest
     RACE-Insight sub-criterion)."""
     assert "RESOLUTION CLAUSE REQUIRED" in _INSIGHT_MIN
-    assert "Where one might expect" in _INSIGHT_MIN
+    # A1 (2026-05-29): the verbatim "Where one might expect…" template was
+    # REMOVED — the writer echoed it into prose and the gemini judge flagged it
+    # as show-off scaffolding (id37 readability). The requirement now mandates
+    # the writer's own varied phrasing instead of a fixed echoable sentence.
+    assert "Where one might expect" not in _INSIGHT_MIN
+    assert "IN YOUR OWN WORDS" in _INSIGHT_MIN
     assert "does NOT satisfy" in _INSIGHT_MIN
 
 

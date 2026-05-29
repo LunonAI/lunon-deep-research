@@ -133,10 +133,70 @@ def test_pre_existing_nul_in_input_does_not_crash():
 
 
 def test_fail_soft_on_bad_input():
-    assert cjk_despace.despace("") == ("", {"cjk_space_collapsed": 0, "boilerplate_stripped": 0})
+    out, stats = cjk_despace.despace("")
+    assert out == ""
+    assert all(v == 0 for v in stats.values())
     out, stats = cjk_despace.despace(None)
     assert out is None
     assert all(v == 0 for v in stats.values())
+
+
+def test_l5_strips_zh_scaffolding_tokens():
+    """L5 (2026-05-29): leaked internal scaffolding tokens (本报告的契约, and
+    AC\\d/R-\\d adjacent to Hanzi) are stripped from ZH prose."""
+    padding = "正 文 内 容 段 落 充 足 " * 20
+    out, stats = cjk_despace.despace(padding + "本报告的契约要求每个实体AC19都要展开，满足R-2标准。", language="zh")
+    assert "本报告的契约" not in out
+    assert "AC19" not in out
+    assert "R-2" not in out
+    assert stats["scaffold_stripped"] >= 3
+
+
+def test_l5_strips_cjk_scaffolding_in_ja_too():
+    """Greptile PR #69 round-1: the scaffold strip is CJK-gated, not ZH-only. A
+    JA article that clears the CJK guard has rubric-id leaks (AC\\d/R-\\d) adjacent
+    to Han ideographs stripped just like ZH — the de-scaffolder follows
+    `_CJK_LANGS`, which includes ja/ko."""
+    padding = "技術評価基準分析結果報告書" * 5  # 65 Kanji → clears the 50-char CJK guard
+    out, stats = cjk_despace.despace(padding + "基準AC19達成、評価R-2基準", language="ja")
+    assert "AC19" not in out
+    assert "R-2" not in out
+    assert stats["scaffold_stripped"] >= 2
+
+
+def test_l5_strips_scaffold_adjacent_to_cjk_extension_a():
+    """Greptile PR #69 round-1: fix (B) widened the AC\\d/R-\\d adjacency class
+    from the main CJK block to the full `_CJK` constant (+ Extension A). This pins
+    that exact delta: a rubric-id leak flanked ONLY by Extension-A ideographs
+    (U+3400–U+4DBF) is stripped now but was NOT under the old main-block class
+    (the ja-gating test above passes pre- and post-fix and so can't pin it)."""
+    padding = "㐀㐁㐂㐃㐄㐅㐆㐇㐈㐉" * 6  # 60 Ext-A ideographs → clears the 50-char CJK guard
+    out, stats = cjk_despace.despace(padding + "㐀AC19㐁", language="zh")
+    assert "AC19" not in out, f"Ext-A-adjacent scaffold not stripped: {out!r}"
+    assert stats["scaffold_stripped"] >= 1
+
+
+def test_l5_collapses_residual_cjk_gap_after_scaffold_strip():
+    """Greptile PR #69 round-3: stripping a scaffold token can EXPOSE a CJK↔CJK
+    space the de-spacer already passed (`字AC19 意` keeps the `9 意` space, then
+    removing AC19 leaves `字 意`). The gated second collapse pass closes it AND
+    adds its count to the stat. The padding is space-free so the initial pass
+    collapses nothing — isolating the stat to exactly the one gap L5 exposed (pre-
+    fix: no re-run → `字意义` absent and cjk_space_collapsed == 0)."""
+    padding = "正文内容段落充足实体研究方法结论分析数据样本指标" * 4  # 96 space-free CJK → clears the 50-char guard
+    out, stats = cjk_despace.despace(padding + "字AC19 意义。", language="zh")
+    assert "AC19" not in out
+    assert "字意义" in out, f"residual CJK gap not collapsed after strip: {out!r}"
+    assert stats["scaffold_stripped"] >= 1
+    assert stats["cjk_space_collapsed"] == 1  # exactly the one gap the strip exposed
+
+
+def test_l5_preserves_en_tier_ranking_rubric_ids():
+    """EN tier-ranking R-N (in tables / EN prose, never Hanzi-adjacent) must
+    survive — the tier-ranking validator's R-N cross-reference depends on it."""
+    en = "Scored per R-1 and R-2 in the table below.\n\n| Entity | R-1 | R-2 |\n|---|---|---|\n| A | 8.0 | 7.0 |\n" * 2
+    out, _ = cjk_despace.despace(en, language="en")
+    assert "R-1" in out and "R-2" in out
 
 
 def test_does_not_touch_heading_hashes_or_numbers():
@@ -146,3 +206,32 @@ def test_does_not_touch_heading_hashes_or_numbers():
     # BETWEEN cjk chars, never the "## 3 " prefix (space follows a digit).
     assert "## 3 章节标题" in out or "## 3 章 节 标 题" in out
     assert "##3" not in out  # never glued the hash to the number
+
+
+def test_a3_collapses_abnormal_unicode_spaces_between_hanzi():
+    """A3 (2026-05-29): NBSP / zero-width / BOM / full-width / thin spaces
+    between Hanzi are collapsed, not just ASCII space/tab — the gemini judge
+    flagged residual '异常空格/不可见字符' after the ASCII-only de-spacer."""
+    padding = "正 文 内 容 段 落 充 足 " * 20  # force CJK-bearing
+    # NBSP, full-width space, zero-width space, narrow NBSP between Hanzi
+    out, stats = cjk_despace.despace(padding + "本 章　的​分 组方式。", language="zh")
+    assert "本章的分组方式" in out, f"abnormal spaces not collapsed: {out!r}"
+    for ws in (" ", "　", "​", " "):
+        assert ws not in out.replace(padding, ""), f"{ws!r} survived"
+
+
+def test_a3_abnormal_spaces_preserved_inside_protected_spans():
+    """The protected-span mask still shields link/anchor/footnote text — a
+    full-width space inside a link title must NOT be collapsed."""
+    padding = "正 文 内 容 段 落 充 足 " * 20
+    anchor = "[锚定新质生产力　券商投行](https://e.com/a)"
+    out, _ = cjk_despace.despace(padding + "参见" + anchor + "。", language="zh")
+    assert anchor in out, f"abnormal space inside link anchor was collapsed: {out!r}"
+
+
+def test_a3_does_not_touch_english_nbsp():
+    """EN articles are skipped by the CJK guard — an NBSP in English prose is
+    left alone (not the de-spacer's job; avoids touching legit EN spacing)."""
+    en = "A non breaking space in English prose stays put here." * 3
+    out, _ = cjk_despace.despace(en, language="en")
+    assert out == en
