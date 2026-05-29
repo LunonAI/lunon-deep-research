@@ -289,6 +289,16 @@ HARD RULES:
   contract with the reader — the reference's verified corpus-wide pattern
   (10/11 articles) and the single most distinguishing structural move
   separating their record-class scores from a survey-style report.
+- L7 META-CAUSAL SYNTHESIS (explain-mechanism / predict / trend archetypes):
+  include a dedicated synthesis chapter near the end whose depth_seeds build an
+  EXPLICIT causal scaffold — (a) enumerate the coupling paths among the
+  challenges/factors (how each amplifies or constrains the others), (b) stratify
+  the mitigations/drivers into maturity tiers (e.g. mature / partial / open), and
+  (c) wire those tiers directly into the forward-looking verdict (feasibility,
+  TRL, or trend call). Include ≥1 external-domain calibration for any
+  forward-looking claim. This meta-causal scaffold (not a flat challenge list) is
+  the #1 corpus's Insight edge — name it as a chapter so the writer builds the
+  chain rather than asserting it.
 - Match the prompt's language."""
 
 
