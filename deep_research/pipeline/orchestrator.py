@@ -25,7 +25,6 @@ from . import specialists
 from .memory_bank import MemoryBank
 from .specialists import research
 
-
 # Per-specialist wall-clock cap (2026-05-25 follow-up after the CAPEL smoke
 # hang on id=56 where horizon_scanner hung mid-flight, stalling the whole
 # task indefinitely). 4 min is sized to cover the worst nominal case at
