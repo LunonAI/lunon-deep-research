@@ -1033,6 +1033,26 @@ def opening_directive() -> str:
     )
 
 
+_SKIM_LAYER_RULE = (
+    "SKIM-LAYER & NAVIGABILITY (L6 — the #1 corpus stays scannable at 2-4x our "
+    "length; the leaderboard judge dinged us for 'suffocating equal-intensity "
+    "density, key points not prominent'):\n"
+    "  - BOLD the single load-bearing claim/finding in each substantive "
+    "paragraph — the one sentence a skimming reader must catch. One bold span "
+    "per paragraph (NOT equal-intensity bolding of many phrases, NOT zero); a "
+    "long chapter must be navigable by its bolded claims alone.\n"
+    "  - Open each chapter with a one-sentence recap-then-preview bridge (what "
+    "the prior chapter established → what THIS chapter adds) and CLOSE it with a "
+    "one-sentence core takeaway.\n"
+    "  - End an evidence-dense chapter with a compact summary table that "
+    "compresses its key data/comparisons.\n"
+    "  - Front-load the core finding in each chapter's opening — do NOT bury the "
+    "result under uniform-intensity detail.\n"
+    "  - Stay CONCISE: depth comes from evidence and analysis, NOT from padding "
+    "with repeated abstract nominalizations to inflate length."
+)
+
+
 def writer_system(
     archetype: str,
     domain: str,
@@ -1130,6 +1150,7 @@ def writer_system(
         [
             _INSIGHT_MIN,
             _CHAPTER_SYNTHESIS_RULE,
+            _SKIM_LAYER_RULE,
             CLEANING_RESISTANT_RULE,
             _EMDASH_RULE,
             _SECTION_OPENING_PROSE_LEAD_RULE,
