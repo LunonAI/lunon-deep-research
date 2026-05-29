@@ -16,7 +16,7 @@ to read the numbers, NOT baked into any logic:
                    the hollow-late-chapter signature, the cleanest structural
                    proxy for the Comprehensiveness gap. <1 good, >1 hollow tail.
   spaced_cjk_rate  fraction of CJK↔CJK adjacencies carrying whitespace.
-                   the reference ~0.001 (max .019); Lunon id37 hit 0.08 — verifies
+                   the reference ~0.0006 (max .012); Lunon id37 hit 0.064 — verifies
                    the G7/A3 de-spacer on shipped output.
   scaffold_residual leaked internal scaffolding remaining in shipped prose.
                    the reference ~0; Lunon prior-dev6 had bare_R_n 134 (id91: 341),
@@ -38,8 +38,15 @@ import statistics as _st
 from .cjk_despace import _ABNORMAL_WS, _CJK
 
 _HEADING_RE = re.compile(r"(?m)^(#{1,6})\s+(.+?)\s*$")
-_CJK_GAP_RE = re.compile(rf"[{_CJK}][{_ABNORMAL_WS}]+[{_CJK}]")
-_CJK_ADJ_RE = re.compile(rf"[{_CJK}][{_CJK}]")
+# Overlapping (zero-width lookahead) CJK-boundary counters. Greptile PR #70:
+# a CONSUMING findall over `[CJK][CJK]` yields only ⌊N/2⌋ matches across a run
+# of N adjacent CJK chars instead of the N−1 true boundaries — and the same
+# under-count hits consecutive SPACED boundaries ("中 文 字"). Both numerator
+# (spaced: ≥1 abnormal-ws) and denominator (all: ≥0 abnormal-ws) use lookaheads
+# so every adjacency is counted exactly once. _ABNORMAL_WS excludes "\n", so a
+# line break is not a boundary (matches the de-spacer's own scoping).
+_CJK_ALL_ADJ_RE = re.compile(rf"(?=[{_CJK}][{_ABNORMAL_WS}]*[{_CJK}])")
+_CJK_SPACED_ADJ_RE = re.compile(rf"(?=[{_CJK}][{_ABNORMAL_WS}]+[{_CJK}])")
 _LEADING_INT_RE = re.compile(r"^(?:§\s*)?\d+(?:[.\s]|$)")
 _CHAPTER_NUM_RE = re.compile(r"(?m)^#{1,6}\s+(?:§\s*)?(\d+)")
 _SENT_SPLIT_RE = re.compile(r"[。！？.!?]+")
@@ -152,12 +159,11 @@ def _percentile(sorted_vals, q):
 def _spaced_cjk_rate(article):
     """fraction of CJK↔CJK adjacencies that carry abnormal whitespace.
     None when the article has no adjacent CJK (e.g. an EN report)."""
-    bad = len(_CJK_GAP_RE.findall(article))
-    good = len(_CJK_ADJ_RE.findall(article))
-    denom = bad + good
-    if not denom:
+    total = len(_CJK_ALL_ADJ_RE.findall(article))
+    if not total:
         return None
-    return round(bad / denom, 5)
+    bad = len(_CJK_SPACED_ADJ_RE.findall(article))
+    return round(bad / total, 5)
 
 
 def _scaffold_residual(article):

@@ -17,6 +17,7 @@ a free per-node cost breakdown at every milestone (item 36).
 import json
 import os
 import pathlib
+import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -499,7 +500,12 @@ def _ends_mid_sentence(text: str) -> bool:
         return True
     last = text.rstrip()
     tail = last.splitlines()[-1].strip()
-    if not tail or tail[0] in "|#-*>" or tail.endswith("|"):
+    # Structural tails legitimately lack terminal punctuation: table rows,
+    # headings, unordered bullets (-, *, +, >) — and ordered list items
+    # ("3. point" / "3) point"), which _prose_paragraphs also excludes.
+    if not tail or tail[0] in "|#-*+>" or tail.endswith("|"):
+        return False
+    if re.match(r"^\d+[.)]\s", tail):
         return False
     return last[-1] not in _SENT_TERMINALS
 
