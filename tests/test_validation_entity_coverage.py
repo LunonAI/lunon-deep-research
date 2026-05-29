@@ -28,6 +28,30 @@ def test_full_coverage_when_every_entity_has_a_heading():
     assert a["coverage"] == 1.0 and a["n_expanded"] == 4 and a["missing"] == []
 
 
+def test_coverage_is_case_insensitive():
+    """Greptile PR #69 round-1: a casing-only mismatch between the architect's
+    entity name and the writer's heading ("IBM Quantum" -> "## IBM quantum")
+    must still count as expanded — otherwise EN-named entities spuriously trip
+    entity_coverage_collapsed and force a needless regen."""
+    ents = ["IBM Quantum", "Google QAI", "Origin", "Baidu"]
+    # Every entity has a body heading, but the casing differs from the declared name.
+    art = "# T\n\n## 1 Matrix\n\n| e | a |\n|---|---|\n" + "".join(
+        f"## {e.lower()}\n\nbody about {e}.\n\n" for e in ents
+    )
+    a = validation._validate_entity_coverage(art, _em(entities=ents))
+    assert a["coverage"] == 1.0 and a["n_expanded"] == 4 and a["missing"] == []
+
+
+def test_missing_entity_keeps_original_casing_in_telemetry():
+    """A genuinely-absent entity is still reported in `missing` with its declared
+    casing (case-insensitive matching must not lowercase the telemetry output)."""
+    ents = ["IBM Quantum", "Google QAI", "Origin"]
+    art = "# T\n\n## IBM quantum\n\nbody.\n\n## google qai\n\nbody.\n"  # Origin absent
+    a = validation._validate_entity_coverage(art, _em(entities=ents))
+    assert a["n_expanded"] == 2
+    assert a["missing"] == ["Origin"]
+
+
 def test_collapsed_coverage_flagged_when_rest_are_matrix_only():
     ents = ["IBM Quantum", "Google QAI", "Origin", "Baidu"]
     # Only IBM Quantum gets a body section; the other three live only as table rows.
