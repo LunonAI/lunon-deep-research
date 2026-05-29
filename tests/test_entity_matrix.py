@@ -119,10 +119,13 @@ def test_normalize_records_no_shortfalls_when_matrix_meets_bounds():
     plan["queries"] = [
         {"id": f"Q{i + 1}", "text": f"q{i + 1}", "type": "factual"} for i in range(architect._QUERIES_MIN)
     ]
-    # P3-W2 + P3-W5 merge follow-up (2026-05-27): list-all archetype
-    # requires BOTH a framing_chapter (§1 contract) and a limitations_chapter
-    # (penultimate falsification chapter) — without both, the audit carries
-    # missing-required shortfalls and the test's `== []` invariant breaks.
+    # G11-A (2026-05-28): list-all NO LONGER requires a framing_chapter or a
+    # limitations_chapter (both removed from architect._FRAMING_CHAPTER_REQUIRED_
+    # ARCHETYPES / _LIMITATIONS_REQUIRED_ARCHETYPES). We still attach valid ones
+    # here because they remain ALLOWED for list-all and exercise the chapter-
+    # audit paths; well-formed chapters add no shortfalls, so the `== []`
+    # invariant holds either way (the dedicated absence tests below pin that
+    # omitting them also fires no shortfall).
     plan["framing_chapter"] = {
         "title": "Framework",
         "sub_sections": [

@@ -1,10 +1,11 @@
 """Unit tests for P3-W5 — limitations chapter architect contract.
 
-the reference corpus pattern (6/11 articles): predict / compare / explain-
-mechanism / list-all archetypes end with an engineering-grade limitations
-chapter enumerating 5 dimensions (data granularity, scope cap, time
-validity, sampling, falsifiers). q3 §8.5 (predict) adds a 3-scenario
-stress test that recomputes the article's main ranking.
+the reference corpus pattern: predict / compare / explain-mechanism archetypes
+end with an engineering-grade limitations chapter enumerating 5 dimensions
+(data granularity, scope cap, time validity, sampling, falsifiers). q3 §8.5
+(predict) adds a 3-scenario stress test that recomputes the article's main
+ranking. G11-A (2026-05-28): list-all is EXCLUDED — the fresh #1 corpus's
+list-all articles (q91/q89) carry no limitations chapter.
 """
 
 from deep_research.pipeline import architect
@@ -47,9 +48,11 @@ def test_limitations_constants_pinned():
         "sampling",
         "falsifiers",
     )
-    assert architect._LIMITATIONS_REQUIRED_ARCHETYPES == frozenset(
-        {"predict", "compare", "explain-mechanism", "list-all"}
-    )
+    # G11-A (2026-05-28): list-all EXCLUDED — q91/q89 carry no Limitations
+    # chapter; the prior 6/11 corpus justification contained no list-all
+    # article. Kept for predict/compare/explain-mechanism.
+    assert architect._LIMITATIONS_REQUIRED_ARCHETYPES == frozenset({"predict", "compare", "explain-mechanism"})
+    assert "list-all" not in architect._LIMITATIONS_REQUIRED_ARCHETYPES
     assert architect._LIMITATIONS_STRESS_TEST_ARCHETYPES == frozenset({"predict"})
 
 
@@ -142,6 +145,21 @@ def test_normalize_recommend_no_limitations_no_shortfall():
     plan = _bare_plan_with_limitations()
     plan.pop("limitations_chapter")
     architect._normalize(plan, archetype="recommend")
+    audit = plan["_outline_audit"]
+    lc_shortfalls = [s for s in audit["shortfalls"] if "limitations_chapter=missing" in s]
+    assert lc_shortfalls == []
+
+
+def test_normalize_list_all_no_limitations_no_shortfall():
+    """G11-A (2026-05-28): list-all was REMOVED from
+    `_LIMITATIONS_REQUIRED_ARCHETYPES`. A list-all plan with NO
+    limitations_chapter must therefore fire no missing-chapter shortfall —
+    exercising the behaviour, not just the constant-value pin in
+    `test_limitations_constants_pinned`. Mirrors the trend / recommend
+    no-shortfall tests above."""
+    plan = _bare_plan_with_limitations()
+    plan.pop("limitations_chapter")
+    architect._normalize(plan, archetype="list-all")
     audit = plan["_outline_audit"]
     lc_shortfalls = [s for s in audit["shortfalls"] if "limitations_chapter=missing" in s]
     assert lc_shortfalls == []
