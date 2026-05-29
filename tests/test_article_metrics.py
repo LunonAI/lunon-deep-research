@@ -53,6 +53,17 @@ def test_spaced_cjk_rate():
     assert am.compute("# T\n\nAll english prose here, nothing else.")["spaced_cjk_rate"] is None
 
 
+def test_spaced_cjk_rate_counts_boundaries_overlapping():
+    """Greptile PR #70: boundaries are counted with overlapping lookaheads, so
+    a run of N adjacent CJK chars yields N-1 boundaries (not ⌊N/2⌋) and
+    CONSECUTIVE spaced boundaries each count."""
+    # 甲乙丙 丁 → boundaries 甲乙, 乙丙, 丙⎵丁 = 3 total, 1 spaced → 1/3
+    assert am.compute("甲乙丙 丁")["spaced_cjk_rate"] == round(1 / 3, 5)
+    # 中⎵文⎵字 → both boundaries spaced → 2/2 = 1.0 (the consuming-findall bug
+    # would have returned 0.5 by consuming the middle char).
+    assert am.compute("中 文 字")["spaced_cjk_rate"] == 1.0
+
+
 def test_scaffold_residual_counts_leaks():
     art = (
         "# T\n\nThe system is strong on R-2 and weak on R-13. Per the rubric this holds. "

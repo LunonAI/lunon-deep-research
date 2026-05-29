@@ -189,3 +189,7 @@ def test_ends_mid_sentence_detector():
     assert o._ends_mid_sentence("| col a | col b |") is False
     assert o._ends_mid_sentence("## A heading") is False
     assert o._ends_mid_sentence("") is False
+    # ordered-list + '+' bullet tails are structural too (Greptile PR #70)
+    assert o._ends_mid_sentence("3. last numbered point") is False
+    assert o._ends_mid_sentence("3) last numbered point") is False
+    assert o._ends_mid_sentence("+ a plus bullet") is False
