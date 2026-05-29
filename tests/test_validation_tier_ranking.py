@@ -9,6 +9,7 @@ their internal digits don't false-positive the precision check.
 """
 
 from deep_research.pipeline import validation
+from deep_research.state import DesignGuide, Scaffold
 
 
 def _full_tr(**overrides):
@@ -477,3 +478,209 @@ def test_sensitivity_heading_does_not_match_undocumented_stress_test_form():
     assert audit["sensitivity_subsection_present"] is False, (
         f"undocumented `Stress Test` form leaked back into sensitivity match: {audit}"
     )
+
+
+# ---------- G3 (2026-05-28): commitment-gate signals ----------
+
+
+def test_audit_reports_entities_scored_present_when_populated():
+    """G3: entities_scored populated → flag True (architect computed numeric
+    scores, so the chapter MUST render a committed matrix)."""
+    plan = {"tier_ranking": _full_tr(entities_scored=[{"name": "A", "s_final": 8.2}])}
+    audit = validation._validate_tier_ranking(_well_formed_article(), plan)
+    assert audit["entities_scored_present"] is True
+
+
+def test_audit_reports_entities_scored_absent_for_qualitative_or_no_scores():
+    """G3: no entities_scored (qualitative compare tiers, or the fail-soft
+    no-scores path) → flag False, so the numeric-matrix requirement won't fire."""
+    plan = {"tier_ranking": _full_tr()}
+    audit = validation._validate_tier_ranking(_well_formed_article(), plan)
+    assert audit["entities_scored_present"] is False
+
+
+def test_audit_counts_deferral_tokens_inside_chapter():
+    """G3: deferral/placeholder tokens in the ranking chapter are counted —
+    待§N核实 / 未核实 / 占位 / 证据缺口."""
+    article = (
+        "# Title\n\n## 1 Intro\n\nBody.\n\n"
+        "## 7 Tier Ranking\n\n"
+        "| Team | S_final |\n|---|---|\n"
+        "| A | 待§2核实 |\n| B | 未核实 |\n\n"
+        "占位说明 and 证据缺口 remain to be filled.\n"
+    )
+    audit = validation._validate_tier_ranking(article, {"tier_ranking": _full_tr()})
+    assert audit["deferral_hits"] >= 4, audit
+
+
+def test_deferral_regex_excludes_hopeful_dai_compounds():
+    """Greptile PR #64 round-2: the leading `待` alternation carries a negative
+    lookbehind `(?<![期对招款])` so hopeful compounds whose last char is `待`
+    (期待 / 对待 / 招待 / 款待) do NOT produce false-positive deferral hits, while
+    genuine deferrals — including `等待核实` (`等` is intentionally NOT excluded) —
+    still match. The `占位(?![置费])` round-1 lookahead is re-pinned here too."""
+    rx = validation._TIER_RANKING_DEFERRAL_RE
+    for s in ["期待完成", "期待核实", "对待验证", "招待补充", "款待完成"]:
+        assert not rx.search(s), f"hopeful compound wrongly matched: {s}"
+    for s in ["待核实", "待§2核实", "待§2–§7完成", "等待核实", "未核实", "证据缺口", "占位"]:
+        assert rx.search(s), f"genuine deferral missed: {s}"
+    for s in ["占位置", "占位费"]:
+        assert not rx.search(s), f"占位 compound wrongly matched: {s}"
+
+
+def test_audit_deferral_scoped_to_chapter_region():
+    """G3: deferral tokens OUTSIDE the ranking chapter (e.g. a §1 roadmap)
+    are NOT counted by deferral_hits — that case is caught instead by the
+    'entities_scored_present but no committed matrix' failure."""
+    article = (
+        "# Title\n\n## 1 Intro\n\n占位 待核实 未核实 证据缺口 in the roadmap.\n\n"
+        "## 7 Tier Ranking\n\n"
+        "| Entity | S_final |\n|---|---|\n| A | 8.20 |\n"
+    )
+    audit = validation._validate_tier_ranking(article, {"tier_ranking": _full_tr()})
+    assert audit["deferral_hits"] == 0, audit
+
+
+def test_audit_clean_committed_ranking_has_zero_deferral():
+    """G3: a fully-committed numeric ranking has no deferral tokens."""
+    audit = validation._validate_tier_ranking(_well_formed_article(), {"tier_ranking": _full_tr()})
+    assert audit["deferral_hits"] == 0
+    assert audit["scoring_table_present"] is True
+    assert audit["two_decimal_cells"] >= 1
+
+
+# ---------- Greptile PR #64 issue #3: `占位` negative lookahead ----------
+
+
+def test_deferral_占位_substring_compounds_not_counted():
+    """Greptile PR #64 issue #3: the bare `占位` alternation matched any
+    occurrence of those two chars as a substring, including the unrelated
+    compounds `占位置` ("occupy a position") and `占位费` ("site/booth fee").
+    The negative lookahead `占位(?![置费])` excludes both while still counting
+    the placeholder sense. Here the ranking chapter contains ONLY the two
+    false-positive compounds, so deferral_hits must be 0."""
+    article = (
+        "# Title\n\n## 1 Intro\n\nBody.\n\n"
+        "## 7 Tier Ranking\n\n"
+        "| Entity | S_final |\n|---|---|\n| A | 8.20 |\n\n"
+        "Entity A 占位置 in the front rank, and the 占位费 was already paid.\n"
+    )
+    audit = validation._validate_tier_ranking(article, {"tier_ranking": _full_tr()})
+    assert audit["deferral_hits"] == 0, audit
+
+
+def test_deferral_real_占位_placeholder_still_counted():
+    """Complement: a genuine `占位` placeholder (bare, and the common
+    `占位符` form) IS still counted — the lookahead only excludes the
+    `[置费]` compounds, so recall on the placeholder sense is unchanged."""
+    article = (
+        "# Title\n\n## 1 Intro\n\nBody.\n\n"
+        "## 7 Tier Ranking\n\n"
+        "| Entity | S_final |\n|---|---|\n| A | 占位 |\n| B | 占位符 |\n"
+    )
+    audit = validation._validate_tier_ranking(article, {"tier_ranking": _full_tr()})
+    assert audit["deferral_hits"] >= 2, audit
+
+
+def test_deferral_other_tokens_recall_unchanged_after_lookahead():
+    """Recall on the non-占位 tokens (待…核实 / 未核实 / 证据缺口) is
+    unaffected by the `占位` lookahead change."""
+    article = (
+        "# Title\n\n## 1 Intro\n\nBody.\n\n"
+        "## 7 Tier Ranking\n\n"
+        "| Entity | S_final |\n|---|---|\n"
+        "| A | 待§2核实 |\n| B | 未核实 |\n| C | 证据缺口 |\n"
+    )
+    audit = validation._validate_tier_ranking(article, {"tier_ranking": _full_tr()})
+    assert audit["deferral_hits"] >= 3, audit
+
+
+# ---------- Greptile PR #64 issue #2: run() promotion-to-failure integration ----------
+#
+# The five helper-level tests above verify the audit dict only. These drive the
+# actual `run()` promotion blocks (~372-399 of validation.py) so a regression in
+# the caller (wrong key, `>` vs `>=`, the two blocks swapped, or a missing
+# entities_scored_present guard) is caught.
+
+
+def _run_input(article: str, plan: dict, task_id: str = "t-tr"):
+    return validation.ValidationInput(
+        article=article,
+        plan=plan,
+        scaffold=Scaffold(sections=[]),
+        design_guide=DesignGuide(),
+        language="en",
+        domain="default",
+        task_id=task_id,
+    )
+
+
+def _uncommitted_deferred_article() -> str:
+    """A tier_ranking chapter that renders a table SHAPE but every score
+    cell is a deferral/placeholder token — no committed 2-decimal cell, and
+    >2 deferral tokens. With entities_scored populated this must trip BOTH
+    `tier_ranking_uncommitted` (a) and `tier_ranking_deferred` (b)."""
+    return (
+        "# Title\n\n## 1 Intro\n\nBody.\n\n"
+        "## 7 Tier Ranking\n\n"
+        "Per §1.2 rubric R-1, R-2, R-3 (scores deferred):\n\n"
+        "| Entity | R-1 | R-2 | S_final |\n"
+        "|---|---|---|---|\n"
+        "| A | 待§2核实 | 未核实 | 占位 |\n"
+        "| B | 证据缺口 | 未核实 | 占位 |\n\n"
+        "Final scoring 待§2–§7完成.\n"
+    )
+
+
+def test_run_promotes_uncommitted_and_deferred_when_entities_scored():
+    """Issue #2: with entities_scored populated and an uncommitted+deferred
+    chapter, `run()` must surface BOTH hard failures in `failures`."""
+    plan = {"tier_ranking": _full_tr(entities_scored=[{"name": "A", "s_final": 8.2}])}
+    out = validation.run(_run_input(_uncommitted_deferred_article(), plan))
+    checks = {f["check"] for f in out.failures}
+    assert "tier_ranking_uncommitted" in checks, f"uncommitted not promoted: {out.failures}"
+    assert "tier_ranking_deferred" in checks, f"deferred not promoted: {out.failures}"
+    # Both promoted failures must be high severity (regen-looping signal).
+    for f in out.failures:
+        if f["check"] in ("tier_ranking_uncommitted", "tier_ranking_deferred"):
+            assert f["severity"] == "high", f
+    assert out.ok is False
+    # The audit metadata is also recorded so a dev reader sees the signal.
+    assert "tier_ranking" in out.counts
+
+
+def test_run_does_not_promote_when_entities_scored_absent():
+    """Issue #2 + Issue #1: the SAME uncommitted+deferred chapter, but with
+    NO entities_scored (qualitative compare tiers / fail-soft no-scores
+    path), must NOT trip either hard failure — both gates are guarded by
+    entities_scored_present so the regenerator never loops on these."""
+    plan = {"tier_ranking": _full_tr()}  # no entities_scored
+    out = validation.run(_run_input(_uncommitted_deferred_article(), plan))
+    checks = {f["check"] for f in out.failures}
+    assert "tier_ranking_uncommitted" not in checks, f"uncommitted wrongly promoted: {out.failures}"
+    assert "tier_ranking_deferred" not in checks, f"deferred wrongly promoted: {out.failures}"
+    # Audit metadata is still recorded (the chapter was planned + rendered).
+    assert "tier_ranking" in out.counts
+    assert out.counts["tier_ranking"]["entities_scored_present"] is False
+
+
+def test_run_does_not_promote_committed_clean_ranking():
+    """Issue #2: a well-formed committed ranking (2-decimal table, no
+    deferral) with entities_scored populated must NOT trip either gate —
+    guards against an inverted condition that would fail clean articles."""
+    plan = {"tier_ranking": _full_tr(entities_scored=[{"name": "A", "s_final": 8.2}])}
+    out = validation.run(_run_input(_well_formed_article(), plan))
+    checks = {f["check"] for f in out.failures}
+    assert "tier_ranking_uncommitted" not in checks, f"clean ranking wrongly flagged uncommitted: {out.failures}"
+    assert "tier_ranking_deferred" not in checks, f"clean ranking wrongly flagged deferred: {out.failures}"
+
+
+def test_run_skips_tier_ranking_when_absent():
+    """Issue #2: with no tier_ranking in the plan, neither gate fires and no
+    tier_ranking metadata is recorded."""
+    plan = {"acceptance_criteria": []}
+    out = validation.run(_run_input("# Title\n\n## 1 Overview\n\nbody\n", plan))
+    checks = {f["check"] for f in out.failures}
+    assert "tier_ranking_uncommitted" not in checks
+    assert "tier_ranking_deferred" not in checks
+    assert "tier_ranking" not in out.counts

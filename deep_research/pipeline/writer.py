@@ -325,35 +325,44 @@ def write_section(
         # raises TypeError. Greptile PR #37 round-3 finding.
         min_axes = min(int(em.get("min_axes_per_entity") or 3), len(dims_sorted))
         if mode == "prose_subheaders" and dims_sorted:
-            # P3b-opt2 (2026-05-28): retire the rigid bolded-label micro-template
-            # (built on a wrong read of the lossy corpus — the FRESH q91 output
-            # shows NO fixed-label template). Verified the reference form: ONE flat ##
-            # section per entity, dense single-theme paragraphs each opened by a
-            # SHORT descriptive bold lead-in. This is simultaneously the
-            # org-structure fix (flat + uniform) and the readability
-            # one-idea-per-paragraph fix (the judge flagged stacked-mode
-            # paragraphs as "internally unstable").
-            axis_themes = ", ".join(d["axis_name"] for d in dims_sorted)
+            # G5 (2026-05-28): RESTORE the byte-identical bolded-axis-label
+            # micro-template (reverts P3b-opt2/#53, which retired it on a MISREAD
+            # — the FRESH q91 DOES use a fixed-label template: `**Signature
+            # techniques.**` ×23, `**Key arc appearances.**` ×25, `**Final
+            # outcome.**` ×20, each canonical string dominating its axis ~88%).
+            # dev4 id=91 fragmented to 34/30/28 label variants per axis (top form
+            # only 21-34%), so the template never read as a template — directly
+            # costing InstFollow ("implementation of the specified organizational
+            # structure", id=91 weight 0.32). We KEEP the complementary
+            # one-idea-per-paragraph / equal-depth / flat rules from #53; the two
+            # are orthogonal (label = first ~3 words; paragraph body unchanged).
+            axis_labels = [str(d["axis_name"]).strip() for d in dims_sorted]
+            label_menu = "\n".join(f"  **{name}.** …{{one dense paragraph}}" for name in axis_labels)
             template_block = (
-                f"PER-ENTITY TREATMENT — reference-verified prose form. Render EACH "
+                f"PER-ENTITY TREATMENT — reference-verified micro-template. Render EACH "
                 f"entity this section addresses as a SINGLE FLAT section (one `##` "
-                f"heading; NO `###`/`####` sub-headings inside an entity). The body "
-                f"is {min_axes}-{len(dims_sorted)} DENSE paragraphs, ONE analytical "
-                f"theme per paragraph, each opened by a SHORT DESCRIPTIVE BOLD "
-                f"lead-in specific to that paragraph's point (e.g. `**Power level "
-                f"and the Eighth-Sense bifurcation.**` — entity-specific phrasing, "
-                f"NOT a fixed reusable label).\n"
+                f"heading; NO `###`/`####` sub-headings inside an entity). The body is "
+                f"{min_axes}-{len(dims_sorted)} DENSE paragraphs, ONE analytical theme "
+                f"per paragraph, each OPENED BY THE EXACT BOLD AXIS LABEL below — "
+                f"BYTE-IDENTICAL across every entity (q91 repeats `**Signature "
+                f"techniques.**` verbatim 23×; do NOT paraphrase, translate, "
+                f"abbreviate, or vary the label per entity):\n"
+                f"{label_menu}\n"
                 f"RULES:\n"
-                f"  • Cover these themes across the paragraphs, in this order: {axis_themes}.\n"
+                f"  • Use these {len(axis_labels)} labels EXACTLY as written, in this "
+                f"order, for EVERY entity. A reader must see the SAME bold labels "
+                f"repeat per entity — that consistent structure is precisely what the "
+                f"judge rewards as 'implementation of the specified organizational "
+                f"structure'. A different phrasing per entity is the failure mode.\n"
                 f"  • Each paragraph ~110-200 words developing ONE theme fully. Do "
                 f"NOT stack multiple modes (source-criticism + power-scaling + "
                 f"mythology + speculation) into one paragraph — the judge penalizes "
                 f"that as 'internally unstable'. Choppy <80-word paragraphs also "
                 f"hurt; the reference's median is ~110+ words.\n"
-                f"  • EQUAL-DEPTH across entities: same theme set, similar length. "
+                f"  • EQUAL-DEPTH across entities: same labels, similar length. "
                 f"No entity dropped; none expanded into a multi-heading essay while "
                 f"siblings get a stub.\n"
-                f"  • Flat ONLY: the bold lead-ins ARE the sub-structure — do NOT "
+                f"  • Flat ONLY: the bold labels ARE the sub-structure — do NOT "
                 f"introduce `###`/`####` headings within an entity.\n"
             )
         else:
