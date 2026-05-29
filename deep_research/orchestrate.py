@@ -91,6 +91,7 @@ def _persist_drift(s, language: str, query: str) -> None:
             # under the _MERMAID_DIRECTIVE and (b) which of the 4 failure
             # modes the writer most often hits.
             "mermaid_validate": dict(getattr(s, "mermaid_validate_stats", {}) or {}),
+            "cjk_despace": dict(getattr(s, "cjk_despace_stats", {}) or {}),
             # P3-W3.b (2026-05-27): xref_repair safety-net post-pass
             # stats {templates_repaired, dangling_refs_excised,
             # sentences_deleted}. The writer's in-prompt
@@ -125,6 +126,7 @@ from ._env import assert_phase, log_usage
 from .pipeline import (
     architect,
     criteria_spec,
+    cjk_despace,
     design_guide,
     evidence_dedup,
     footnote_normalize,
@@ -402,9 +404,13 @@ def from_plan(ctx: dict, query: str, language: str, task_id: int | None = None) 
         "skipped_reason": nfo.skipped_reason,
     }
 
-    # Drift instrumentation — captured AFTER all post-edits so the artifact
-    # reflects the actually-shipped article.
-    _persist_drift(s, language, query)
+    # G7 (2026-05-28): ZH-aware de-spacing. Runs LAST (after numbering_fix /
+    # footnote_normalize) on the final article so it only sees shipped prose;
+    # it masks link/anchor/footnote/code spans before collapsing CAPEL-induced
+    # CJK↔CJK spaces, so it cannot touch headings, numbers, or citation tokens.
+    despaced, dc_stats = _phase("cjk_despace", cjk_despace.despace, s.article, language=language)
+    s.article = despaced
+    s.cjk_despace_stats = dc_stats
 
     return s.article
 
