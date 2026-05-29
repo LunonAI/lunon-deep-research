@@ -799,7 +799,11 @@ _FRAMING_SUBSECTION_TYPES: tuple[str, ...] = ("scope", "rubric", "roadmap", "voc
 # Archetypes for which framing_chapter is REQUIRED. Trend tasks with a
 # single axis (e.g. "track the evolution of X over time") often don't
 # benefit from a methodology preamble; we OFFER but don't require it.
-_FRAMING_CHAPTER_REQUIRED_ARCHETYPES = frozenset({"list-all", "compare", "explain-mechanism", "predict", "recommend"})
+# G11-A (2026-05-28): list-all REMOVED. The fresh #1 corpus (q91, q89 — the
+# only list-all/roster articles) carries ZERO §0.x Scope/Rubric/Roadmap/
+# Vocabulary framing; forcing it emitted unrequested scaffolding (id=91's
+# §0.1–§0.4) that inflates the H2 count and contradicts the live vintage.
+_FRAMING_CHAPTER_REQUIRED_ARCHETYPES = frozenset({"compare", "explain-mechanism", "predict", "recommend"})
 
 # Archetypes that should produce a non-empty `published_rubric_items` list
 # (the rubric is referenced downstream when entities are scored). Trend and
@@ -848,7 +852,13 @@ _LIMITATIONS_SUBSECTION_TYPES: tuple[str, ...] = (
     "sampling",
     "falsifiers",
 )
-_LIMITATIONS_REQUIRED_ARCHETYPES = frozenset({"predict", "compare", "explain-mechanism", "list-all"})
+# G11-A (2026-05-28): list-all REMOVED. The architect's prior corpus
+# justification cited a 6/11 pattern (q14/q23/q56/q3/q44/q89) — but NONE of
+# those six is list-all (q14=predict, q23=compare, q56=explain-mech, q3=predict,
+# q44=trend, q89=analyze). The two actual list-all articles (q91, q89-roster)
+# carry ZERO Limitations/Falsifiers chapter; forcing it on id=91 emitted an
+# unrequested §63 block. Keep it for predict/compare/explain-mechanism.
+_LIMITATIONS_REQUIRED_ARCHETYPES = frozenset({"predict", "compare", "explain-mechanism"})
 _LIMITATIONS_STRESS_TEST_ARCHETYPES = frozenset({"predict"})
 
 # P3-W6 (2026-05-27): stakeholder chapter bounds. the reference corpus pattern
