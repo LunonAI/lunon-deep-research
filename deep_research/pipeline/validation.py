@@ -455,7 +455,7 @@ def run(inp: ValidationInput) -> ValidationOutput:
                         f"{mt_audit['min_axis_coverage']:.2f} over {mt_audit['n_entities']} "
                         f"entities; target ≥{_MICRO_TEMPLATE_MIN_COVERAGE:.2f}). Open each "
                         f"entity's per-axis paragraph with the EXACT bold axis label, "
-                        f"byte-identical across entities: {mt_audit['axis_coverage']}"
+                        f"byte-identical across entities: {json.dumps(mt_audit['axis_coverage'], ensure_ascii=False)}"
                     ),
                 }
             )
@@ -477,14 +477,16 @@ def run(inp: ValidationInput) -> ValidationOutput:
 
 
 def _validate_prose_form(article: str) -> dict:
-    """P3b-opt2 (2026-05-28): advisory prose-form readability telemetry,
-    replacing the retired rigid micro-template compliance check. The prose
-    form merged in #53 uses descriptive entity-specific bold lead-ins, NOT
-    fixed `**axis:**` labels — so the old axis-label metric now reads ~0 and
-    is misleading. This measures what the reference-verified prose form
-    actually targets:
+    """P3b-opt2 (2026-05-28): advisory prose-form readability telemetry.
+    This measures only the reference-verified prose-form readability targets:
       - paragraph density (EN corpus median ~81 words; "choppy" = < 80 words)
       - heading flatness (the reference corpus h4_total = 0)
+
+    Axis-label consistency is NOT measured here. G5 (this PR) restored the
+    byte-identical pinned bold axis labels (`**axis:**` per entity), and that
+    coverage is audited separately by `_validate_micro_template`; this function
+    deliberately stays label-agnostic so it stands on every archetype, prose or
+    micro-template.
 
     Runs on every article; advisory only (no hard-fail). NOTE: validation
     runs BEFORE the numbering_fix flatten, so h3/h4 reflect the writer's RAW
@@ -1075,12 +1077,15 @@ def _validate_micro_template(article: str, entity_matrix) -> dict | None:
 
     Returns None unless `entity_matrix` is in prose_subheaders mode with ≥3
     entities and ≥1 named axis. Otherwise, for each axis_name, count its
-    byte-identical bold lead-in (`**axis.**` / `**axis:**` / `**axis**`,
-    case-insensitive, optional terminal `. : 。 ：`) across the article and
-    divide by the entity count (capped at 1.0). Coverage ~1.0 means the writer
-    used ONE canonical label per axis for every entity (the q91 form);
-    low coverage means the labels fragmented into per-entity variants (the
-    dev4 id=91 failure — top form only 21-34% per axis).
+    canonical bold lead-in (`**axis.**` / `**axis:**` / `**axis**`, optional
+    terminal `. : 。 ：`) across the article and divide by the entity count
+    (capped at 1.0). The match is intentionally case-insensitive: casing-only
+    drift (e.g. `**Signature Techniques**`) is treated as a canonical hit to
+    avoid false-positive fragmentation alerts, even though the writer is asked
+    for byte-identical labels. Coverage ~1.0 means the writer used ONE
+    canonical label per axis for every entity (the q91 form); low coverage
+    means the labels fragmented into per-entity variants (the dev4 id=91
+    failure — top form only 21-34% per axis).
 
     Returns {axis_coverage: {axis: float}, min_axis_coverage: float,
     n_entities: int, n_axes: int}. Advisory; the caller promotes a severe
@@ -1100,6 +1105,8 @@ def _validate_micro_template(article: str, entity_matrix) -> dict | None:
     for name in axis_names:
         # Canonical bold lead-in: `**name**` with an optional terminal
         # period/colon (EN or ZH) inside or just before the closing `**`.
+        # Case-insensitive: we treat wrong capitalisation as canonical to
+        # avoid false-positive fragmentation alerts on casing-only drift.
         pat = re.compile(r"\*\*\s*" + re.escape(name) + r"\s*[.:。：]?\s*\*\*", re.IGNORECASE)
         uses = len(pat.findall(article))
         axis_coverage[name] = round(min(uses / n_entities, 1.0), 3)
