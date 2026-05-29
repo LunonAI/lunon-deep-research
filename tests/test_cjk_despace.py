@@ -1,0 +1,79 @@
+"""G7 (2026-05-28): tests for the ZH-aware de-spacing post-pass.
+
+Pins: (a) CAPEL-induced spaces between Hanzi are collapsed; (b) spaces inside
+link/anchor text, footnote refs/defs, and inline code are PROTECTED (so the
+Qianfan-style nested-link-title pattern isn't mangled); (c) Hanzi↔Latin spaces
+are preserved; (d) the `Per the rubric` scaffolding leak is stripped; (e)
+fail-soft on bad input.
+"""
+
+from deep_research.pipeline import cjk_despace
+
+
+def test_collapses_spaces_between_hanzi():
+    out, stats = cjk_despace.despace("本 章 的 分 组 方 式" + "，" + "见 下 文。" * 20)
+    assert "本章的分组方式" in out
+    assert stats["cjk_space_collapsed"] >= 6
+
+
+def test_collapses_space_before_cjk_punctuation():
+    body = "这 是 正 文 内 容 " * 20  # force CJK-bearing
+    out, _ = cjk_despace.despace(body + "结 论 ， 见 后。")
+    assert "结论，见后" in out
+
+
+def test_preserves_spaces_inside_link_anchor_text():
+    """Qianfan's incidental spaced-CJK lives inside source-title anchors —
+    the de-spacer MUST NOT touch them."""
+    padding = "正 文 段 落 内 容 充 足 " * 20
+    anchor = "[锚定新质生产力 券商投行全生命周期](https://example.com/a)"
+    out, _ = cjk_despace.despace(padding + "参见" + anchor + "的报道。")
+    assert anchor in out, f"link anchor text was mangled: {out!r}"
+
+
+def test_preserves_footnote_refs_and_defs():
+    padding = "正 文 内 容 段 落 " * 20
+    text = padding + "结论可靠[^src-1]。\n\n[^src-1]: 某 来 源 标 题"
+    out, _ = cjk_despace.despace(text)
+    assert "[^src-1]" in out  # ref token intact
+    # The def lead `[^src-1]:` is protected; its title text is inside the
+    # protected def-lead span only up to the colon — title body may de-space,
+    # which is fine (it's prose, not an anchor). Ref marker integrity is what
+    # matters for footnote coverage.
+
+
+def test_does_not_collapse_hanzi_latin_boundary():
+    body = "正 文 内 容 段 落 " * 20
+    out, _ = cjk_despace.despace(body + "使用 GPT 模型")
+    assert "使用 GPT 模型" in out, f"Hanzi↔Latin space wrongly collapsed: {out!r}"
+
+
+def test_does_not_touch_pure_english():
+    text = "This is a fully English paragraph with normal spacing throughout." * 5
+    out, stats = cjk_despace.despace(text)
+    assert out == text
+    assert stats["cjk_space_collapsed"] == 0
+
+
+def test_strips_per_the_rubric_scaffolding():
+    text = "This controversy is, Per the rubric, strong on the originality axis." * 3
+    out, stats = cjk_despace.despace(text)
+    assert "Per the rubric" not in out
+    assert stats["boilerplate_stripped"] >= 1
+    assert "strong on the originality axis" in out
+
+
+def test_fail_soft_on_bad_input():
+    assert cjk_despace.despace("") == ("", {"cjk_space_collapsed": 0, "boilerplate_stripped": 0})
+    out, stats = cjk_despace.despace(None)
+    assert out is None
+    assert all(v == 0 for v in stats.values())
+
+
+def test_does_not_touch_heading_hashes_or_numbers():
+    body = "## 3 章 节 标 题\n\n正 文 内 容 段 落 充 足 " * 10
+    out, _ = cjk_despace.despace(body)
+    # Heading markers + numbers survive; the de-spacer only removes spaces
+    # BETWEEN cjk chars, never the "## 3 " prefix (space follows a digit).
+    assert "## 3 章节标题" in out or "## 3 章 节 标 题" in out
+    assert "##3" not in out  # never glued the hash to the number
