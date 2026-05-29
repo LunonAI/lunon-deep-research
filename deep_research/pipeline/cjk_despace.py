@@ -54,8 +54,14 @@ def _strip_boilerplate(text: str) -> tuple[str, int]:
     out, n = _BOILERPLATE_RE.subn(" ", text)
     if n:
         # Tidy the seams the strip leaves (double spaces / space-before-punct).
+        # Greptile PR #66 round-3 (2026-05-29): both passes use HORIZONTAL
+        # whitespace only ([ \t]) so a boilerplate strip anywhere in the article
+        # can never collapse a paragraph break elsewhere (a body line that
+        # happens to start with `.`/`,` — common in CJK continuation contexts —
+        # must keep its preceding newline). Mirrors the `[^\S\n]` intent of
+        # _BOILERPLATE_RE.
         out = re.sub(r"[ \t]{2,}", " ", out)
-        out = re.sub(r"\s+([.,;:!?])", r"\1", out)
+        out = re.sub(r"[ \t]+([.,;:!?])", r"\1", out)
     return out, n
 
 
