@@ -412,6 +412,10 @@ def from_plan(ctx: dict, query: str, language: str, task_id: int | None = None) 
     s.article = despaced
     s.cjk_despace_stats = dc_stats
 
+    # Drift instrumentation — captured AFTER all post-edits so the artifact
+    # reflects the actually-shipped article.
+    _persist_drift(s, language, query)
+
     return s.article
 
 
