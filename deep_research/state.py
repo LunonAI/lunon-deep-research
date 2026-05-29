@@ -148,6 +148,9 @@ class PipelineState:
     # forwarded into inner_loop_drift.jsonl so dev4 / W13 analysers can
     # track per-archetype mermaid emission rates and repair pressure.
     mermaid_validate_stats: dict = field(default_factory=dict)
+    # G7 (2026-05-28): cjk_despace stats {cjk_space_collapsed, boilerplate_stripped}
+    # — quantifies CAPEL CJK-fragmentation pressure on ZH articles.
+    cjk_despace_stats: dict = field(default_factory=dict)
     # P3-W3.b (2026-05-27): per-task xref_repair stats dict
     # {templates_repaired, dangling_refs_excised, sentences_deleted}.
     # Populated from pipeline.xref_repair.repair() in the post-pass chain
