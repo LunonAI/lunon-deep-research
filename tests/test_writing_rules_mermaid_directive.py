@@ -46,3 +46,16 @@ def test_mermaid_directive_allowed_types_match_validator():
     rule = wr._MERMAID_DIRECTIVE
     for kw in _VALID_DIAGRAM_TYPES:
         assert kw in rule, f"validator accepts `{kw}` but directive doesn't list it — writer will avoid this valid type"
+
+
+def test_mermaid_directive_g8_priority_predict_and_no_list_all():
+    """G8 (2026-05-28): predict is the primary mermaid lever (timeline + tier
+    topology); the list-all leg is REMOVED (q91 uses ~1 — pushing diagrams onto
+    the weakest question is counterproductive); qualitative trend added."""
+    rule = wr._MERMAID_DIRECTIVE
+    assert "PREDICT (primary)" in rule
+    assert "tier-topology" in rule
+    assert "QUALITATIVE TREND" in rule
+    # The old list-all recommendation must be gone.
+    assert "list-all (process flow for entity-introduction timeline)" not in rule
+    assert "NOT list-all" in rule
