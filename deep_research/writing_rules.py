@@ -620,11 +620,14 @@ _INSIGHT_MIN = (
     "      reconciles / 悖论 / 矛盾 / 挑战在于 / 关键问题'. NEW IN WAVE 3 "
     "      PR 2 — Lunon was structurally uncovered on RACE 3.\n"
     "      RESOLUTION CLAUSE REQUIRED (P3b-D1): a flagged tension counts "
-    "      ONLY when followed by an explicit resolution. Use this shape: "
-    "      'Where one might expect X, the system instead resolves into Y because Z.' "
-    "      A bare unresolved tension does NOT satisfy (f) — name how it "
-    "      resolves or what constrains the resolution. This is our weakest "
-    "      RACE-Insight sub-criterion vs Qianfan; reasoning, not citations.\n"
+    "      ONLY when followed by an explicit resolution. Name the expected "
+    "      outcome, the actual resolution, and the cause IN YOUR OWN WORDS, "
+    "      with varied natural phrasing per instance — do NOT reuse a fixed, "
+    "      reusable template sentence (a verbatim recurring construction reads "
+    "      as show-off scaffolding to the judge). A bare unresolved "
+    "      tension does NOT satisfy (f) — name how it resolves or what "
+    "      constrains the resolution. This is our weakest RACE-Insight "
+    "      sub-criterion vs Qianfan; reasoning, not citations.\n"
     "\n"
     "GROUNDING RULE (unchanged from prior policy): every element above MUST "
     "be evidence-backed — name a source, cite a date or named work, or "
@@ -1030,6 +1033,38 @@ def opening_directive() -> str:
     )
 
 
+_SKIM_LAYER_RULE = (
+    "SKIM-LAYER & NAVIGABILITY (L6 — the #1 corpus stays scannable at 2-4x our "
+    "length; the leaderboard judge dinged us for 'suffocating equal-intensity "
+    "density, key points not prominent'):\n"
+    "  - BOLD the single load-bearing claim/finding in each substantive "
+    "paragraph — the one sentence a skimming reader must catch. One bold span "
+    "per paragraph (NOT equal-intensity bolding of many phrases, NOT zero); a "
+    "long chapter must be navigable by its bolded claims alone.\n"
+    "  - Open each chapter with a one-sentence recap-then-preview bridge (what "
+    "the prior chapter established → what THIS chapter adds) and CLOSE it with a "
+    "one-sentence core takeaway.\n"
+    "  - End an evidence-dense chapter with a compact summary table that "
+    "compresses its key data/comparisons.\n"
+    "  - Front-load the core finding in each chapter's opening — do NOT bury the "
+    "result under uniform-intensity detail.\n"
+    "  - Stay CONCISE: depth comes from evidence and analysis, NOT from padding "
+    "with repeated abstract nominalizations to inflate length."
+)
+
+
+_NUMERIC_SPINE_RULE = (
+    "NUMERIC SPINE (L2 — quantitative reports only): if this report's core "
+    "deliverable is a headline quantity (a total / count / market size / annual "
+    "figure), there must be exactly ONE such headline figure across the whole "
+    "article. Derive it ONCE from a named, cited datapoint, state the derivation, "
+    "and reuse that SAME figure (and figures derived from it) VERBATIM in the "
+    "abstract, every body chapter, and the forecast. Do NOT re-derive a different "
+    "total in a later chapter — a reader must be able to extract ONE coherent "
+    "answer. Conflicting headline totals across chapters are a fatal defect."
+)
+
+
 def writer_system(
     archetype: str,
     domain: str,
@@ -1127,6 +1162,8 @@ def writer_system(
         [
             _INSIGHT_MIN,
             _CHAPTER_SYNTHESIS_RULE,
+            _SKIM_LAYER_RULE,
+            _NUMERIC_SPINE_RULE,
             CLEANING_RESISTANT_RULE,
             _EMDASH_RULE,
             _SECTION_OPENING_PROSE_LEAD_RULE,

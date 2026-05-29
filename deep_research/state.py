@@ -67,6 +67,16 @@ class ScaffoldSection:
     assigned_specialists: list = field(default_factory=list)  # role names
     placeholder: str = ""
 
+    @property
+    def effective_length_tokens(self) -> int:
+        """`expected_length_tokens` with the canonical fallback applied: an unset
+        (None) or zero target collapses to the 1200 default. SINGLE SOURCE OF
+        TRUTH for that fallback so every consumer does the same int-safe
+        arithmetic — the field is typed `int` but settable, and both
+        orchestrate._expected_tok_for and validation.run feed it into
+        `int(0.7 * …)`, which would crash on None. (Greptile PR #69 round-2.)"""
+        return self.expected_length_tokens or 1200
+
 
 @dataclass
 class Scaffold:
@@ -151,6 +161,11 @@ class PipelineState:
     # G7 (2026-05-28): cjk_despace stats {cjk_space_collapsed, boilerplate_stripped}
     # — quantifies CAPEL CJK-fragmentation pressure on ZH articles.
     cjk_despace_stats: dict = field(default_factory=dict)
+    # L1 (2026-05-29): chapter-completion stats {n_sections, n_hollow_final,
+    # hollow_sections} — sections still below their declared depth target after
+    # the inner loop (the "hollow chapter" failure vs Qianfan). >0 hollow signals
+    # an upstream coverage gap (enumerate-and-expand / deliverable-mapping).
+    completion_stats: dict = field(default_factory=dict)
     # P3-W3.b (2026-05-27): per-task xref_repair stats dict
     # {templates_repaired, dangling_refs_excised, sentences_deleted}.
     # Populated from pipeline.xref_repair.repair() in the post-pass chain
