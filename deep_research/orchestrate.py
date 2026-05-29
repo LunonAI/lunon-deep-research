@@ -93,6 +93,11 @@ def _persist_drift(s, language: str, query: str) -> None:
             "mermaid_validate": dict(getattr(s, "mermaid_validate_stats", {}) or {}),
             "cjk_despace": dict(getattr(s, "cjk_despace_stats", {}) or {}),
             "completion": dict(getattr(s, "completion_stats", {}) or {}),
+            # 2026-05-29: advisory final-article metrics (heading profile,
+            # frontload_ratio, spaced-CJK + scaffolding RESIDUAL, paragraph
+            # density) — distance-from-Qianfan structural signals + round-2 fix
+            # verification on the shipped article. See pipeline/article_metrics.py.
+            "final_article_metrics": dict(getattr(s, "final_article_metrics", {}) or {}),
             # P3-W3.b (2026-05-27): xref_repair safety-net post-pass
             # stats {templates_repaired, dangling_refs_excised,
             # sentences_deleted}. The writer's in-prompt
@@ -126,6 +131,7 @@ from . import archetype as _arch
 from ._env import assert_phase, log_usage
 from .pipeline import (
     architect,
+    article_metrics,
     cjk_despace,
     criteria_spec,
     design_guide,
@@ -413,6 +419,14 @@ def from_plan(ctx: dict, query: str, language: str, task_id: int | None = None) 
     s.article = despaced
     s.cjk_despace_stats = dc_stats
 
+    # Advisory final-article metrics on the SHIPPED article (after every
+    # post-pass). Pure read — no gating, no mutation — so it cannot confound the
+    # dev6 A/B. Fail-soft: a metrics error must never break a completed run.
+    try:
+        s.final_article_metrics = article_metrics.compute(s.article, language=language)
+    except Exception:  # noqa: BLE001
+        s.final_article_metrics = {}
+
     # Drift instrumentation — captured AFTER all post-edits so the artifact
     # reflects the actually-shipped article.
     _persist_drift(s, language, query)
@@ -465,6 +479,29 @@ def _section_too_thin(text: str, expected_tok: int) -> bool:
     if not expected_tok or expected_tok <= 0:
         return False
     return _approx_tokens(text) < _COMPLETION_MIN_RATIO * expected_tok
+
+
+# Sentence-terminal punctuation (EN + CJK) + closing brackets/quotes a complete
+# prose tail may legitimately end on.
+_SENT_TERMINALS = "。！？.!?…）)】」』》”’\"'"
+
+
+def _ends_mid_sentence(text: str) -> bool:
+    """Advisory: True if the section's prose tail looks truncated mid-sentence —
+    an unclosed code fence, or a final prose line ending without sentence-terminal
+    punctuation. Distinguishes a TOKEN-CEILING cutoff (raise max_tokens) from a
+    short-but-complete section (research starvation → L1b). Structural tails
+    (table rows, list items, headings) legitimately lack terminal punctuation
+    and are NOT flagged."""
+    if not text or not text.strip():
+        return False
+    if text.count("```") % 2 == 1:  # odd fence count ⇒ truncated inside a block
+        return True
+    last = text.rstrip()
+    tail = last.splitlines()[-1].strip()
+    if not tail or tail[0] in "|#-*>" or tail.endswith("|"):
+        return False
+    return last[-1] not in _SENT_TERMINALS
 
 
 def _expand_feedback(expected_tok: int) -> str:
@@ -529,6 +566,11 @@ def _run_section_loop(s: PipelineState, query, language):
         # what `writer.write_section` ultimately fetches internally — keep this
         # call so grounding.check has its own deterministic evidence view.
         ev = bank.for_section(sid)
+        # L1b smoking gun: how many evidence blocks did the research phase route
+        # to THIS section? A hollow section with an empty slice = research
+        # starvation (→ L1b); a hollow section with a full slice = writer-budget
+        # (L1a's job) or a token-ceiling cutoff (→ raise max_tokens).
+        evidence_blocks = len(ev or [])
         draft_s, stats = _write_with_guide(
             u,
             plan,
@@ -635,7 +677,15 @@ def _run_section_loop(s: PipelineState, query, language):
         # L1 telemetry: is the section STILL hollow after the inner loop?
         # A persistent hollow chapter signals an upstream coverage gap.
         final_thin = _section_too_thin(draft_s, expected_tok)
-        return sid, u, draft_s, last_scores, agg_stats, traj, final_thin
+        draft_tok = _approx_tokens(draft_s)
+        sec_meta = {
+            "evidence_blocks": evidence_blocks,
+            "expected_tok": expected_tok,
+            "draft_tok": draft_tok,
+            "thin_ratio": round(draft_tok / expected_tok, 3) if expected_tok else None,
+            "mid_sentence": _ends_mid_sentence(draft_s),
+        }
+        return sid, u, draft_s, last_scores, agg_stats, traj, final_thin, sec_meta
 
     order_ix = {u["id"]: i for i, u in enumerate(units)}
     sec_workers = int(os.environ.get("DR_SECTION_WORKERS", "4"))
@@ -644,10 +694,15 @@ def _run_section_loop(s: PipelineState, query, language):
     results.sort(key=lambda r: order_ix.get(r[0], 1e9))
 
     sections, score_summary, failing = [], [], []
-    completion = {"n_sections": 0, "n_hollow_final": 0, "hollow_sections": []}
-    for sid, u, draft_s, last, stats, traj, final_thin in results:
+    completion = {"n_sections": 0, "n_hollow_final": 0, "hollow_sections": [], "sections": []}
+    for idx, (sid, u, draft_s, last, stats, traj, final_thin, sec_meta) in enumerate(results):
         sections.append(draft_s)
         completion["n_sections"] += 1
+        # L1b: per-section record correlating hollowness with the routed evidence
+        # count and chapter POSITION (idx) — so the dev6 shows whether hollow
+        # chapters cluster late (Qianfan's late chapters stay rich) and whether
+        # they were starved of evidence vs merely written short.
+        completion["sections"].append({"section": sid, "idx": idx, "final_thin": final_thin, **sec_meta})
         if final_thin:
             completion["n_hollow_final"] += 1
             completion["hollow_sections"].append(sid)

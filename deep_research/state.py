@@ -162,10 +162,18 @@ class PipelineState:
     # — quantifies CAPEL CJK-fragmentation pressure on ZH articles.
     cjk_despace_stats: dict = field(default_factory=dict)
     # L1 (2026-05-29): chapter-completion stats {n_sections, n_hollow_final,
-    # hollow_sections} — sections still below their declared depth target after
-    # the inner loop (the "hollow chapter" failure vs Qianfan). >0 hollow signals
-    # an upstream coverage gap (enumerate-and-expand / deliverable-mapping).
+    # hollow_sections, sections=[{section,idx,final_thin,evidence_blocks,
+    # expected_tok,draft_tok,thin_ratio,mid_sentence}]} — sections still below
+    # their declared depth target after the inner loop (the "hollow chapter"
+    # failure vs Qianfan). The per-section records correlate hollowness with the
+    # routed evidence count + chapter position: the L1b research-starvation-vs-
+    # writer-budget smoking gun.
     completion_stats: dict = field(default_factory=dict)
+    # 2026-05-29: advisory final-article metrics computed on the shipped article
+    # (pipeline/article_metrics.py): heading_profile, frontload_ratio,
+    # spaced_cjk_rate, scaffold_residual, paragraph density. Distance-from-Qianfan
+    # structural signals + round-2 fix verification. Pure telemetry, no gating.
+    final_article_metrics: dict = field(default_factory=dict)
     # P3-W3.b (2026-05-27): per-task xref_repair stats dict
     # {templates_repaired, dangling_refs_excised, sentences_deleted}.
     # Populated from pipeline.xref_repair.repair() in the post-pass chain
