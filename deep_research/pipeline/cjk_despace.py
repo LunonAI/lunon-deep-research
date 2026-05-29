@@ -104,6 +104,20 @@ _CJK_SCAFFOLD_RE = re.compile(
 # is treated as an explicit "skip the CJK scan" override (see despace()).
 _CJK_LANGS = frozenset({"zh", "ja", "ko"})
 
+# Collapse abnormal whitespace on CJK↔CJK and CJK↔CJK-punct boundaries (both
+# directions). Compiled once and shared by the initial de-space pass AND the
+# gated post-L5 re-run, so the two can never drift apart.
+_CJK_GAP_RE = re.compile(rf"(?<=[{_CJK}])[{_ABNORMAL_WS}]+(?=[{_CJK}{_CJK_PUNCT}])")
+_CJK_PUNCT_GAP_RE = re.compile(rf"(?<=[{_CJK_PUNCT}])[{_ABNORMAL_WS}]+(?=[{_CJK}])")
+
+
+def _collapse_cjk_spaces(text: str) -> tuple[str, int]:
+    """Remove abnormal whitespace between adjacent CJK chars (and between a CJK
+    char and CJK punctuation). Returns (text, n_collapsed)."""
+    text, n1 = _CJK_GAP_RE.subn("", text)
+    text, n2 = _CJK_PUNCT_GAP_RE.subn("", text)
+    return text, n1 + n2
+
 
 def despace(text: str, language: str | None = None) -> tuple[str, dict]:
     """Collapse CAPEL-induced spaces between adjacent CJK chars (and between a
@@ -155,12 +169,19 @@ def despace(text: str, language: str | None = None) -> tuple[str, dict]:
     # whitespace class is `_ABNORMAL_WS` (ASCII space/tab + NBSP/zero-width/
     # BOM/full-width/thin/narrow) so the model's invisible-space artifacts
     # between Hanzi are collapsed, not just ASCII spaces.
-    masked, n1 = re.subn(rf"(?<=[{_CJK}])[{_ABNORMAL_WS}]+(?=[{_CJK}{_CJK_PUNCT}])", "", masked)
-    masked, n2 = re.subn(rf"(?<=[{_CJK_PUNCT}])[{_ABNORMAL_WS}]+(?=[{_CJK}])", "", masked)
-    stats["cjk_space_collapsed"] = n1 + n2
+    masked, n_collapsed = _collapse_cjk_spaces(masked)
+    stats["cjk_space_collapsed"] = n_collapsed
 
     # L5: strip leaked internal scaffolding tokens from CJK body prose (zh/ja/ko).
     masked, n3 = _CJK_SCAFFOLD_RE.subn("", masked)
     stats["scaffold_stripped"] = n3
+    # Greptile PR #69 round-3: the strip can EXPOSE a CJK↔CJK gap the de-spacer has
+    # already passed — e.g. `字AC19 意` keeps its `9 意` space (the de-spacer's
+    # lookbehind needs CJK on the left and `9` is not), so removing `AC19` leaves
+    # `字 意`. Re-run the collapse ONCE, gated on an actual strip (n3 > 0), to close
+    # any inter-CJK gap L5 opened; the de-spacer would otherwise never revisit it.
+    if n3:
+        masked, n_more = _collapse_cjk_spaces(masked)
+        stats["cjk_space_collapsed"] += n_more
 
     return _restore(masked), stats

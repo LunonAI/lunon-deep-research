@@ -52,6 +52,39 @@ def test_missing_entity_keeps_original_casing_in_telemetry():
     assert a["missing"] == ["Origin"]
 
 
+def test_short_entity_name_no_substring_false_positive():
+    """Greptile PR #69 round-3: a short EN entity must NOT count as expanded just
+    because its letters appear inside an unrelated heading word ("AI" in "SAIL",
+    "OS" in "POSIX", "ML" in "HTML"). The ASCII-alnum word-boundary guard removes
+    that false positive (pre-fix the unanchored substring test counted all three,
+    silently hiding a real coverage gap below the 0.5 threshold)."""
+    ents = ["AI", "OS", "ML"]
+    art = "# T\n\n## SAIL Research\n\nbody.\n\n## POSIX layer\n\nbody.\n\n## HTML rendering\n\nbody.\n"
+    a = validation._validate_entity_coverage(art, _em(entities=ents))
+    assert a["n_expanded"] == 0
+    assert set(a["missing"]) == {"AI", "OS", "ML"}
+
+
+def test_short_entity_name_matches_standalone_heading():
+    """The same short entities DO count when they head their own section — the
+    guard anchors on boundaries, it does not require the name to be multi-word."""
+    ents = ["AI", "OS", "ML"]
+    art = "# T\n\n## AI Overview\n\nb.\n\n## OS Internals\n\nb.\n\n## ML Pipeline\n\nb.\n"
+    a = validation._validate_entity_coverage(art, _em(entities=ents))
+    assert a["coverage"] == 1.0 and a["n_expanded"] == 3
+
+
+def test_cjk_entity_matches_within_longer_heading():
+    """Greptile PR #69 round-3 regression guard: the boundary guard keys on ASCII
+    alnum ONLY, so a CJK entity embedded in a longer CJK heading still matches. A
+    naive `\\b` anchor would wrongly miss these (no ASCII word boundary between Han
+    chars) — this pins that the false-positive fix did not break CJK coverage."""
+    ents = ["量子计算", "人工智能", "区块链"]
+    art = "# 报告\n\n## 量子计算的发展\n\n正文。\n\n## 人工智能概述\n\n正文。\n\n## 区块链技术\n\n正文。\n"
+    a = validation._validate_entity_coverage(art, _em(entities=ents))
+    assert a["coverage"] == 1.0 and a["n_expanded"] == 3
+
+
 def test_collapsed_coverage_flagged_when_rest_are_matrix_only():
     ents = ["IBM Quantum", "Google QAI", "Origin", "Baidu"]
     # Only IBM Quantum gets a body section; the other three live only as table rows.
