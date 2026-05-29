@@ -86,8 +86,10 @@ def despace(text: str, language: str | None = None) -> tuple[str, dict]:
     # `language` label (e.g. "en") is an explicit override that skips the scan;
     # otherwise the Hanzi-count guard — robust to an absent/mislabeled label —
     # is authoritative. (Greptile PR #66 round-2: makes `language` a real gate
-    # instead of an ignored parameter.)
-    if language is not None and language.split("-")[0].strip().lower() not in _CJK_LANGS:
+    # instead of an ignored parameter.) Greptile PR #66 round-4: split on BOTH
+    # `-` and `_` so underscore locales ("zh_CN") yield primary subtag "zh" and
+    # are not mistaken for a non-CJK label that would skip de-spacing entirely.
+    if language is not None and re.split(r"[-_]", language)[0].strip().lower() not in _CJK_LANGS:
         return text, stats
     if len(re.findall(rf"[{_CJK}]", text)) < 50:
         return text, stats
