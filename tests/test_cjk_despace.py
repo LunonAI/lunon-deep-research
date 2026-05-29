@@ -31,6 +31,25 @@ def test_preserves_spaces_inside_link_anchor_text():
     assert anchor in out, f"link anchor text was mangled: {out!r}"
 
 
+def test_preserves_spaces_inside_reference_style_link_anchor():
+    """Reference-style links (`[anchor text][ref-id]`) carry the same incidental
+    spaced-CJK source titles as inline links — the de-spacer MUST NOT collapse
+    the spaces inside the anchor text."""
+    padding = "正 文 段 落 内 容 充 足 " * 20
+    anchor = "[锚定新质生产力 券商投行全生命周期][src1]"
+    out, _ = cjk_despace.despace(padding + "参见" + anchor + "的报道。")
+    assert anchor in out, f"reference-style link anchor was mangled: {out!r}"
+
+
+def test_preserves_bare_reference_label():
+    """A bare `[label]` (no following `(`) is protected verbatim — even when
+    its content is spaced CJK that the de-spacer would otherwise collapse."""
+    padding = "正 文 段 落 内 容 充 足 " * 20
+    label = "[锚定 生产力]"
+    out, _ = cjk_despace.despace(padding + "见来源" + label + "的说明。")
+    assert label in out, f"bare reference label was mangled: {out!r}"
+
+
 def test_preserves_footnote_refs_and_defs():
     padding = "正 文 内 容 段 落 " * 20
     text = padding + "结论可靠[^src-1]。\n\n[^src-1]: 某 来 源 标 题"

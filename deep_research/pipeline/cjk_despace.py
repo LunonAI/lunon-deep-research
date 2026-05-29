@@ -35,8 +35,10 @@ _CJK_PUNCT = "，。、；：！？（）【】《》「」“”‘’—…·"
 # after de-spacing.
 _PROTECT_RE = re.compile(
     r"!?\[[^\]\n]*\]\([^)\n]*\)"  # [anchor text](url) / ![alt](src)
-    r"|\[\^[^\]\n]*\]:?"          # [^ref]  and  [^ref]: definition lead
-    r"|`[^`\n]*`"                 # inline code
+    r"|\[\^[^\]\n]*\]:?"  # [^ref]  and  [^ref]: definition lead
+    r"|\[[^\]\n]*\]\[[^\]\n]*\]"  # [anchor text][ref-id] reference-style links
+    r"|\[[^\]\n]+\](?!\()"  # bare [ref-id] labels
+    r"|`[^`\n]*`"  # inline code
 )
 
 # G7 sibling: leaked RACE scaffolding. Strip the `Per the rubric` connective
