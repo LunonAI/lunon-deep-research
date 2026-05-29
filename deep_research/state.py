@@ -151,6 +151,11 @@ class PipelineState:
     # G7 (2026-05-28): cjk_despace stats {cjk_space_collapsed, boilerplate_stripped}
     # — quantifies CAPEL CJK-fragmentation pressure on ZH articles.
     cjk_despace_stats: dict = field(default_factory=dict)
+    # L1 (2026-05-29): chapter-completion stats {n_sections, n_hollow_final,
+    # hollow_sections} — sections still below their declared depth target after
+    # the inner loop (the "hollow chapter" failure vs Qianfan). >0 hollow signals
+    # an upstream coverage gap (enumerate-and-expand / deliverable-mapping).
+    completion_stats: dict = field(default_factory=dict)
     # P3-W3.b (2026-05-27): per-task xref_repair stats dict
     # {templates_repaired, dangling_refs_excised, sentences_deleted}.
     # Populated from pipeline.xref_repair.repair() in the post-pass chain

@@ -92,6 +92,7 @@ def _persist_drift(s, language: str, query: str) -> None:
             # modes the writer most often hits.
             "mermaid_validate": dict(getattr(s, "mermaid_validate_stats", {}) or {}),
             "cjk_despace": dict(getattr(s, "cjk_despace_stats", {}) or {}),
+            "completion": dict(getattr(s, "completion_stats", {}) or {}),
             # P3-W3.b (2026-05-27): xref_repair safety-net post-pass
             # stats {templates_repaired, dangling_refs_excised,
             # sentences_deleted}. The writer's in-prompt
@@ -432,6 +433,52 @@ def _state_from_ctx(ctx, query, language):
     return s
 
 
+# L1 (2026-05-29): chapter-completion gate. The inner loop accepts a section on
+# grounding + quality SCORE but never on COMPLETENESS, so a thin-but-coherent
+# section passes — the "hollow late chapter" failure the Qianfan head-to-head
+# flagged (id38 §5 = 185 chars vs a multi-thousand-token target; id44 forecast
+# chapter = logic skeleton). We gate acceptance on a minimum content ratio vs
+# the section's own declared length target and, when too thin, retry with an
+# explicit expand directive (bounded by INNER_CAP). A section still thin after
+# retries is surfaced in completion telemetry — a signal of an upstream coverage
+# gap (which the enumerate-and-expand / deliverable-mapping levers address).
+_COMPLETION_MIN_RATIO = 0.5  # below the 0.7x stated target — only SEVERE shortfalls fire
+
+
+def _approx_tokens(text: str) -> int:
+    """Rough token estimate robust across ZH/EN, body only (heading lines
+    stripped). CJK ~1.6 chars/token, other text ~4 chars/token."""
+    if not text:
+        return 0
+    body = "\n".join(ln for ln in text.split("\n") if not ln.lstrip().startswith("#"))
+    cjk = sum(1 for ch in body if "一" <= ch <= "鿿")
+    other = len(body) - cjk
+    return int(cjk / 1.6 + other / 4)
+
+
+def _section_too_thin(text: str, expected_tok: int) -> bool:
+    if not expected_tok or expected_tok <= 0:
+        return False
+    return _approx_tokens(text) < _COMPLETION_MIN_RATIO * expected_tok
+
+
+def _expand_feedback(expected_tok: int) -> str:
+    return (
+        f"COMPLETENESS — this section is far below its declared depth target "
+        f"(~{expected_tok} tokens). Fully develop EVERY sub-topic the section's "
+        f"plan declares; do NOT emit a skeleton/intro-only stub or defer content "
+        f"to other sections. Expand with concrete, evidence-bearing detail."
+    )
+
+
+def _expected_tok_for(scaffold, sid: str) -> int:
+    if scaffold:
+        for sec in scaffold.sections:
+            if sec.section_id == sid:
+                return sec.expected_length_tokens
+    return 1200
+
+
 def _run_section_loop(s: PipelineState, query, language):
     plan, bank, spec, archetype, domain = (s.plan, s.memory_bank, s.spec, s.archetype["archetype"], s.domain)
     units = writer.outline_units(plan)
@@ -451,6 +498,9 @@ def _run_section_loop(s: PipelineState, query, language):
 
     def process_one(u):
         sid = u["id"]
+        # L1: the section's declared depth target — used to gate acceptance on
+        # completeness so a thin-but-coherent draft can't pass as "done".
+        expected_tok = _expected_tok_for(s.scaffold, sid)
         # Per-section CAPEL telemetry: sum strip + violation counts across
         # every writer call this section sees (initial draft + grounding/
         # inner-loop retries). Recording only the final attempt's stats would
@@ -538,8 +588,15 @@ def _run_section_loop(s: PipelineState, query, language):
                     "degraded": bool(r.get("degraded")),
                 }
             )
-            if r["ok"]:
+            # L1: accept only when quality-ok AND not hollow. A thin section
+            # (well below its declared depth target) retries with an explicit
+            # expand directive even if it scored ok — bounded by INNER_CAP.
+            thin = _section_too_thin(draft_s, expected_tok)
+            if r["ok"] and not thin:
                 break
+            fb = inner_loop.feedback_text(r) if not r["ok"] else ""
+            if thin:
+                fb = (fb + " " + _expand_feedback(expected_tok)).strip()
             draft_s, stats = _write_with_guide(
                 u,
                 plan,
@@ -552,10 +609,13 @@ def _run_section_loop(s: PipelineState, query, language):
                 s.design_guide,
                 s.scaffold,
                 task_id=s.task_id,
-                feedback=inner_loop.feedback_text(r),
+                feedback=fb,
             )
             _accum(stats)
-        return sid, u, draft_s, last_scores, agg_stats, traj
+        # L1 telemetry: is the section STILL hollow after the inner loop?
+        # A persistent hollow chapter signals an upstream coverage gap.
+        final_thin = _section_too_thin(draft_s, expected_tok)
+        return sid, u, draft_s, last_scores, agg_stats, traj, final_thin
 
     order_ix = {u["id"]: i for i, u in enumerate(units)}
     sec_workers = int(os.environ.get("DR_SECTION_WORKERS", "4"))
@@ -564,8 +624,13 @@ def _run_section_loop(s: PipelineState, query, language):
     results.sort(key=lambda r: order_ix.get(r[0], 1e9))
 
     sections, score_summary, failing = [], [], []
-    for sid, u, draft_s, last, stats, traj in results:
+    completion = {"n_sections": 0, "n_hollow_final": 0, "hollow_sections": []}
+    for sid, u, draft_s, last, stats, traj, final_thin in results:
         sections.append(draft_s)
+        completion["n_sections"] += 1
+        if final_thin:
+            completion["n_hollow_final"] += 1
+            completion["hollow_sections"].append(sid)
         if traj:
             s.inner_loop_trajectory.append({"section": sid, "iters": traj})
         if stats and (stats.get("n_markers_stripped") or stats.get("n_violations")):
@@ -581,6 +646,7 @@ def _run_section_loop(s: PipelineState, query, language):
             )
             for f in last.get("fail", []):
                 failing.append(f"[{sid}] {f.get('criterion')}: {f.get('rationale', '')}")
+    s.completion_stats = completion
     return sections, score_summary, failing
 
 
