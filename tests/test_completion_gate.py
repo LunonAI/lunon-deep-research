@@ -164,3 +164,32 @@ def test_thin_and_ungrounded_section_gets_expand_directive(monkeypatch):
     ), f"grounding-fail rewrite never combined grounding + expand directive: {rewrite_fbs}"
     # And the section is still flagged hollow in completion telemetry.
     assert s.completion_stats["n_hollow_final"] == 1
+    # L1b smoking gun: the per-section record carries the routed evidence count
+    # (0 here → the _Bank returns []), the chapter position, and the thinness
+    # ratio — so the dev6 can attribute hollowness to research starvation
+    # (empty slice) vs writer-budget (full slice).
+    secs = s.completion_stats["sections"]
+    assert len(secs) == 1
+    rec = secs[0]
+    assert rec["section"] == "S1" and rec["idx"] == 0
+    assert rec["evidence_blocks"] == 0  # _Bank.for_section → []
+    assert rec["final_thin"] is True
+    assert rec["thin_ratio"] is not None and rec["thin_ratio"] < o._COMPLETION_MIN_RATIO
+
+
+def test_ends_mid_sentence_detector():
+    # complete prose tail → not flagged
+    assert o._ends_mid_sentence("A full sentence ends here.") is False
+    assert o._ends_mid_sentence("一个完整的句子。") is False
+    # truncated mid-sentence → flagged
+    assert o._ends_mid_sentence("This sentence just stops with no") is True
+    # unclosed code fence → flagged
+    assert o._ends_mid_sentence("intro\n\n```python\nx = 1") is True
+    # structural tails (table row / heading / list) are NOT prose → not flagged
+    assert o._ends_mid_sentence("| col a | col b |") is False
+    assert o._ends_mid_sentence("## A heading") is False
+    assert o._ends_mid_sentence("") is False
+    # ordered-list + '+' bullet tails are structural too (Greptile PR #70)
+    assert o._ends_mid_sentence("3. last numbered point") is False
+    assert o._ends_mid_sentence("3) last numbered point") is False
+    assert o._ends_mid_sentence("+ a plus bullet") is False
