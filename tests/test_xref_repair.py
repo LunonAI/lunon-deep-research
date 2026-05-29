@@ -160,6 +160,20 @@ def test_repair_no_leading_space_when_ref_is_first_token():
     assert "a later section" not in out
 
 
+def test_repair_no_leading_space_with_consecutive_leading_refs():
+    r"""Greptile PR #62 round-2: the start rule must absorb a RUN of leading
+    markers, not just one. Two consecutive dangling bare refs separated by only
+    whitespace ("§97 §98 text" -> "\x00 \x00 text") previously left "\x00 text"
+    after the single-marker start rule, which the interior collapse then turned
+    into a spurious leading space."""
+    text = "## 1 Intro\n\n## 2 Body\n\n§97 §98 explains this fully and with detail here."
+    out, stats = repair(text)
+    assert stats["dangling_refs_excised"] >= 2, f"got {stats}; {out!r}"
+    assert "§97" not in out and "§98" not in out
+    assert "\n\nexplains this" in out, f"leading space left after run of excised refs: {out!r}"
+    assert "\n\n explains" not in out, f"leading space left after run of excised refs: {out!r}"
+
+
 def test_repair_strips_embedded_nul_bytes_in_input():
     r"""Greptile PR #62 issue 3: the `_SENT = "\x00"` excision marker assumes
     NUL never occurs in real article text. If an upstream pass emits embedded
