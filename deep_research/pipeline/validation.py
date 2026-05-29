@@ -363,6 +363,40 @@ def run(inp: ValidationInput) -> ValidationOutput:
     tr_audit = _validate_tier_ranking(inp.article, inp.plan)
     if tr_audit is not None:
         counts["tier_ranking"] = tr_audit
+        # G3 (2026-05-28): promote an UNCOMMITTED ranking to a HARD failure so
+        # the regen loop fixes it (the predict core payload). (a) requires a
+        # committed 2-decimal matrix ONLY when the architect actually computed
+        # scores (entities_scored populated) — so qualitative compare tiers and
+        # the fail-soft no-scores path don't loop. (b) fails a rendered-but-
+        # hedged ranking regardless.
+        if tr_audit["entities_scored_present"] and (
+            not tr_audit["scoring_table_present"] or tr_audit["two_decimal_cells"] == 0
+        ):
+            failures.append(
+                {
+                    "check": "tier_ranking_uncommitted",
+                    "severity": "high",
+                    "detail": (
+                        "tier_ranking has computed scores (entities_scored populated) but the "
+                        f"chapter renders no committed numeric matrix (table_present="
+                        f"{tr_audit['scoring_table_present']}, two_decimal_cells="
+                        f"{tr_audit['two_decimal_cells']}). Render the per-entity S_final scores "
+                        "as a 2-decimal markdown table — do not defer to other sections."
+                    ),
+                }
+            )
+        if tr_audit["deferral_hits"] > _TIER_RANKING_DEFERRAL_MAX:
+            failures.append(
+                {
+                    "check": "tier_ranking_deferred",
+                    "severity": "high",
+                    "detail": (
+                        f"tier_ranking chapter contains {tr_audit['deferral_hits']} deferral/"
+                        "placeholder tokens (待…核实 / 未核实 / 证据缺口 / 占位); commit the "
+                        "ranking with concrete scores instead of deferring it."
+                    ),
+                }
+            )
 
     # 9. STAKEHOLDER CHAPTER OVERLAP (P3-W6; Greptile PR #42 round-2 wiring).
     # When the architect populated `plan["stakeholder_chapter"]` because the
@@ -833,6 +867,17 @@ _TIER_RANKING_SENSITIVITY_HEADING_RE = re.compile(
 # so `[^S7-2.45]` and `§7.45` don't false-positive the 2-decimal regex.
 _TIER_RANKING_NOISE_STRIP_RE = re.compile(r"\[\^[^\]]*\]|§\d+(?:\.\d+)*")
 
+# G3 (2026-05-28): deferral / placeholder tokens that signal an UNCOMMITTED
+# ranking. q14 §7.6 commits 30 teams with numeric S_final and ZERO deferral
+# vocab; dev4 id=14 rendered its multi-team tables with every score cell tagged
+# 待§2核实 / 未核实 / 占位 / 证据缺口 — a table-shaped chapter with no actual
+# predictions. These tokens are ~0 in the fresh #1 corpus and in Lunon's
+# non-predict dev4 articles (id8=1, id37=1, id91=0), so a low in-chapter ceiling
+# is regression-safe. `待…(核实|完成|验证|补充)` covers `待核实`, `待§2核实`, and
+# `待§2–§7完成`; the rest are literal placeholder markers.
+_TIER_RANKING_DEFERRAL_RE = re.compile(r"待[^，。；、\n]{0,10}(?:核实|完成|验证|补充)|未核实|证据缺口|占位")
+_TIER_RANKING_DEFERRAL_MAX = 2
+
 
 def _validate_tier_ranking(article: str, plan: dict) -> dict | None:
     """P3-W7.b (2026-05-27): structural + precision + sensitivity audit
@@ -852,11 +897,16 @@ def _validate_tier_ranking(article: str, plan: dict) -> dict | None:
         "rubric_mismatch_keys": [str],  # tier_ranking.weights keys NOT in
                                         # framing_chapter.published_rubric_items
                                         # (cross-PR consistency check)
+        "entities_scored_present": bool,  # G3: architect computed numeric scores
+        "deferral_hits": int,           # G3: deferral/placeholder tokens in chapter
       }
 
-    Advisory severity — surfaced in `counts["tier_ranking"]` for drift
-    telemetry; does NOT block the validation gate. The corrective signal
-    is the (deferred) compliance scorer.
+    The structural/precision fields are advisory drift telemetry. G3
+    (2026-05-28): the CALLER promotes two conditions to HARD failures —
+    (a) entities_scored_present but no committed numeric matrix, and
+    (b) deferral_hits over `_TIER_RANKING_DEFERRAL_MAX` — so the regen loop
+    fixes an uncommitted/deferred ranking (the predict archetype's core
+    analytic payload).
     """
     tr = plan.get("tier_ranking")
     if not isinstance(tr, dict):
@@ -944,6 +994,19 @@ def _validate_tier_ranking(article: str, plan: dict) -> dict | None:
 
     sensitivity_subsection_present = bool(_TIER_RANKING_SENSITIVITY_HEADING_RE.search(chapter_body))
 
+    # G3 (2026-05-28): did the architect actually compute numeric scores? When
+    # `entities_scored` is populated, the chapter MUST render them as a committed
+    # 2-decimal matrix; when it's absent (qualitative compare tiers, or the
+    # fail-soft None path when tier_ranking_score.score_entities times out) we do
+    # NOT require a numeric matrix — gating on this keeps the commitment failure
+    # off compare and off the no-scores path so it can't loop the regen.
+    entities_scored = tr.get("entities_scored")
+    entities_scored_present = isinstance(entities_scored, (list, dict)) and len(entities_scored) > 0
+    # Deferral / placeholder density INSIDE the ranking chapter (a rendered but
+    # hedged ranking). Chapter-scoped so legitimate uncertainty prose elsewhere
+    # (e.g. the limitations chapter) is not penalised.
+    deferral_hits = len(_TIER_RANKING_DEFERRAL_RE.findall(chapter_body))
+
     # Cross-PR consistency: tier_ranking.weights keys SHOULD mirror the
     # framing_chapter.published_rubric_items ids. When both are present
     # in the plan, any tier_ranking weight key NOT in the rubric is
@@ -969,6 +1032,8 @@ def _validate_tier_ranking(article: str, plan: dict) -> dict | None:
         "decimal_precision_ok": decimal_precision_ok,
         "sensitivity_subsection_present": sensitivity_subsection_present,
         "rubric_mismatch_keys": rubric_mismatch_keys,
+        "entities_scored_present": entities_scored_present,
+        "deferral_hits": deferral_hits,
     }
 
 

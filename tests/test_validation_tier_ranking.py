@@ -477,3 +477,57 @@ def test_sensitivity_heading_does_not_match_undocumented_stress_test_form():
     assert audit["sensitivity_subsection_present"] is False, (
         f"undocumented `Stress Test` form leaked back into sensitivity match: {audit}"
     )
+
+
+# ---------- G3 (2026-05-28): commitment-gate signals ----------
+
+
+def test_audit_reports_entities_scored_present_when_populated():
+    """G3: entities_scored populated → flag True (architect computed numeric
+    scores, so the chapter MUST render a committed matrix)."""
+    plan = {"tier_ranking": _full_tr(entities_scored=[{"name": "A", "s_final": 8.2}])}
+    audit = validation._validate_tier_ranking(_well_formed_article(), plan)
+    assert audit["entities_scored_present"] is True
+
+
+def test_audit_reports_entities_scored_absent_for_qualitative_or_no_scores():
+    """G3: no entities_scored (qualitative compare tiers, or the fail-soft
+    no-scores path) → flag False, so the numeric-matrix requirement won't fire."""
+    plan = {"tier_ranking": _full_tr()}
+    audit = validation._validate_tier_ranking(_well_formed_article(), plan)
+    assert audit["entities_scored_present"] is False
+
+
+def test_audit_counts_deferral_tokens_inside_chapter():
+    """G3: deferral/placeholder tokens in the ranking chapter are counted —
+    待§N核实 / 未核实 / 占位 / 证据缺口."""
+    article = (
+        "# Title\n\n## 1 Intro\n\nBody.\n\n"
+        "## 7 Tier Ranking\n\n"
+        "| Team | S_final |\n|---|---|\n"
+        "| A | 待§2核实 |\n| B | 未核实 |\n\n"
+        "占位说明 and 证据缺口 remain to be filled.\n"
+    )
+    audit = validation._validate_tier_ranking(article, {"tier_ranking": _full_tr()})
+    assert audit["deferral_hits"] >= 4, audit
+
+
+def test_audit_deferral_scoped_to_chapter_region():
+    """G3: deferral tokens OUTSIDE the ranking chapter (e.g. a §1 roadmap)
+    are NOT counted by deferral_hits — that case is caught instead by the
+    'entities_scored_present but no committed matrix' failure."""
+    article = (
+        "# Title\n\n## 1 Intro\n\n占位 待核实 未核实 证据缺口 in the roadmap.\n\n"
+        "## 7 Tier Ranking\n\n"
+        "| Entity | S_final |\n|---|---|\n| A | 8.20 |\n"
+    )
+    audit = validation._validate_tier_ranking(article, {"tier_ranking": _full_tr()})
+    assert audit["deferral_hits"] == 0, audit
+
+
+def test_audit_clean_committed_ranking_has_zero_deferral():
+    """G3: a fully-committed numeric ranking has no deferral tokens."""
+    audit = validation._validate_tier_ranking(_well_formed_article(), {"tier_ranking": _full_tr()})
+    assert audit["deferral_hits"] == 0
+    assert audit["scoring_table_present"] is True
+    assert audit["two_decimal_cells"] >= 1
