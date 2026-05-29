@@ -444,6 +444,30 @@ def run(inp: ValidationInput) -> ValidationOutput:
     if lim_audit is not None:
         counts["limitations_chapter"] = lim_audit
 
+    # 11. MICRO-TEMPLATE LABEL CONSISTENCY (G5). When entity_matrix is in
+    # prose_subheaders mode, each axis must open its per-entity paragraph with
+    # ONE byte-identical bold label across all entities (q91 form). Severe
+    # fragmentation (canonical label covers <50% of entities) → medium failure
+    # so the regen loop re-pins the labels. Returns None for table_columns_only
+    # mode or <3 entities, so the check is silent there.
+    mt_audit = _validate_micro_template(inp.article, inp.plan.get("entity_matrix"))
+    if mt_audit is not None:
+        counts["micro_template"] = mt_audit
+        if mt_audit["min_axis_coverage"] < _MICRO_TEMPLATE_MIN_COVERAGE:
+            failures.append(
+                {
+                    "check": "micro_template_fragmented",
+                    "severity": "medium",
+                    "detail": (
+                        f"per-entity axis labels fragmented (min canonical coverage "
+                        f"{mt_audit['min_axis_coverage']:.2f} over {mt_audit['n_entities']} "
+                        f"entities; target ≥{_MICRO_TEMPLATE_MIN_COVERAGE:.2f}). Open each "
+                        f"entity's per-axis paragraph with the EXACT bold axis label, "
+                        f"byte-identical across entities: {json.dumps(mt_audit['axis_coverage'], ensure_ascii=False)}"
+                    ),
+                }
+            )
+
     ok = not failures
 
     # Build structured feedback for the refiner (NOT free-text)
@@ -461,14 +485,16 @@ def run(inp: ValidationInput) -> ValidationOutput:
 
 
 def _validate_prose_form(article: str) -> dict:
-    """P3b-opt2 (2026-05-28): advisory prose-form readability telemetry,
-    replacing the retired rigid micro-template compliance check. The prose
-    form merged in #53 uses descriptive entity-specific bold lead-ins, NOT
-    fixed `**axis:**` labels — so the old axis-label metric now reads ~0 and
-    is misleading. This measures what the reference-verified prose form
-    actually targets:
+    """P3b-opt2 (2026-05-28): advisory prose-form readability telemetry.
+    This measures only the reference-verified prose-form readability targets:
       - paragraph density (EN corpus median ~81 words; "choppy" = < 80 words)
       - heading flatness (the reference corpus h4_total = 0)
+
+    Axis-label consistency is NOT measured here. G5 (this PR) restored the
+    byte-identical pinned bold axis labels (`**axis:**` per entity), and that
+    coverage is audited separately by `_validate_micro_template`; this function
+    deliberately stays label-agnostic so it stands on every archetype, prose or
+    micro-template.
 
     Runs on every article; advisory only (no hard-fail). NOTE: validation
     runs BEFORE the numbering_fix flatten, so h3/h4 reflect the writer's RAW
@@ -893,6 +919,14 @@ _TIER_RANKING_NOISE_STRIP_RE = re.compile(r"\[\^[^\]]*\]|§\d+(?:\.\d+)*")
 _TIER_RANKING_DEFERRAL_RE = re.compile(r"待[^，。；、\n]{0,10}(?:核实|完成|验证|补充)|未核实|证据缺口|占位(?![置费])")
 _TIER_RANKING_DEFERRAL_MAX = 2
 
+# G5 (2026-05-28): minimum per-axis canonical-label coverage for the
+# prose_subheaders micro-template. Below this, a canonical axis label appears
+# for fewer than half the entities → the writer fragmented into per-entity
+# variant phrasings (dev4 id=91: top form only 21-34% per axis) instead of the
+# pinned byte-identical label. 0.5 is deliberately lenient (severe fragmentation
+# only) to avoid firing when an article profiles some entities in groups.
+_MICRO_TEMPLATE_MIN_COVERAGE = 0.5
+
 
 def _validate_tier_ranking(article: str, plan: dict) -> dict | None:
     """P3-W7.b (2026-05-27): structural + precision + sensitivity audit
@@ -1049,6 +1083,54 @@ def _validate_tier_ranking(article: str, plan: dict) -> dict | None:
         "rubric_mismatch_keys": rubric_mismatch_keys,
         "entities_scored_present": entities_scored_present,
         "deferral_hits": deferral_hits,
+    }
+
+
+def _validate_micro_template(article: str, entity_matrix) -> dict | None:
+    """G5 (2026-05-28): per-axis canonical-label coverage for the
+    prose_subheaders micro-template.
+
+    Returns None unless `entity_matrix` is in prose_subheaders mode with ≥3
+    entities and ≥1 named axis. Otherwise, for each axis_name, count its
+    canonical bold lead-in (`**axis.**` / `**axis:**` / `**axis**`, optional
+    terminal `. : 。 ：`) across the article and divide by the entity count
+    (capped at 1.0). The match is intentionally case-insensitive: casing-only
+    drift (e.g. `**Signature Techniques**`) is treated as a canonical hit to
+    avoid false-positive fragmentation alerts, even though the writer is asked
+    for byte-identical labels. Coverage ~1.0 means the writer used ONE
+    canonical label per axis for every entity (the q91 form); low coverage
+    means the labels fragmented into per-entity variants (the dev4 id=91
+    failure — top form only 21-34% per axis).
+
+    Returns {axis_coverage: {axis: float}, min_axis_coverage: float,
+    n_entities: int, n_axes: int}. Advisory; the caller promotes a severe
+    shortfall (< _MICRO_TEMPLATE_MIN_COVERAGE) to a medium failure.
+    """
+    if not isinstance(entity_matrix, dict):
+        return None
+    if entity_matrix.get("instantiation_mode") != "prose_subheaders":
+        return None
+    entities = entity_matrix.get("entities")
+    dims = entity_matrix.get("dimensions") or []
+    axis_names = [str(d.get("axis_name")).strip() for d in dims if isinstance(d, dict) and d.get("axis_name")]
+    n_entities = len(entities) if isinstance(entities, list) else 0
+    if n_entities < 3 or not axis_names:
+        return None
+    axis_coverage: dict[str, float] = {}
+    for name in axis_names:
+        # Canonical bold lead-in: `**name**` with an optional terminal
+        # period/colon (EN or ZH) inside or just before the closing `**`.
+        # Case-insensitive: we treat wrong capitalisation as canonical to
+        # avoid false-positive fragmentation alerts on casing-only drift.
+        pat = re.compile(r"\*\*\s*" + re.escape(name) + r"\s*[.:。：]?\s*\*\*", re.IGNORECASE)
+        uses = len(pat.findall(article))
+        axis_coverage[name] = round(min(uses / n_entities, 1.0), 3)
+    min_cov = min(axis_coverage.values()) if axis_coverage else 0.0
+    return {
+        "axis_coverage": axis_coverage,
+        "min_axis_coverage": round(min_cov, 3),
+        "n_entities": n_entities,
+        "n_axes": len(axis_names),
     }
 
 
