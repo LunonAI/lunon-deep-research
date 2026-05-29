@@ -51,9 +51,7 @@ def test_limitations_constants_pinned():
     # G11-A (2026-05-28): list-all EXCLUDED — q91/q89 carry no Limitations
     # chapter; the prior 6/11 corpus justification contained no list-all
     # article. Kept for predict/compare/explain-mechanism.
-    assert architect._LIMITATIONS_REQUIRED_ARCHETYPES == frozenset(
-        {"predict", "compare", "explain-mechanism"}
-    )
+    assert architect._LIMITATIONS_REQUIRED_ARCHETYPES == frozenset({"predict", "compare", "explain-mechanism"})
     assert "list-all" not in architect._LIMITATIONS_REQUIRED_ARCHETYPES
     assert architect._LIMITATIONS_STRESS_TEST_ARCHETYPES == frozenset({"predict"})
 
@@ -147,6 +145,21 @@ def test_normalize_recommend_no_limitations_no_shortfall():
     plan = _bare_plan_with_limitations()
     plan.pop("limitations_chapter")
     architect._normalize(plan, archetype="recommend")
+    audit = plan["_outline_audit"]
+    lc_shortfalls = [s for s in audit["shortfalls"] if "limitations_chapter=missing" in s]
+    assert lc_shortfalls == []
+
+
+def test_normalize_list_all_no_limitations_no_shortfall():
+    """G11-A (2026-05-28): list-all was REMOVED from
+    `_LIMITATIONS_REQUIRED_ARCHETYPES`. A list-all plan with NO
+    limitations_chapter must therefore fire no missing-chapter shortfall —
+    exercising the behaviour, not just the constant-value pin in
+    `test_limitations_constants_pinned`. Mirrors the trend / recommend
+    no-shortfall tests above."""
+    plan = _bare_plan_with_limitations()
+    plan.pop("limitations_chapter")
+    architect._normalize(plan, archetype="list-all")
     audit = plan["_outline_audit"]
     lc_shortfalls = [s for s in audit["shortfalls"] if "limitations_chapter=missing" in s]
     assert lc_shortfalls == []

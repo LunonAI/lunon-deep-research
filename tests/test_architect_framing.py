@@ -107,6 +107,21 @@ def test_normalize_trend_archetype_no_framing_no_shortfall():
     assert fc_shortfalls == [], f"trend should not require framing: {audit['shortfalls']}"
 
 
+def test_normalize_list_all_archetype_no_framing_no_shortfall():
+    """G11-A (2026-05-28): list-all was REMOVED from
+    `_FRAMING_CHAPTER_REQUIRED_ARCHETYPES`. A list-all plan with NO
+    framing_chapter must therefore fire no missing-chapter shortfall —
+    exercising the behaviour, not just the `"list-all" not in ...`
+    constant-value pin in `test_framing_chapter_required_archetypes_pinned`.
+    Mirrors the trend no-shortfall test above."""
+    plan = _bare_plan_with_framing()
+    plan.pop("framing_chapter")
+    architect._normalize(plan, archetype="list-all")
+    audit = plan["_outline_audit"]
+    fc_shortfalls = [s for s in audit["shortfalls"] if "framing_chapter=missing" in s]
+    assert fc_shortfalls == [], f"list-all should not require framing: {audit['shortfalls']}"
+
+
 def test_normalize_audit_records_sub_section_types():
     """Audit must surface the list of sub-section types so dev-run
     analysers can spot when one was dropped."""
