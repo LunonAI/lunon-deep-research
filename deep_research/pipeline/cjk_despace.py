@@ -78,36 +78,47 @@ def despace(text: str, language: str | None = None) -> tuple[str, dict]:
     if not isinstance(text, str) or not text:
         return text, stats
 
-    # The boilerplate strip applies to EN and ZH alike.
-    text, n_bp = _strip_boilerplate(text)
-    stats["boilerplate_stripped"] = n_bp
+    # Greptile PR #66 round-5: strip any pre-existing NUL up front so the
+    # `\x00…\x00` stash sentinels below stay unambiguous. Otherwise a
+    # NUL-contaminated input (malformed API chunk, binary bleed) could be
+    # mis-read by the restore pass as a stash marker, IndexError into
+    # `protected`, and crash the run — this phase promises never to raise.
+    text = text.replace("\x00", "")
 
-    # De-spacing only matters for CJK-bearing articles. A confidently non-CJK
-    # `language` label (e.g. "en") is an explicit override that skips the scan;
-    # otherwise the Hanzi-count guard — robust to an absent/mislabeled label —
-    # is authoritative. (Greptile PR #66 round-2: makes `language` a real gate
-    # instead of an ignored parameter.) Greptile PR #66 round-4: split on BOTH
-    # `-` and `_` so underscore locales ("zh_CN") yield primary subtag "zh" and
-    # are not mistaken for a non-CJK label that would skip de-spacing entirely.
-    if language is not None and re.split(r"[-_]", language)[0].strip().lower() not in _CJK_LANGS:
-        return text, stats
-    if len(re.findall(rf"[{_CJK}]", text)) < 50:
-        return text, stats
-
-    # 1. Mask protected spans.
+    # Mask protected spans (inline/reference links, footnote refs, inline code)
+    # FIRST so neither the boilerplate strip nor the CJK de-spacer can reach
+    # inside a span (Greptile PR #66 round-5: a "[Per the rubric …](url)" anchor
+    # must not be mangled by the boilerplate strip running on raw text).
     protected: list[str] = []
 
     def _stash(m: re.Match) -> str:
         protected.append(m.group(0))
         return f"\x00{len(protected) - 1}\x00"
 
+    def _restore(s: str) -> str:
+        return re.sub(r"\x00(\d+)\x00", lambda m: protected[int(m.group(1))], s)
+
     masked = _PROTECT_RE.sub(_stash, text)
 
-    # 2. Collapse CJK↔CJK and CJK↔CJK-punct spaces.
+    # Strip the `Per the rubric` scaffolding leak (EN and ZH alike) on masked
+    # prose only — spans are already hidden, so a link/code interior is safe.
+    masked, n_bp = _strip_boilerplate(masked)
+    stats["boilerplate_stripped"] = n_bp
+
+    # De-spacing only matters for CJK-bearing articles. A confidently non-CJK
+    # `language` label (e.g. "en") is an explicit override that skips the scan;
+    # otherwise the Hanzi-count guard — robust to an absent/mislabeled label —
+    # is authoritative. (Greptile PR #66 round-2: makes `language` a real gate
+    # instead of an ignored parameter.) Round-4: split on BOTH `-` and `_` so
+    # underscore locales ("zh_CN") yield primary subtag "zh".
+    if language is not None and re.split(r"[-_]", language)[0].strip().lower() not in _CJK_LANGS:
+        return _restore(masked), stats
+    if len(re.findall(rf"[{_CJK}]", masked)) < 50:
+        return _restore(masked), stats
+
+    # Collapse CJK↔CJK and CJK↔CJK-punct spaces on the masked prose.
     masked, n1 = re.subn(rf"(?<=[{_CJK}])[ \t]+(?=[{_CJK}{_CJK_PUNCT}])", "", masked)
     masked, n2 = re.subn(rf"(?<=[{_CJK_PUNCT}])[ \t]+(?=[{_CJK}])", "", masked)
     stats["cjk_space_collapsed"] = n1 + n2
 
-    # 3. Restore protected spans.
-    text = re.sub(r"\x00(\d+)\x00", lambda m: protected[int(m.group(1))], masked)
-    return text, stats
+    return _restore(masked), stats
