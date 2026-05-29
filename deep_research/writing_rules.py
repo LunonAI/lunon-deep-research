@@ -340,9 +340,19 @@ _MERMAID_DIRECTIVE = (
     "Anything else gets stripped by the post-pass.\n"
     "  - Decorative diagrams that restate the immediately-preceding "
     "paragraph (the diagram must ADD a structural view the prose doesn't).\n"
-    "Tasks where mermaid is most likely to help: predict (timeline of "
-    "milestones), explain-mechanism (causal dependency graph), "
-    "list-all (process flow for entity-introduction timeline)."
+    "Tasks where mermaid is most likely to help, in priority order (G8, "
+    "2026-05-28, calibrated to the fresh corpus):\n"
+    "  - PREDICT (primary): BOTH a dated-milestone timeline AND a "
+    "tier-topology graph are expected — q14 uses 7 diagrams (tier topology "
+    "§7.6, breakthrough matrix, milestone timeline). This is the strongest "
+    "lever; a predict article with 0 diagrams is under-built.\n"
+    "  - EXPLAIN-MECHANISM: a causal dependency graph when the mechanism has "
+    "≥3 linked stages (soft — emit only when the structure genuinely fits; a "
+    "forced/empty diagram COSTS Readability points).\n"
+    "  - QUALITATIVE TREND: a synthesis flowchart converging sub-trends "
+    "(q38 uses 16).\n"
+    "  - NOT list-all (q91 uses ~1 — entity rosters don't need diagrams) and "
+    "NOT quantitative / market-sizing trend (q44 uses 0 — use tables instead)."
 )
 
 
