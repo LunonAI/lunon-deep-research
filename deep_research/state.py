@@ -149,7 +149,7 @@ class PipelineState:
     # track per-archetype mermaid emission rates and repair pressure.
     mermaid_validate_stats: dict = field(default_factory=dict)
     # P3-W3.b (2026-05-27): per-task xref_repair stats dict
-    # {templates_repaired, dangling_refs_rewritten, sentences_deleted}.
+    # {templates_repaired, dangling_refs_excised, sentences_deleted}.
     # Populated from pipeline.xref_repair.repair() in the post-pass chain
     # (orchestrate.py between zh_writer_pass and mermaid_validate). The
     # in-prompt `_MID_PARAGRAPH_XREF_RULE` directive is the primary force
