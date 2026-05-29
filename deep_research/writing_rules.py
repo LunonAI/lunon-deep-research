@@ -412,7 +412,7 @@ _TIER_RANKING_RULE = (
 # chapter` in validation.py.
 _LIMITATIONS_RULE = (
     "LIMITATIONS CHAPTER STRUCTURE (P3-W5; required for predict / "
-    "compare / explain-mechanism / list-all archetypes when "
+    "compare / explain-mechanism archetypes when "
     "`limitations_chapter` is in the plan):\n"
     "The limitations chapter MUST contain 5 sub-sections, in this order:\n"
     "  1. Data granularity — name a SPECIFIC observable the sources could "
@@ -1066,13 +1066,14 @@ def writer_system(
     Greptile PR #45 round-6 issue #2 (2026-05-27):
     `has_limitations_chapter` gates `_LIMITATIONS_RULE` inclusion,
     mirroring the stakeholder precedent. The architect only emits
-    `limitations_chapter` for predict / compare / explain-mechanism /
-    list-all archetypes; trend / recommend tasks never carry the
-    chapter and the ~1300-char rule is pure prompt noise for them.
-    Callers in writer.py pass
+    `limitations_chapter` for predict / compare / explain-mechanism
+    archetypes (G11-A 2026-05-28: list-all REMOVED — the live #1
+    corpus's list-all/roster articles carry no Limitations chapter);
+    trend / recommend tasks never carry the chapter and the ~1300-char
+    rule is pure prompt noise for them. Callers in writer.py pass
     `has_limitations_chapter=bool(plan.get("limitations_chapter"))`.
     Defaults False — the rule's textual self-guard ("required for
-    predict / compare / explain-mechanism / list-all archetypes when
+    predict / compare / explain-mechanism archetypes when
     `limitations_chapter` is in the plan") still kicks in if a future
     caller forgets to set the flag, so silent breakage is impossible.
 
@@ -1126,9 +1127,9 @@ def writer_system(
     # Greptile PR #45 round-6 issue #2: gate `_LIMITATIONS_RULE` on
     # `has_limitations_chapter`. The architect only emits
     # `plan["limitations_chapter"]` for predict / compare /
-    # explain-mechanism / list-all archetypes; for trend / recommend
-    # the ~1300-char rule is pure prompt noise. Mirrors the
-    # `has_stakeholder_chapter` precedent below.
+    # explain-mechanism archetypes (G11-A: list-all removed); for
+    # trend / recommend the ~1300-char rule is pure prompt noise.
+    # Mirrors the `has_stakeholder_chapter` precedent below.
     if has_limitations_chapter:
         middle_rules.append(_LIMITATIONS_RULE)
     # Greptile PR #47 round-5 preempt: gate `_TIER_RANKING_RULE` on
