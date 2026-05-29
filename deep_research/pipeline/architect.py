@@ -229,6 +229,14 @@ HARD RULES:
 - EVERY extracted intent becomes >=1 acceptance_criterion (source="intent").
 - Prompt-enumerated terms/entities MUST appear verbatim as section or
   subsection titles (structural anchoring → instruction-following).
+- L4 DELIVERABLE DECOMPOSITION: parse the prompt into its explicitly enumerated
+  deliverables — every distinct thing it asks you to research / list / compare /
+  evaluate / assess / model / forecast / recommend. EACH enumerated deliverable
+  MUST map to its OWN dedicated top-level chapter (or clearly-named subsection);
+  never fold a named deliverable into another and never omit one (e.g. if the
+  prompt asks for a "模型准确度评估"/"accuracy evaluation", that is its own chapter,
+  not scattered lines). List the parsed deliverables verbatim in
+  `_outline_audit.deliverables` so each can be checked against a heading.
 - 48-64 queries AND 24-32 acceptance_criteria. Every query maps to >=1 TOC
   section. Distribute query `type` to cover all needed analytical functions.
   (Query count doubled from 24-32 post-#4: the depth_seeds H4-leaf payload
@@ -263,6 +271,14 @@ HARD RULES:
   archetype doesn't have a per-entity expansion in body chapters).
   Set `min_axes_per_entity` to 3 unless you have a reason to require
   every entity to instantiate every axis (then set equal to len(dimensions)).
+  L3 CRITICAL — EXPAND EVERY ENTITY: each entity in `entities` MUST receive its
+  OWN body subsection with the full per-entity treatment. A row in the §1 matrix
+  table is NOT a substitute for a body expansion. Do NOT expand only an exemplar
+  entity/subset and leave the rest as table rows — that is the single biggest
+  Comprehensiveness + Instruction-Following gap to the #1 corpus (it expands ALL
+  enumerated items at uniform depth). Build report_toc so there is a body
+  subsection per entity (or per entity-group with each entity as a depth_seed
+  cluster), enough that every entity is individually developed.
 - framing_chapter REQUIRED for all archetypes EXCEPT single-axis trend
   tasks. The framing chapter §1 publishes (a) scope/boundary, (b) an
   evaluation rubric (4-6 items with weights, applicable for compare/

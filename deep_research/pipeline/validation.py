@@ -468,6 +468,29 @@ def run(inp: ValidationInput) -> ValidationOutput:
                 }
             )
 
+    # 11b. ENTITY COVERAGE (L3). Every declared entity must get its own body
+    # expansion, not just a §1 matrix row. A SEVERE collapse → medium failure so
+    # the regen expands the omitted entities (the Qianfan head-to-head's biggest
+    # Comprehensiveness gap: id8 expanded 1 of 12 systems). Silent for
+    # table_columns_only / <3 entities.
+    ec_audit = _validate_entity_coverage(inp.article, inp.plan.get("entity_matrix"))
+    if ec_audit is not None:
+        counts["entity_coverage"] = ec_audit
+        if ec_audit["coverage"] < _ENTITY_COVERAGE_MIN_RATIO:
+            failures.append(
+                {
+                    "check": "entity_coverage_collapsed",
+                    "severity": "medium",
+                    "detail": (
+                        f"only {ec_audit['n_expanded']}/{ec_audit['n_entities']} declared "
+                        f"entities got their own body expansion (coverage {ec_audit['coverage']:.2f}, "
+                        f"target ≥{_ENTITY_COVERAGE_MIN_RATIO:.2f}). A §1 matrix row is NOT a "
+                        f"substitute — give EACH entity its own subsection with the full "
+                        f"per-entity treatment. Missing: {json.dumps(ec_audit['missing'], ensure_ascii=False)}"
+                    ),
+                }
+            )
+
     ok = not failures
 
     # Build structured feedback for the refiner (NOT free-text)
@@ -936,6 +959,14 @@ _TIER_RANKING_DEFERRAL_MAX = 2
 # only) to avoid firing when an article profiles some entities in groups.
 _MICRO_TEMPLATE_MIN_COVERAGE = 0.5
 
+# L3 (2026-05-29): minimum fraction of entity_matrix entities that must get
+# their OWN body expansion (a heading), not just a §1 matrix row. The Qianfan
+# head-to-head showed Lunon collapses coverage — id8 expanded 1 of 12 systems
+# (0.08), id14 ~4 of 15 teams (0.27) — a large Comprehensiveness loss. 0.5 fires
+# only on a SEVERE collapse, lenient enough that imperfect heading-name matching
+# on a near-complete article doesn't false-fire.
+_ENTITY_COVERAGE_MIN_RATIO = 0.5
+
 
 def _validate_tier_ranking(article: str, plan: dict) -> dict | None:
     """P3-W7.b (2026-05-27): structural + precision + sensitivity audit
@@ -1150,6 +1181,42 @@ def _validate_micro_template(article: str, entity_matrix) -> dict | None:
         "n_entities": n_entities,
         "n_axes": len(axis_names),
     }
+
+
+def _validate_entity_coverage(article: str, entity_matrix) -> dict | None:
+    """L3 (2026-05-29): every entity_matrix entity must get its OWN body
+    expansion (a heading), not just a §1 matrix row.
+
+    Returns None unless entity_matrix is prose_subheaders with ≥3 entities.
+    Otherwise an entity is 'expanded' if its name appears in a markdown heading
+    anywhere in the body (a per-entity section). Returns {n_entities, n_expanded,
+    coverage, missing}. The caller promotes a SEVERE collapse
+    (coverage < _ENTITY_COVERAGE_MIN_RATIO) to a medium failure — the Qianfan
+    head-to-head's biggest Comprehensiveness gap (id8 expanded 1/12 systems).
+    """
+    if not isinstance(entity_matrix, dict):
+        return None
+    if entity_matrix.get("instantiation_mode") != "prose_subheaders":
+        return None
+    entities = entity_matrix.get("entities")
+    if not isinstance(entities, list) or len(entities) < 3:
+        return None
+    # All heading TEXT (any level), so a per-entity section heading counts but a
+    # matrix table row (a `| ... |` line, not a heading) does not.
+    heading_text = "\n".join(re.findall(r"(?m)^#{1,4}\s+(.+)$", article))
+    n_expanded = 0
+    missing: list[str] = []
+    for ent in entities:
+        e = str(ent).strip()
+        if not e:
+            continue
+        if e in heading_text:
+            n_expanded += 1
+        else:
+            missing.append(e)
+    total = n_expanded + len(missing)
+    coverage = round(n_expanded / total, 3) if total else 1.0
+    return {"n_entities": total, "n_expanded": n_expanded, "coverage": coverage, "missing": missing[:20]}
 
 
 def _validate_limitations_chapter(article: str, limitations_chapter) -> dict | None:
