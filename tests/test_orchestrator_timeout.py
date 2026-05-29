@@ -159,11 +159,24 @@ def test_orchestrator_run_returns_zero_timeouts_when_all_specialists_complete(mo
 
 
 def test_specialist_timeout_constant_is_set_and_sane():
-    """Pin the _SPECIALIST_TIMEOUT_S constant — must be set, must be in
+    """Pin the _SPECIALIST_TIMEOUT_S default — must be set, must be in
     a sane range (>= 60s to cover legitimate slow specialists, <= 600s
-    to avoid effectively-unbounded behavior the pre-fix code had)."""
+    to avoid effectively-unbounded behavior the pre-fix code had). This
+    pins the DEFAULT (no DR_SPECIALIST_TIMEOUT_S in the CI env); a run may
+    deliberately override higher for high-concurrency."""
     assert hasattr(orchestrator, "_SPECIALIST_TIMEOUT_S")
     assert 60 <= orchestrator._SPECIALIST_TIMEOUT_S <= 600
+
+
+def test_specialist_timeout_reads_env_override(monkeypatch):
+    """DR_SPECIALIST_TIMEOUT_S overrides the 240s default so high-concurrency
+    runs can raise the cap instead of dropping specialists. Tested via the
+    helper (not a module reload) so it can't perturb other tests' module
+    state."""
+    monkeypatch.setenv("DR_SPECIALIST_TIMEOUT_S", "450")
+    assert orchestrator._specialist_timeout_from_env() == 450
+    monkeypatch.delenv("DR_SPECIALIST_TIMEOUT_S", raising=False)
+    assert orchestrator._specialist_timeout_from_env() == 240
 
 
 def test_gap_fill_timeout_logs_to_stderr_and_digest(monkeypatch, capsys):

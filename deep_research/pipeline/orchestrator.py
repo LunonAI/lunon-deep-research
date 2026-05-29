@@ -17,12 +17,14 @@ memory bank keyed by the producing query's target_sections (items 13/25).
 
 import concurrent.futures
 import json
+import os
 import sys
 
 from .. import llm
 from . import specialists
 from .memory_bank import MemoryBank
 from .specialists import research
+
 
 # Per-specialist wall-clock cap (2026-05-25 follow-up after the CAPEL smoke
 # hang on id=56 where horizon_scanner hung mid-flight, stalling the whole
@@ -34,7 +36,18 @@ from .specialists import research
 # Pre-fix the orchestrator's `for role in order` loop had no per-iteration
 # wall-clock bound; only the OpenRouter HTTP layer's 180s × 3 retries
 # capped any single LLM call, leaving inter-call hangs unbounded.
-_SPECIALIST_TIMEOUT_S = 240
+#
+# Overridable via DR_SPECIALIST_TIMEOUT_S: the 240s default is sized for
+# low-concurrency runs, but at high article-level concurrency (e.g. the
+# full-100 at --workers 20) the shared API slows every Exa/extract call, so
+# specialists that finish fine solo blow past 240s and get dropped —
+# silently degrading coverage. Such runs should export a higher value
+# rather than lower --workers.
+def _specialist_timeout_from_env() -> int:
+    return int(os.environ.get("DR_SPECIALIST_TIMEOUT_S", "240"))
+
+
+_SPECIALIST_TIMEOUT_S = _specialist_timeout_from_env()
 
 
 def _research_with_timeout(role, qlist, *, language, domain, exa_mode, model_override, timeout_s=None):
