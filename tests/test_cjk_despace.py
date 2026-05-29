@@ -176,6 +176,21 @@ def test_l5_strips_scaffold_adjacent_to_cjk_extension_a():
     assert stats["scaffold_stripped"] >= 1
 
 
+def test_l5_collapses_residual_cjk_gap_after_scaffold_strip():
+    """Greptile PR #69 round-3: stripping a scaffold token can EXPOSE a CJK↔CJK
+    space the de-spacer already passed (`字AC19 意` keeps the `9 意` space, then
+    removing AC19 leaves `字 意`). The gated second collapse pass closes it AND
+    adds its count to the stat. The padding is space-free so the initial pass
+    collapses nothing — isolating the stat to exactly the one gap L5 exposed (pre-
+    fix: no re-run → `字意义` absent and cjk_space_collapsed == 0)."""
+    padding = "正文内容段落充足实体研究方法结论分析数据样本指标" * 4  # 96 space-free CJK → clears the 50-char guard
+    out, stats = cjk_despace.despace(padding + "字AC19 意义。", language="zh")
+    assert "AC19" not in out
+    assert "字意义" in out, f"residual CJK gap not collapsed after strip: {out!r}"
+    assert stats["scaffold_stripped"] >= 1
+    assert stats["cjk_space_collapsed"] == 1  # exactly the one gap the strip exposed
+
+
 def test_l5_preserves_en_tier_ranking_rubric_ids():
     """EN tier-ranking R-N (in tables / EN prose, never Hanzi-adjacent) must
     survive — the tier-ranking validator's R-N cross-reference depends on it."""

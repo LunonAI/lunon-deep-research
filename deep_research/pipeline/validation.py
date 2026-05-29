@@ -1209,21 +1209,30 @@ def _validate_entity_coverage(article: str, entity_matrix) -> dict | None:
     # greptile regex-heading-coverage: cap at 6, not 4), so a per-entity section
     # heading counts but a matrix table row (a `| ... |` line) does not.
     heading_text = "\n".join(re.findall(r"(?m)^#{1,6}\s+(.+)$", article))
-    # Greptile PR #69 round-1 (2026-05-29): case-INSENSITIVE membership. The writer
-    # routinely re-cases an architect-declared entity ("IBM Quantum" -> heading
-    # "## IBM quantum"); a casing-only mismatch must NOT count the entity as missing,
-    # or a cluster of EN-named entities could push a near-compliant article below
-    # _ENTITY_COVERAGE_MIN_RATIO and force a needless regen. Mirrors the IGNORECASE
-    # treatment in _entity_axis_fragmentation above. `missing` keeps the original
-    # casing for readable telemetry.
-    heading_text_lc = heading_text.lower()
+    # Match each entity in the heading text, anchored on ASCII-alphanumeric word
+    # boundaries and case-insensitively. `missing` keeps original casing for
+    # readable telemetry.
+    #   - Greptile PR #69 round-1: re.IGNORECASE so a casing-only rewrite
+    #     ("IBM Quantum" -> heading "## IBM quantum") still counts — a cluster of
+    #     EN entities must not be pushed below _ENTITY_COVERAGE_MIN_RATIO and force
+    #     a needless regen. Mirrors the IGNORECASE axis-label match in _validate_micro_template.
+    #   - Greptile PR #69 round-3: the guards `(?<![A-Za-z0-9])…(?![A-Za-z0-9])`
+    #     stop a SHORT EN entity ("AI", "OS", "ML") from false-positive matching
+    #     INSIDE a larger word ("AI" in "SAIL", "OS" in "POSIX"), which would
+    #     silently mask a real coverage gap below the 0.5 threshold. The guards key
+    #     on [A-Za-z0-9] ONLY, so a CJK entity inside a longer CJK heading
+    #     ("量子计算" in "量子计算的发展") still matches — CJK is not ASCII-word-
+    #     delimited and a naive \b would wrongly miss it — and multi-word proper
+    #     nouns ("IBM Quantum") match verbatim. Same boundary technique as
+    #     cjk_despace._CJK_SCAFFOLD_RE.
     n_expanded = 0
     missing: list[str] = []
     for ent in entities:
         e = str(ent).strip()
         if not e:
             continue
-        if e.lower() in heading_text_lc:
+        pat = re.compile(r"(?<![A-Za-z0-9])" + re.escape(e) + r"(?![A-Za-z0-9])", re.IGNORECASE)
+        if pat.search(heading_text):
             n_expanded += 1
         else:
             missing.append(e)
