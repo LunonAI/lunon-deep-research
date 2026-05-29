@@ -53,11 +53,13 @@ def test_framing_chapter_constants_match_spec():
 
 
 def test_framing_chapter_required_archetypes_pinned():
-    """list-all, compare, explain-mechanism, predict, recommend require
-    framing chapter. trend is optional (single-axis trend tasks don't
-    benefit from a methodology preamble)."""
-    expected = {"list-all", "compare", "explain-mechanism", "predict", "recommend"}
+    """compare, explain-mechanism, predict, recommend require a framing
+    chapter. trend is optional (single-axis trend tasks don't benefit from a
+    methodology preamble). G11-A: list-all is EXCLUDED — the fresh #1 corpus
+    (q91/q89) carries no §0.x framing for roster prompts."""
+    expected = {"compare", "explain-mechanism", "predict", "recommend"}
     assert architect._FRAMING_CHAPTER_REQUIRED_ARCHETYPES == frozenset(expected)
+    assert "list-all" not in architect._FRAMING_CHAPTER_REQUIRED_ARCHETYPES
 
 
 def test_framing_chapter_rubric_required_archetypes_pinned():

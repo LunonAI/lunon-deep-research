@@ -1,10 +1,11 @@
 """Unit tests for P3-W5 — limitations chapter architect contract.
 
-Qianfan corpus pattern (6/11 articles): predict / compare / explain-
-mechanism / list-all archetypes end with an engineering-grade limitations
-chapter enumerating 5 dimensions (data granularity, scope cap, time
-validity, sampling, falsifiers). q3 §8.5 (predict) adds a 3-scenario
-stress test that recomputes the article's main ranking.
+Qianfan corpus pattern: predict / compare / explain-mechanism archetypes
+end with an engineering-grade limitations chapter enumerating 5 dimensions
+(data granularity, scope cap, time validity, sampling, falsifiers). q3 §8.5
+(predict) adds a 3-scenario stress test that recomputes the article's main
+ranking. G11-A (2026-05-28): list-all is EXCLUDED — the fresh #1 corpus's
+list-all articles (q91/q89) carry no limitations chapter.
 """
 
 from deep_research.pipeline import architect
@@ -47,9 +48,13 @@ def test_limitations_constants_pinned():
         "sampling",
         "falsifiers",
     )
+    # G11-A (2026-05-28): list-all EXCLUDED — q91/q89 carry no Limitations
+    # chapter; the prior 6/11 corpus justification contained no list-all
+    # article. Kept for predict/compare/explain-mechanism.
     assert architect._LIMITATIONS_REQUIRED_ARCHETYPES == frozenset(
-        {"predict", "compare", "explain-mechanism", "list-all"}
+        {"predict", "compare", "explain-mechanism"}
     )
+    assert "list-all" not in architect._LIMITATIONS_REQUIRED_ARCHETYPES
     assert architect._LIMITATIONS_STRESS_TEST_ARCHETYPES == frozenset({"predict"})
 
 
