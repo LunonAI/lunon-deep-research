@@ -146,3 +146,32 @@ def test_does_not_touch_heading_hashes_or_numbers():
     # BETWEEN cjk chars, never the "## 3 " prefix (space follows a digit).
     assert "## 3 章节标题" in out or "## 3 章 节 标 题" in out
     assert "##3" not in out  # never glued the hash to the number
+
+
+def test_a3_collapses_abnormal_unicode_spaces_between_hanzi():
+    """A3 (2026-05-29): NBSP / zero-width / BOM / full-width / thin spaces
+    between Hanzi are collapsed, not just ASCII space/tab — the gemini judge
+    flagged residual '异常空格/不可见字符' after the ASCII-only de-spacer."""
+    padding = "正 文 内 容 段 落 充 足 " * 20  # force CJK-bearing
+    # NBSP, full-width space, zero-width space, narrow NBSP between Hanzi
+    out, stats = cjk_despace.despace(padding + "本 章　的​分 组方式。", language="zh")
+    assert "本章的分组方式" in out, f"abnormal spaces not collapsed: {out!r}"
+    for ws in (" ", "　", "​", " "):
+        assert ws not in out.replace(padding, ""), f"{ws!r} survived"
+
+
+def test_a3_abnormal_spaces_preserved_inside_protected_spans():
+    """The protected-span mask still shields link/anchor/footnote text — a
+    full-width space inside a link title must NOT be collapsed."""
+    padding = "正 文 内 容 段 落 充 足 " * 20
+    anchor = "[锚定新质生产力　券商投行](https://e.com/a)"
+    out, _ = cjk_despace.despace(padding + "参见" + anchor + "。", language="zh")
+    assert anchor in out, f"abnormal space inside link anchor was collapsed: {out!r}"
+
+
+def test_a3_does_not_touch_english_nbsp():
+    """EN articles are skipped by the CJK guard — an NBSP in English prose is
+    left alone (not the de-spacer's job; avoids touching legit EN spacing)."""
+    en = "A non breaking space in English prose stays put here." * 3
+    out, _ = cjk_despace.despace(en, language="en")
+    assert out == en
