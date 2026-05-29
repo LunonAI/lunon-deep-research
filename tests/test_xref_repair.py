@@ -4,10 +4,15 @@ Belt-and-braces against two failure modes the writer occasionally produces
 despite the in-prompt rules:
   1. Chapter-opening "Building on §X" templates leaking in (Wave-3 §12.A.v4
      reduced these to 0% in the W3 smoke; repair is regression safety net).
-  2. Dangling forward-refs (`§47` in an article ending at §40).
+  2. Dangling forward-refs (`§47` in an article ending at §40, or `§5.16`
+     when chapter 5 renders only §5.1–§5.4).
 
-Tests pin idempotency, fail-soft on bad input, and the dangling-rewrite vs
-sentence-delete branching logic.
+G2 (2026-05-28): dangling refs are now EXCISED (with orphan-glue cleanup),
+not rewritten to "a later section". G12 (2026-05-28): a `§N.M` is dangling
+unless `§N.M` (or a deeper `§N.M.x`) actually renders — the prior
+top-chapter exemption is gone. Tests pin idempotency, fail-soft on bad
+input, the excise-vs-delete branching, and that "a later section" never
+appears in repaired output.
 """
 
 from deep_research.pipeline.xref_repair import repair
@@ -25,15 +30,16 @@ def test_repair_replaces_building_on_template_with_clean_intro():
     assert "## 2 Foo" in out
 
 
-def test_repair_rewrites_dangling_forward_ref_to_a_later_section():
-    """A §N where N is not in the heading set is rewritten to
-    'a later section', preserving the surrounding prose."""
-    text = "## 1 Intro\n\n## 2 Body\n\nWe will cover this in (Section 99) in detail. Other content surrounds."
+def test_repair_excises_dangling_forward_ref():
+    """A §N where N is not in the heading set is EXCISED (G2), with the
+    surrounding prose left clean — never rewritten to 'a later section'."""
+    text = "## 1 Intro\n\n## 2 Body\n\nThe topic is examined further elsewhere (Section 99). Other content surrounds."
     out, stats = repair(text)
-    assert stats["dangling_refs_rewritten"] >= 1, f"got {stats}; out={out!r}"
+    assert stats["dangling_refs_excised"] >= 1, f"got {stats}; out={out!r}"
     assert "Section 99" not in out
-    assert "a later section" in out
-    assert "Other content surrounds." in out
+    assert "a later section" not in out
+    # The ref was excised and the space-before-period seam cleaned up.
+    assert "examined further elsewhere. Other content surrounds." in out
 
 
 def test_repair_deletes_sentence_when_only_clause_is_dangling_ref():
@@ -44,16 +50,177 @@ def test_repair_deletes_sentence_when_only_clause_is_dangling_ref():
     # after stripping the ref → deleted.
     assert stats["sentences_deleted"] >= 1, f"got {stats}"
     assert "Section 99" not in out
+    assert "a later section" not in out
     assert "Real sentence one." in out
     assert "Final sentence." in out
 
 
 def test_repair_preserves_legitimate_xrefs():
-    """References to existing chapters/sections survive unchanged."""
-    text = "## 1 Intro\n\n## 2 Body\n\n## 3 More\n\nSee (Section 2) for context and (Section 3.1) for detail."
+    """References to existing chapters/sections (incl. rendered sub-sections)
+    survive unchanged. The §3.1 ref is legitimate ONLY because `### 3.1`
+    actually renders — see test_repair_excises_ref_to_unrendered_subsection
+    for the G12 counter-case."""
+    text = (
+        "## 1 Intro\n\n## 2 Body\n\n## 3 More\n\n### 3.1 Detail\n\n"
+        "See (Section 2) for context and (Section 3.1) for detail."
+    )
     out, stats = repair(text)
     assert "(Section 2)" in out
-    assert stats["dangling_refs_rewritten"] == 0
+    assert "(Section 3.1)" in out
+    assert stats["dangling_refs_excised"] == 0
+    assert stats["sentences_deleted"] == 0
+
+
+def test_repair_excises_ref_to_unrendered_subsection():
+    """G12: `§5.16` is dangling when chapter 5 renders only §5.1 — the prior
+    top-chapter exemption (any N.M valid if chapter N exists) is removed."""
+    text = "## 5 Five\n\n### 5.1 Sub\n\nThe mechanism is detailed in (Section 5.16) at length. More prose surrounds it."
+    out, stats = repair(text)
+    assert stats["dangling_refs_excised"] >= 1, f"§5.16 not flagged dangling: {stats}; {out!r}"
+    assert "5.16" not in out
+    assert "a later section" not in out
+    # The legitimately-rendered §5.1 chapter/heading is untouched.
+    assert "### 5.1 Sub" in out
+
+
+def test_repair_excises_range_ref_without_orphan_dash():
+    """G2: a dangling ref inside a numeric range ('§9–§15', §15 dangling) is
+    excised together with its orphan range dash — no trailing '§9–' leak."""
+    text = "## 9 Nine\n\nThe arc spans §9–§15 across the saga. The remainder is summarized after."
+    out, stats = repair(text)
+    assert stats["dangling_refs_excised"] >= 1, f"got {stats}; {out!r}"
+    assert "§15" not in out
+    assert "a later section" not in out
+    # The valid §9 survives; the orphan en-dash that the excision would have
+    # left ("§9–") must be gone.
+    assert "§9" in out
+    assert "§9–" not in out and "§9 –" not in out
+
+
+def test_repair_excises_consecutive_list_refs_without_orphan_commas():
+    """G2: a run of dangling refs in a list ('§5.16, §5.31, §5.42') is excised
+    with the orphan list commas cleaned up — no ', ,' leak.
+
+    Greptile PR #62 issue 1: also assert the orphan conjunction ('and') the
+    excision strands between markers is absorbed — pre-fix the commas were
+    cleaned but "§5.31, and §5.42" collapsed to "\\x00 \\x00 and \\x00",
+    leaving prose like "scattered across and throughout the work"."""
+    text = (
+        "## 5 Five\n\n### 5.1 Sub\n\n"
+        "Clues are scattered across §5.16, §5.31, and §5.42 throughout the work. End sentence here."
+    )
+    out, stats = repair(text)
+    assert stats["dangling_refs_excised"] >= 1, f"got {stats}; {out!r}"
+    for ref in ("5.16", "5.31", "5.42"):
+        assert ref not in out, f"{ref} survived: {out!r}"
+    assert "a later section" not in out
+    assert ", ," not in out and " , " not in out, f"orphan list comma leaked: {out!r}"
+    # The whole list was excised, so the conjunction that joined its final
+    # item must be gone too — not stranded as "across and throughout".
+    assert "across throughout the work" in out, f"orphan conjunction leaked: {out!r}"
+    assert "across and" not in out and "and throughout" not in out, f"orphan conjunction leaked: {out!r}"
+    assert "End sentence here." in out
+
+
+def test_repair_absorbs_orphan_or_conjunction_in_excised_list():
+    """Greptile PR #62 issue 1: the conjunction rule covers 'or' as well as
+    'and'. When every item in an 'A or B' list is dangling, neither the refs
+    NOR the joining 'or' should survive."""
+    text = "## 1 A\n\nThe data lives in §5.16 or §5.42 somewhere in this document. More content follows after."
+    out, stats = repair(text)
+    assert stats["dangling_refs_excised"] >= 1, f"got {stats}; {out!r}"
+    for ref in ("5.16", "5.42"):
+        assert ref not in out, f"{ref} survived: {out!r}"
+    assert "lives in somewhere" in out, f"orphan 'or' leaked: {out!r}"
+    assert " or somewhere" not in out and "in or" not in out, f"orphan 'or' leaked: {out!r}"
+
+
+def test_repair_preserves_conjunction_not_adjacent_to_excised_ref():
+    """Greptile PR #62 issue 1 (precision guard): a conjunction that is NOT
+    directly adjacent to a removed ref is normal prose and must survive. Here
+    'Apples and oranges' is far from the dangling §99, so 'and' stays."""
+    text = "## 1 A\n\nApples and oranges appear in §99 of the text here today. Tail content follows after."
+    out, _ = repair(text)
+    assert "§99" not in out and "99" not in out.split("Tail")[0], f"§99 not excised: {out!r}"
+    assert "Apples and oranges" in out, f"legitimate conjunction wrongly absorbed: {out!r}"
+
+
+def test_repair_no_leading_space_when_ref_is_first_token():
+    r"""Greptile PR #62 issue 2: a marker at the very start of a (sub)string
+    must collapse to nothing, not a single space. Pre-fix "§99 explains this"
+    excised to "\x00 explains this" then collapsed to " explains this" — a
+    sentence beginning with a spurious leading space."""
+    text = "## 1 Intro\n\n## 2 Body\n\n§99 explains this fully and with detail here."
+    out, stats = repair(text)
+    assert stats["dangling_refs_excised"] >= 1, f"got {stats}; {out!r}"
+    assert "§99" not in out
+    # The body line must begin with the real first word, not a leading space.
+    assert "\n\nexplains this" in out, f"leading space left after excised first-token ref: {out!r}"
+    assert "\n\n explains" not in out, f"leading space left after excised first-token ref: {out!r}"
+    assert "a later section" not in out
+
+
+def test_repair_no_leading_space_with_consecutive_leading_refs():
+    r"""Greptile PR #62 round-2: the start rule must absorb a RUN of leading
+    markers, not just one. Two consecutive dangling bare refs separated by only
+    whitespace ("§97 §98 text" -> "\x00 \x00 text") previously left "\x00 text"
+    after the single-marker start rule, which the interior collapse then turned
+    into a spurious leading space."""
+    text = "## 1 Intro\n\n## 2 Body\n\n§97 §98 explains this fully and with detail here."
+    out, stats = repair(text)
+    assert stats["dangling_refs_excised"] >= 2, f"got {stats}; {out!r}"
+    assert "§97" not in out and "§98" not in out
+    assert "\n\nexplains this" in out, f"leading space left after run of excised refs: {out!r}"
+    assert "\n\n explains" not in out, f"leading space left after run of excised refs: {out!r}"
+
+
+def test_repair_strips_embedded_nul_bytes_in_input():
+    r"""Greptile PR #62 issue 3: the `_SENT = "\x00"` excision marker assumes
+    NUL never occurs in real article text. If an upstream pass emits embedded
+    NULs, `_cleanup_excised` would mis-process those positions as excision
+    markers. repair() now strips NULs at the entry point so the invariant is
+    enforced — the NUL is gone and surrounding text is intact."""
+    text = "## 1 Intro\n\nSome content\x00here with embedded nul and more prose follows along."
+    out, stats = repair(text)
+    assert "\x00" not in out, f"NUL byte survived in output: {out!r}"
+    # The NUL was simply removed; neighbouring characters are not mangled.
+    assert "Some contenthere" in out, f"text around NUL corrupted: {out!r}"
+    # No spurious repair was triggered by the stray NUL.
+    assert stats["dangling_refs_excised"] == 0
+    assert stats["sentences_deleted"] == 0
+
+
+def test_repair_embedded_nul_does_not_corrupt_real_dangling_excision():
+    r"""Greptile PR #62 issue 3 (interaction): an embedded NUL elsewhere in the
+    text must NOT interfere with a genuine dangling-ref excision — the NUL is
+    stripped first, so its position is not mistaken for an excision marker."""
+    text = "## 1 Intro\n\nThe pre\x00fix note refers to (Section 99) for detail with surrounding prose. Tail here."
+    out, stats = repair(text)
+    assert "\x00" not in out, f"NUL survived: {out!r}"
+    assert "(Section 99)" not in out, f"dangling ref not excised: {out!r}"
+    assert "prefix note" in out, f"NUL-adjacent text corrupted: {out!r}"
+    assert stats["dangling_refs_excised"] >= 1, f"got {stats}; {out!r}"
+
+
+def test_repair_never_emits_a_later_section():
+    """Regression pin: 'a later section' (the retired G2 rewrite token) must
+    NEVER appear in repaired output, across a mix of dangling-ref shapes."""
+    text = (
+        "## 1 Intro\n\n## 2 Body\n\n"
+        "Bare ref §99 appears here mid-sentence with content. "
+        "A parenthetical (Section 88) sits inside this clause too. "
+        "A range §2–§77 and a list §5.16, §5.31 round it out, with prose after."
+    )
+    out, _ = repair(text)
+    assert "a later section" not in out, f"retired rewrite token leaked: {out!r}"
+
+
+def test_repair_preserves_legitimate_xrefs_returns_zero():
+    """References to existing chapters survive; no excision/deletion fires."""
+    text = "## 1 Intro\n\n## 2 Body\n\n## 3 More\n\nSee (Section 2) and (Section 3) for context here."
+    out, stats = repair(text)
+    assert "(Section 2)" in out and "(Section 3)" in out
+    assert stats["dangling_refs_excised"] == 0
     assert stats["sentences_deleted"] == 0
 
 
@@ -61,14 +228,14 @@ def test_repair_is_idempotent():
     """Running repair() twice produces the same output."""
     text = (
         "## 2 Foo\n\nBuilding on §1 established earlier, this section continues.\n\n"
-        "Substantive paragraph (Section 99) hallucinated ref. End."
+        "Substantive paragraph (Section 99) hallucinated ref with lots of trailing prose. End."
     )
     out_1, _ = repair(text)
     out_2, stats_2 = repair(out_1)
     assert out_1 == out_2, "second repair pass changed the output"
     # Second pass should find nothing to repair
     assert stats_2["templates_repaired"] == 0
-    assert stats_2["dangling_refs_rewritten"] == 0
+    assert stats_2["dangling_refs_excised"] == 0
 
 
 def test_repair_handles_empty_input_gracefully():
@@ -95,7 +262,7 @@ def test_repair_handles_non_string_input_gracefully():
 def test_repair_returns_required_stats_keys():
     """Pin the stats dict keys."""
     _, stats = repair("## 1 X\n\nbody")
-    expected = {"templates_repaired", "dangling_refs_rewritten", "sentences_deleted"}
+    expected = {"templates_repaired", "dangling_refs_excised", "sentences_deleted"}
     assert set(stats.keys()) == expected, f"got {set(stats.keys())}"
 
 
@@ -125,17 +292,9 @@ def test_repair_preserves_paragraph_boundary_when_dangler_only_sentence_deleted(
     its sep — collapsing the following `## N` heading inline with the
     preceding sentence and silently producing invalid markdown.
 
-    Concrete failure case (from the Greptile report):
-      "## 1 Intro\n\nReal content. See (Section 99).\n\n## 2 Body"
-    Pre-fix, repair produced:
-      "## 1 Intro\n\nReal content. ## 2 Body"  ← heading inlined
     Post-fix, the `\n\n` separator from the deleted sentence is carried
     forward onto the preceding separator slot so structural whitespace
     is preserved.
-
-    The complementary REWRITE path already preserved sep unconditionally
-    (test_repair_preserves_paragraph_boundaries_with_dangling_ref_present);
-    this test pins symmetry for the delete path.
     """
     text = "## 1 Intro\n\nReal content. See (Section 99).\n\n## 2 Body\n\nNext chapter prose.\n"
     out, stats = repair(text)
@@ -168,17 +327,17 @@ def test_repair_delete_path_preserves_multi_paragraph_structure():
 
 
 def test_repair_preserves_paragraph_boundaries_with_dangling_ref_present():
-    """The boundary-preservation must hold even on the dangling-ref repair
+    """The boundary-preservation must hold even on the dangling-ref excise
     branch (the path that previously did `out_parts.append(...)` + final
     `" ".join`). This routes through the path Greptile flagged."""
     text = (
         "## 1 Intro\n\n## 2 Body\n\n"
-        "Real sentence (Section 99) hallucinated. End of paragraph.\n\n"
+        "Real sentence (Section 99) hallucinated mid-clause with plenty of trailing prose. End of paragraph.\n\n"
         "## 3 More\n\nNext chapter prose.\n"
     )
     out, stats = repair(text)
     # Repair fired on the dangling ref.
-    assert stats["dangling_refs_rewritten"] + stats["sentences_deleted"] >= 1
+    assert stats["dangling_refs_excised"] + stats["sentences_deleted"] >= 1
     # The `## 3 More` heading must remain at line start.
     assert "\n\n## 3 More" in out, f"separator collapsed near repair site: {out!r}"
     assert "## 3 More\n\nNext chapter prose." in out
@@ -232,31 +391,22 @@ def test_repair_does_not_destroy_heading_with_short_name_when_first_sentence_is_
     characters. For short chapter names ("Results", "Summary",
     "Overview", "Methods" — all ≤7 letters), the combined residual
     falls below the 15-char delete threshold, and the entire token —
-    heading included — is silently deleted.
-
-    Concrete failure (the exact case Greptile reported):
-      "## 1 Results\n\nSee (Section 47).\n\n## 2 Body\n\nContent."
-    Residual after stripping "(Section 47)" = "##1ResultsSee" = 13
-    chars < 15 → pre-fix, the WHOLE token "## 1 Results\n\nSee
-    (Section 47)." was deleted, removing the `## 1 Results` heading
-    from the article. Post-write data loss in a chapter-structural
-    element.
+    heading included — was silently deleted pre-fix.
 
     Fix: when the token contains a markdown heading line, route to
-    the rewrite path (heading preserved, dangler swapped for "a later
-    section") instead of the delete path.
+    the excise path (heading preserved, dangler excised) instead of
+    the delete path.
     """
     text = "## 1 Results\n\nSee (Section 47).\n\n## 2 Body\n\nContent here is fine.\n"
     out, stats = repair(text)
     # The heading MUST survive.
     assert "## 1 Results" in out, f"heading silently destroyed: {out!r}"
-    # The dangler must have been rewritten (not deleted) — the rewrite path
-    # path swaps it for "a later section".
-    assert "a later section" in out, f"dangler not rewritten on heading path: {out!r}"
+    # The dangler must have been excised (not rewritten, not deleted).
+    assert "a later section" not in out, f"retired rewrite token leaked: {out!r}"
     assert "(Section 47)" not in out
-    # The delete path must NOT have fired — heading guard routes to rewrite.
+    # The delete path must NOT have fired — heading guard routes to excise.
     assert stats["sentences_deleted"] == 0, f"heading-rooted token wrongly deleted: {stats}; {out!r}"
-    assert stats["dangling_refs_rewritten"] >= 1
+    assert stats["dangling_refs_excised"] >= 1
     # Downstream content is unaffected.
     assert "## 2 Body" in out
     assert "Content here is fine." in out
@@ -266,31 +416,22 @@ def test_repair_heading_guard_covers_common_short_chapter_names():
     """Greptile PR #39 round-3 issue #1: parameterized verification
     that each of the canonical short-name chapters Greptile called out
     ("Summary", "Results", "Overview", "Methods") survives a
-    dangler-only first sentence. Pre-fix every one of these would have
-    silently lost the heading; post-fix every heading must appear in
-    the repaired output."""
+    dangler-only first sentence."""
     short_names = ("Summary", "Results", "Overview", "Methods")
     for name in short_names:
         text = f"## 1 {name}\n\nSee (Section 99).\n\n## 2 Body\n\nReal content here.\n"
         out, _stats = repair(text)
         assert f"## 1 {name}" in out, f"heading `## 1 {name}` destroyed by repair (output: {out!r})"
         assert "## 2 Body" in out
+        assert "a later section" not in out
 
 
 def test_repair_strips_lowercase_building_on_template():
     r"""Greptile PR #39 round-3 issue #2: `_OPENING_TEMPLATE_PATTERN`
     previously had no `re.I` flag, so only Title-Case "Building on"
-    templates were stripped by `repair()`. But the auditor's
-    `opening_template_pattern` in `writing_rules.check_xref_quality`
-    uses `re.I` and flags lowercase variants too. A model regression
-    that emitted lowercase `"## 2 Foo\n\nbuilding on §1 …"` would slip
-    past `repair()` unchanged while the auditor reported
-    `opening_template_violations=1` — a false divergence between what
-    the post-write pass "repaired" and what the auditor sees. Adding
-    `re.I` to the repair pattern aligns both passes.
+    templates were stripped. Adding `re.I` aligns repair() with the
+    auditor's case-insensitive `opening_template_pattern`.
     """
-    # Same fixture as test_repair_replaces_building_on_template_with_clean_intro
-    # but with a lowercase 'b' to exercise the re.I codepath.
     text = "## 2 Foo\n\nbuilding on §1 established earlier, this section continues. Substantive content follows here."
     out, stats = repair(text)
     assert stats["templates_repaired"] == 1, f"lowercase template not stripped: {stats}; out={out!r}"
@@ -302,10 +443,8 @@ def test_repair_strips_lowercase_building_on_template():
 
 def test_repair_lowercase_template_strip_does_not_false_positive_in_prose():
     """Symmetric to test_repair_preserves_legitimate_text_in_forbidden_block:
-    the `re.I` flag added in round-3 must NOT cause mid-paragraph
-    lowercase 'building on' to be flagged. The `^##` anchor (no
-    letters) already prevents this regardless of the flag, but pin
-    the invariant explicitly."""
+    the `re.I` flag must NOT cause mid-paragraph lowercase 'building on'
+    to be flagged."""
     text = (
         "## 1 Intro\n\n"
         "The author's strategy of building on prior work shapes the discussion. "
@@ -317,48 +456,32 @@ def test_repair_lowercase_template_strip_does_not_false_positive_in_prose():
     assert "building on prior work" in out
 
 
-def test_repair_heading_guard_does_not_rewrite_chapter_title_text():
-    r"""Greptile PR #39 round-4: the heading-guard path previously
-    applied `ref_pattern.sub(_rewrite, sentence)` to the WHOLE token —
-    heading line included. `ref_pattern`'s third alternation
-    `(?:Section|Chapter|Sec\.)\s+([\d\.]+)\b` matches title words like
-    "Chapter 47" in a heading `## 5 Chapter 47 Overview`. If 47 is
-    dangling, the heading would be silently corrupted to
-    `"## 5 a later section Overview"` — structural damage in the
-    navigational layer.
+def test_repair_heading_guard_does_not_excise_chapter_title_text():
+    r"""Greptile PR #39 round-4 (carried into G2): the heading-guard path
+    must apply excision to BODY lines only. `ref_pattern`'s third
+    alternation `(?:Section|Chapter|Sec\.)\s+([\d\.]+)\b` matches title
+    words like "Chapter 47" in a heading `## 5 Chapter 47 Overview`. If
+    47 is dangling, a whole-token sub would corrupt the heading.
 
-    Fix: split the token line-by-line; heading-marker lines are emitted
-    verbatim, body lines have `_rewrite` applied. This test pins:
+    This test pins:
       (a) the heading title "Chapter 47" survives verbatim even though
           47 is not in the heading-id set;
-      (b) the BODY dangler `(Section 47)` IS still rewritten to
-          `(a later section)` — the round-3 short-name fix continues
-          to apply.
-
-    Concrete fixture: id `5` is in heading-ids (`## 5 Chapter 47
-    Overview`), so the auditor must NOT classify `5` itself as
-    dangling. The `47` referenced in the heading title is a legitimate
-    proper-noun chapter-number reference within the title text — it's
-    naming the chapter, not navigating to it.
+      (b) the BODY dangler `(Section 47)` IS excised.
     """
     text = (
         "## 5 Chapter 47 Overview\n\n"
-        "See (Section 47).\n\n"  # dangling body ref → rewrite
+        "See (Section 47).\n\n"  # dangling body ref → excise
         "## 6 Next\n\nNext chapter prose is here.\n"
     )
     out, stats = repair(text)
     # (a) Heading title must NOT have been corrupted.
-    assert "## 5 Chapter 47 Overview" in out, f"heading title rewritten by ref_pattern: {out!r}"
-    # The buggy output to guard against:
-    assert "a later section Overview" not in out, (
-        f"heading-title `Chapter N` rewritten as if it were a body xref: {out!r}"
-    )
-    # (b) Body dangler still rewritten.
-    assert "(a later section)" in out, f"body dangler not rewritten: {out!r}"
-    assert "(Section 47)" not in out
-    # Stats: heading-routed path uses _rewrite, so the rewrite counter
+    assert "## 5 Chapter 47 Overview" in out, f"heading title excised by ref_pattern: {out!r}"
+    assert "a later section" not in out
+    # (b) Body dangler excised.
+    assert "(Section 47)" not in out, f"body dangler not excised: {out!r}"
+    # Stats: heading-routed path uses excise, so the excise counter
     # increments; the delete counter stays zero (heading-guard preempts it).
-    assert stats["dangling_refs_rewritten"] >= 1
+    assert stats["dangling_refs_excised"] >= 1
     assert stats["sentences_deleted"] == 0
     # Downstream chapter unaffected.
     assert "## 6 Next" in out
@@ -366,16 +489,15 @@ def test_repair_heading_guard_does_not_rewrite_chapter_title_text():
 
 
 def test_repair_heading_guard_preserves_multiple_heading_lines_verbatim():
-    """When the token contains multiple consecutive heading lines (e.g.
-    a chapter heading followed immediately by a sub-section heading
-    before any prose), every heading line must survive verbatim — none
-    of them should have `_rewrite` applied even when their titles
-    contain `Section N` / `Chapter N` patterns."""
+    """When the token contains multiple consecutive heading lines, every
+    heading line must survive verbatim — none should have excision applied
+    even when their titles contain `Section N` / `Chapter N` patterns."""
     text = "## 5 Chapter 47 Overview\n\n### 5.1 Section 99 Subtopic\n\nSee (Section 47).\n\n## 6 Done\n\nLast prose.\n"
     out, _ = repair(text)
     # Both heading titles must survive — neither "Chapter 47" nor
-    # "Section 99" should be rewritten by the body-xref rewriter.
+    # "Section 99" should be excised by the body-xref pass.
     assert "## 5 Chapter 47 Overview" in out, f"H2 title corrupted: {out!r}"
     assert "### 5.1 Section 99 Subtopic" in out, f"H3 title corrupted: {out!r}"
-    # Body dangler still rewritten.
-    assert "(a later section)" in out
+    # Body dangler excised, no retired rewrite token.
+    assert "(Section 47)" not in out
+    assert "a later section" not in out
