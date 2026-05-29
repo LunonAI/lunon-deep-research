@@ -99,7 +99,12 @@ def test_repair_excises_range_ref_without_orphan_dash():
 
 def test_repair_excises_consecutive_list_refs_without_orphan_commas():
     """G2: a run of dangling refs in a list ('§5.16, §5.31, §5.42') is excised
-    with the orphan list commas cleaned up — no ', ,' leak."""
+    with the orphan list commas cleaned up — no ', ,' leak.
+
+    Greptile PR #62 issue 1: also assert the orphan conjunction ('and') the
+    excision strands between markers is absorbed — pre-fix the commas were
+    cleaned but "§5.31, and §5.42" collapsed to "\\x00 \\x00 and \\x00",
+    leaving prose like "scattered across and throughout the work"."""
     text = (
         "## 5 Five\n\n### 5.1 Sub\n\n"
         "Clues are scattered across §5.16, §5.31, and §5.42 throughout the work. End sentence here."
@@ -110,7 +115,77 @@ def test_repair_excises_consecutive_list_refs_without_orphan_commas():
         assert ref not in out, f"{ref} survived: {out!r}"
     assert "a later section" not in out
     assert ", ," not in out and " , " not in out, f"orphan list comma leaked: {out!r}"
+    # The whole list was excised, so the conjunction that joined its final
+    # item must be gone too — not stranded as "across and throughout".
+    assert "across throughout the work" in out, f"orphan conjunction leaked: {out!r}"
+    assert "across and" not in out and "and throughout" not in out, f"orphan conjunction leaked: {out!r}"
     assert "End sentence here." in out
+
+
+def test_repair_absorbs_orphan_or_conjunction_in_excised_list():
+    """Greptile PR #62 issue 1: the conjunction rule covers 'or' as well as
+    'and'. When every item in an 'A or B' list is dangling, neither the refs
+    NOR the joining 'or' should survive."""
+    text = "## 1 A\n\nThe data lives in §5.16 or §5.42 somewhere in this document. More content follows after."
+    out, stats = repair(text)
+    assert stats["dangling_refs_excised"] >= 1, f"got {stats}; {out!r}"
+    for ref in ("5.16", "5.42"):
+        assert ref not in out, f"{ref} survived: {out!r}"
+    assert "lives in somewhere" in out, f"orphan 'or' leaked: {out!r}"
+    assert " or somewhere" not in out and "in or" not in out, f"orphan 'or' leaked: {out!r}"
+
+
+def test_repair_preserves_conjunction_not_adjacent_to_excised_ref():
+    """Greptile PR #62 issue 1 (precision guard): a conjunction that is NOT
+    directly adjacent to a removed ref is normal prose and must survive. Here
+    'Apples and oranges' is far from the dangling §99, so 'and' stays."""
+    text = "## 1 A\n\nApples and oranges appear in §99 of the text here today. Tail content follows after."
+    out, _ = repair(text)
+    assert "§99" not in out and "99" not in out.split("Tail")[0], f"§99 not excised: {out!r}"
+    assert "Apples and oranges" in out, f"legitimate conjunction wrongly absorbed: {out!r}"
+
+
+def test_repair_no_leading_space_when_ref_is_first_token():
+    r"""Greptile PR #62 issue 2: a marker at the very start of a (sub)string
+    must collapse to nothing, not a single space. Pre-fix "§99 explains this"
+    excised to "\x00 explains this" then collapsed to " explains this" — a
+    sentence beginning with a spurious leading space."""
+    text = "## 1 Intro\n\n## 2 Body\n\n§99 explains this fully and with detail here."
+    out, stats = repair(text)
+    assert stats["dangling_refs_excised"] >= 1, f"got {stats}; {out!r}"
+    assert "§99" not in out
+    # The body line must begin with the real first word, not a leading space.
+    assert "\n\nexplains this" in out, f"leading space left after excised first-token ref: {out!r}"
+    assert "\n\n explains" not in out, f"leading space left after excised first-token ref: {out!r}"
+    assert "a later section" not in out
+
+
+def test_repair_strips_embedded_nul_bytes_in_input():
+    r"""Greptile PR #62 issue 3: the `_SENT = "\x00"` excision marker assumes
+    NUL never occurs in real article text. If an upstream pass emits embedded
+    NULs, `_cleanup_excised` would mis-process those positions as excision
+    markers. repair() now strips NULs at the entry point so the invariant is
+    enforced — the NUL is gone and surrounding text is intact."""
+    text = "## 1 Intro\n\nSome content\x00here with embedded nul and more prose follows along."
+    out, stats = repair(text)
+    assert "\x00" not in out, f"NUL byte survived in output: {out!r}"
+    # The NUL was simply removed; neighbouring characters are not mangled.
+    assert "Some contenthere" in out, f"text around NUL corrupted: {out!r}"
+    # No spurious repair was triggered by the stray NUL.
+    assert stats["dangling_refs_excised"] == 0
+    assert stats["sentences_deleted"] == 0
+
+
+def test_repair_embedded_nul_does_not_corrupt_real_dangling_excision():
+    r"""Greptile PR #62 issue 3 (interaction): an embedded NUL elsewhere in the
+    text must NOT interfere with a genuine dangling-ref excision — the NUL is
+    stripped first, so its position is not mistaken for an excision marker."""
+    text = "## 1 Intro\n\nThe pre\x00fix note refers to (Section 99) for detail with surrounding prose. Tail here."
+    out, stats = repair(text)
+    assert "\x00" not in out, f"NUL survived: {out!r}"
+    assert "(Section 99)" not in out, f"dangling ref not excised: {out!r}"
+    assert "prefix note" in out, f"NUL-adjacent text corrupted: {out!r}"
+    assert stats["dangling_refs_excised"] >= 1, f"got {stats}; {out!r}"
 
 
 def test_repair_never_emits_a_later_section():

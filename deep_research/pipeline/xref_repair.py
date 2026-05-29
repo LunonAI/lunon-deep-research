@@ -75,6 +75,13 @@ def repair(text: str) -> tuple[str, dict]:
     if not isinstance(text, str) or not text:
         return text, {"templates_repaired": 0, "dangling_refs_excised": 0, "sentences_deleted": 0}
 
+    # G2 (Greptile PR #62): the `_SENT = "\x00"` excision marker assumes NUL
+    # never occurs in article text. Enforce that invariant at the entry point —
+    # if an upstream pass emits embedded NUL bytes, the `_cleanup_excised`
+    # regexes would silently mis-process those positions as if they were
+    # excision markers. Stripping NULs here keeps the sentinel unambiguous.
+    text = text.replace("\x00", "")
+
     stats = {"templates_repaired": 0, "dangling_refs_excised": 0, "sentences_deleted": 0}
 
     # PASS 1: chapter-opening "Building on §X" templates.
@@ -166,12 +173,30 @@ def repair(text: str) -> tuple[str, dict]:
         s = re.sub(rf"[–—-]\s*{_SENT}", _SENT, s)
         s = re.sub(rf"{_SENT}\s*,", _SENT, s)
         s = re.sub(rf",\s*{_SENT}", _SENT, s)
+        # G2 (Greptile PR #62 issue 1): absorb an English conjunction stranded
+        # next to a marker by the excision. After the comma rules above, an
+        # all-dangling list like "§5.16, §5.31, and §5.42" collapses to
+        # "\x00 \x00 and \x00", leaving "and" orphaned between markers — which
+        # would surface as prose like "scattered across and throughout". These
+        # rules absorb a conjunction ONLY when it is directly adjacent to a
+        # marker (whitespace-separated), so mid-sentence conjunctions in normal
+        # prose ("See \x00 today and tomorrow") are left untouched.
+        s = re.sub(rf"\b(?:and|or)\s+{_SENT}", _SENT, s, flags=re.I)
+        s = re.sub(rf"{_SENT}\s+(?:and|or)\b", _SENT, s, flags=re.I)
         s = re.sub(rf"\(\s*{_SENT}\s*\)", _SENT, s)
-        # Collapse every marker (and surrounding whitespace) to one space.
+        # G2 (Greptile PR #62 issue 2): a marker at the very start/end of the
+        # (sub)string has no neighbouring token to join, so collapse it to
+        # nothing — otherwise the general interior rule below would leave a
+        # spurious leading/trailing space (e.g. "§99 explains this" → leading
+        # " explains this"). Run before the interior collapse.
+        s = re.sub(rf"^\s*{_SENT}\s*", "", s)
+        s = re.sub(rf"\s*{_SENT}\s*$", "", s)
+        # Collapse every remaining (interior) marker (and surrounding
+        # whitespace) to one space.
         s = re.sub(rf"\s*{_SENT}\s*", " ", s)
         # Normalise the seams left behind.
-        s = re.sub(r"\(\s*\)", "", s)              # empty parens
-        s = re.sub(r"\s+([,.;:!?])", r"\1", s)     # space before punctuation
+        s = re.sub(r"\(\s*\)", "", s)  # empty parens
+        s = re.sub(r"\s+([,.;:!?])", r"\1", s)  # space before punctuation
         s = re.sub(r"\(\s+", "(", s)
         s = re.sub(r"\s+\)", ")", s)
         s = re.sub(r"[ \t]{2,}", " ", s)
