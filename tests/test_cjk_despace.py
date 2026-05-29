@@ -111,6 +111,27 @@ def test_language_override_skips_cjk_despace():
         assert stats_region["cjk_space_collapsed"] >= 6, label
 
 
+def test_boilerplate_inside_link_anchor_is_not_stripped():
+    """Greptile PR #66 round-5: spans are masked BEFORE the boilerplate strip,
+    so 'Per the rubric' at the start of a link anchor is preserved (link not
+    mangled) while a prose occurrence elsewhere is still removed."""
+    text = "See [Per the rubric guide](https://x/y) for context. This is, Per the rubric, strong."
+    out, stats = cjk_despace.despace(text)
+    assert "[Per the rubric guide](https://x/y)" in out, out  # link intact
+    assert "is, Per the rubric, strong" not in out  # prose scaffolding stripped
+    assert stats["boilerplate_stripped"] >= 1
+
+
+def test_pre_existing_nul_in_input_does_not_crash():
+    """Greptile PR #66 round-5: a pre-existing NUL sequence must not be mistaken
+    for a stash sentinel and IndexError the restore pass — NULs are stripped at
+    entry so the phase never raises and still de-spaces the surrounding CJK."""
+    text = "本 章 \x005\x00 的 分 组 方 式" + "，" + "见 下 文。" * 20
+    out, stats = cjk_despace.despace(text)
+    assert "\x00" not in out
+    assert stats["cjk_space_collapsed"] >= 1
+
+
 def test_fail_soft_on_bad_input():
     assert cjk_despace.despace("") == ("", {"cjk_space_collapsed": 0, "boilerplate_stripped": 0})
     out, stats = cjk_despace.despace(None)
