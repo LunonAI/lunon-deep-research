@@ -22,7 +22,7 @@ def _article_with_labels(entities, per_entity_labels):
     """Build an article where each entity opens each axis paragraph with the
     given bold label string (allows simulating fragmentation by varying it)."""
     parts = ["# Title\n"]
-    for ent, labels in zip(entities, per_entity_labels):
+    for ent, labels in zip(entities, per_entity_labels, strict=False):
         parts.append(f"## {ent}\n")
         for lab in labels:
             parts.append(f"**{lab}.** Dense paragraph about {ent} on this axis.\n")
@@ -40,6 +40,29 @@ def test_returns_none_for_table_columns_only_mode():
 
 def test_returns_none_when_fewer_than_three_entities():
     assert validation._validate_micro_template("x", _em(entities=["A", "B"])) is None
+
+
+def test_inline_axis_mentions_outside_entity_paragraphs_do_not_inflate_coverage():
+    """Greptile PR #64 round-3: only PARAGRAPH LEAD-IN bold labels count. A
+    framing/rubric sentence that names the axes INLINE (mid-sentence) must not
+    add out-of-section hits that inflate coverage and mask a fully fragmented
+    entity section (entity_matrix has no chapter title to slice on)."""
+    entities = ["A", "B", "C", "D"]
+    axes = ("Signature techniques", "Key arc appearances")
+    # Entity section is fully fragmented — no canonical lead-in for either axis.
+    frag = "\n".join(f"## {e}\n\n**Its own thing for {e}.** Body about {e}.\n" for e in entities)
+    # Framing paragraph names both axes inline (mid-sentence), twice each.
+    framing = (
+        "# Title\n\n## 0 Framing\n\n"
+        "This section evaluates **Signature techniques.** and **Key arc appearances.** "
+        "weighing **Signature techniques.** against **Key arc appearances.** throughout.\n\n"
+    )
+    audit = validation._validate_micro_template(framing + frag, _em(entities=entities, axes=axes))
+    assert audit is not None
+    # Inline mentions are not lead-ins → they do not count; fragmentation stands.
+    assert audit["axis_coverage"]["Signature techniques"] == 0.0, audit
+    assert audit["axis_coverage"]["Key arc appearances"] == 0.0, audit
+    assert audit["min_axis_coverage"] < 0.5, audit
 
 
 def test_full_coverage_when_canonical_label_used_for_every_entity():
