@@ -1201,9 +1201,10 @@ def _validate_entity_coverage(article: str, entity_matrix) -> dict | None:
     entities = entity_matrix.get("entities")
     if not isinstance(entities, list) or len(entities) < 3:
         return None
-    # All heading TEXT (any level), so a per-entity section heading counts but a
-    # matrix table row (a `| ... |` line, not a heading) does not.
-    heading_text = "\n".join(re.findall(r"(?m)^#{1,4}\s+(.+)$", article))
+    # All heading TEXT (H1-H6, so a deep per-entity section heading still counts;
+    # greptile regex-heading-coverage: cap at 6, not 4), so a per-entity section
+    # heading counts but a matrix table row (a `| ... |` line) does not.
+    heading_text = "\n".join(re.findall(r"(?m)^#{1,6}\s+(.+)$", article))
     n_expanded = 0
     missing: list[str] = []
     for ent in entities:
