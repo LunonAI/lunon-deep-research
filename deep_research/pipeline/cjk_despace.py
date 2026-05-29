@@ -73,6 +73,23 @@ def _strip_boilerplate(text: str) -> tuple[str, int]:
     return out, n
 
 
+# L5 (2026-05-29): leaked internal scaffolding tokens that the Qianfan
+# head-to-head saw as reader-facing junk in ZH prose (本报告的契约, bare AC19/
+# R-1..R-6 rubric/criterion ids). Strip `本报告的契约` (always our literal
+# contract phrase) and bare AC\d / R-\d ONLY when adjacent to Hanzi (a ZH-prose
+# leak). EN tier-ranking R-N (in tables / EN prose, never Hanzi-adjacent) and
+# legitimate "AC"/"R-2" usage are untouched — and it runs on the MASKED text so
+# links/footnotes/code are shielded.
+# `\b` can't be used as the token boundary here: CJK chars are word characters
+# in Unicode mode, so there is NO `\b` between a digit and an adjacent Hanzi.
+# Use explicit non-alnum guards instead so a Hanzi-sandwiched AC19/R-2 matches
+# while EN tokens (preceded/followed by ASCII letters) are left intact.
+_ZH_SCAFFOLD_RE = re.compile(
+    r"本报告的契约"
+    r"|(?<=[一-鿿])[ \t]*(?:AC\d{1,3}|R-\d{1,2})(?![A-Za-z0-9])"
+    r"|(?<![A-Za-z0-9])(?:AC\d{1,3}|R-\d{1,2})[ \t]*(?=[一-鿿])"
+)
+
 # Languages whose prose can carry CAPEL CJK spacing. A label outside this set
 # is treated as an explicit "skip the CJK scan" override (see despace()).
 _CJK_LANGS = frozenset({"zh", "ja", "ko"})
@@ -82,7 +99,7 @@ def despace(text: str, language: str | None = None) -> tuple[str, dict]:
     """Collapse CAPEL-induced spaces between adjacent CJK chars (and between a
     CJK char and CJK punctuation), scoped to body prose. Also strips the
     `Per the rubric` scaffolding leak. Returns (text, stats)."""
-    stats = {"cjk_space_collapsed": 0, "boilerplate_stripped": 0}
+    stats = {"cjk_space_collapsed": 0, "boilerplate_stripped": 0, "scaffold_stripped": 0}
     if not isinstance(text, str) or not text:
         return text, stats
 
@@ -131,5 +148,9 @@ def despace(text: str, language: str | None = None) -> tuple[str, dict]:
     masked, n1 = re.subn(rf"(?<=[{_CJK}])[{_ABNORMAL_WS}]+(?=[{_CJK}{_CJK_PUNCT}])", "", masked)
     masked, n2 = re.subn(rf"(?<=[{_CJK_PUNCT}])[{_ABNORMAL_WS}]+(?=[{_CJK}])", "", masked)
     stats["cjk_space_collapsed"] = n1 + n2
+
+    # L5: strip leaked internal scaffolding tokens from ZH body prose.
+    masked, n3 = _ZH_SCAFFOLD_RE.subn("", masked)
+    stats["scaffold_stripped"] = n3
 
     return _restore(masked), stats

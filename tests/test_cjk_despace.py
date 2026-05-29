@@ -133,10 +133,31 @@ def test_pre_existing_nul_in_input_does_not_crash():
 
 
 def test_fail_soft_on_bad_input():
-    assert cjk_despace.despace("") == ("", {"cjk_space_collapsed": 0, "boilerplate_stripped": 0})
+    out, stats = cjk_despace.despace("")
+    assert out == ""
+    assert all(v == 0 for v in stats.values())
     out, stats = cjk_despace.despace(None)
     assert out is None
     assert all(v == 0 for v in stats.values())
+
+
+def test_l5_strips_zh_scaffolding_tokens():
+    """L5 (2026-05-29): leaked internal scaffolding tokens (本报告的契约, and
+    AC\\d/R-\\d adjacent to Hanzi) are stripped from ZH prose."""
+    padding = "正 文 内 容 段 落 充 足 " * 20
+    out, stats = cjk_despace.despace(padding + "本报告的契约要求每个实体AC19都要展开，满足R-2标准。", language="zh")
+    assert "本报告的契约" not in out
+    assert "AC19" not in out
+    assert "R-2" not in out
+    assert stats["scaffold_stripped"] >= 3
+
+
+def test_l5_preserves_en_tier_ranking_rubric_ids():
+    """EN tier-ranking R-N (in tables / EN prose, never Hanzi-adjacent) must
+    survive — the tier-ranking validator's R-N cross-reference depends on it."""
+    en = "Scored per R-1 and R-2 in the table below.\n\n| Entity | R-1 | R-2 |\n|---|---|---|\n| A | 8.0 | 7.0 |\n" * 2
+    out, _ = cjk_despace.despace(en, language="en")
+    assert "R-1" in out and "R-2" in out
 
 
 def test_does_not_touch_heading_hashes_or_numbers():
