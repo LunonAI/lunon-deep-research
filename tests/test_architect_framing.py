@@ -53,11 +53,13 @@ def test_framing_chapter_constants_match_spec():
 
 
 def test_framing_chapter_required_archetypes_pinned():
-    """list-all, compare, explain-mechanism, predict, recommend require
-    framing chapter. trend is optional (single-axis trend tasks don't
-    benefit from a methodology preamble)."""
-    expected = {"list-all", "compare", "explain-mechanism", "predict", "recommend"}
+    """compare, explain-mechanism, predict, recommend require a framing
+    chapter. trend is optional (single-axis trend tasks don't benefit from a
+    methodology preamble). G11-A: list-all is EXCLUDED — the fresh #1 corpus
+    (q91/q89) carries no §0.x framing for roster prompts."""
+    expected = {"compare", "explain-mechanism", "predict", "recommend"}
     assert architect._FRAMING_CHAPTER_REQUIRED_ARCHETYPES == frozenset(expected)
+    assert "list-all" not in architect._FRAMING_CHAPTER_REQUIRED_ARCHETYPES
 
 
 def test_framing_chapter_rubric_required_archetypes_pinned():
@@ -103,6 +105,21 @@ def test_normalize_trend_archetype_no_framing_no_shortfall():
     audit = plan["_outline_audit"]
     fc_shortfalls = [s for s in audit["shortfalls"] if "framing_chapter=missing" in s]
     assert fc_shortfalls == [], f"trend should not require framing: {audit['shortfalls']}"
+
+
+def test_normalize_list_all_archetype_no_framing_no_shortfall():
+    """G11-A (2026-05-28): list-all was REMOVED from
+    `_FRAMING_CHAPTER_REQUIRED_ARCHETYPES`. A list-all plan with NO
+    framing_chapter must therefore fire no missing-chapter shortfall —
+    exercising the behaviour, not just the `"list-all" not in ...`
+    constant-value pin in `test_framing_chapter_required_archetypes_pinned`.
+    Mirrors the trend no-shortfall test above."""
+    plan = _bare_plan_with_framing()
+    plan.pop("framing_chapter")
+    architect._normalize(plan, archetype="list-all")
+    audit = plan["_outline_audit"]
+    fc_shortfalls = [s for s in audit["shortfalls"] if "framing_chapter=missing" in s]
+    assert fc_shortfalls == [], f"list-all should not require framing: {audit['shortfalls']}"
 
 
 def test_normalize_audit_records_sub_section_types():

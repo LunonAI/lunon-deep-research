@@ -66,8 +66,8 @@ def test_limitations_rule_names_scenario_stress_test_for_predict():
 def test_limitations_rule_installed_when_has_limitations_chapter_true():
     """Greptile PR #45 round-6 issue #2 (2026-05-27): the rule is
     gated on `has_limitations_chapter`. When the caller signals the
-    plan carries the chapter (predict / compare / explain-mechanism /
-    list-all), the rule must appear in the assembled system prompt."""
+    plan carries the chapter (predict / compare / explain-mechanism),
+    the rule must appear in the assembled system prompt."""
     sys_prompt = wr.writer_system(
         archetype="predict",
         domain="default",
@@ -108,7 +108,7 @@ def test_limitations_rule_defaults_omitted_when_flag_not_passed():
     gets the default `False`, which omits the rule. Mirrors the
     `has_stakeholder_chapter` default-False behaviour. The textual
     self-guard inside the rule ("required for predict / compare /
-    explain-mechanism / list-all archetypes when `limitations_chapter`
+    explain-mechanism archetypes when `limitations_chapter`
     is in the plan") would still kick in if a future caller forgot
     the flag, preventing silent breakage."""
     sys_prompt = wr.writer_system(
