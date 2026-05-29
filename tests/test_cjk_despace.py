@@ -104,9 +104,11 @@ def test_language_override_skips_cjk_despace():
     assert stats_en["cjk_space_collapsed"] == 0, "en label should skip CJK de-spacing"
     out_zh, stats_zh = cjk_despace.despace(cjk, language="zh")
     assert stats_zh["cjk_space_collapsed"] >= 6, "zh label should de-space"
-    # Region subtag tolerated; None falls back to the Hanzi-count guard.
-    _, stats_region = cjk_despace.despace(cjk, language="zh-CN")
-    assert stats_region["cjk_space_collapsed"] >= 6
+    # Region subtag tolerated for BOTH hyphen and underscore notation
+    # (Greptile PR #66 round-4: "zh_CN" must not be read as a non-CJK label).
+    for label in ("zh-CN", "zh_CN"):
+        _, stats_region = cjk_despace.despace(cjk, language=label)
+        assert stats_region["cjk_space_collapsed"] >= 6, label
 
 
 def test_fail_soft_on_bad_input():
