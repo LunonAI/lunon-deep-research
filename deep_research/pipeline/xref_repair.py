@@ -188,9 +188,12 @@ def repair(text: str) -> tuple[str, dict]:
         # (sub)string has no neighbouring token to join, so collapse it to
         # nothing — otherwise the general interior rule below would leave a
         # spurious leading/trailing space (e.g. "§99 explains this" → leading
-        # " explains this"). Run before the interior collapse.
-        s = re.sub(rf"^\s*{_SENT}\s*", "", s)
-        s = re.sub(rf"\s*{_SENT}\s*$", "", s)
+        # " explains this"). The `+` absorbs a whole RUN of leading/trailing
+        # markers in one pass, so consecutive dangling bare refs separated by
+        # only whitespace ("§5.16 §5.42 text" → "\x00 \x00 text") leave no
+        # residual leading space. Run before the interior collapse.
+        s = re.sub(rf"^(?:\s*{_SENT}\s*)+", "", s)
+        s = re.sub(rf"(?:\s*{_SENT}\s*)+$", "", s)
         # Collapse every remaining (interior) marker (and surrounding
         # whitespace) to one space.
         s = re.sub(rf"\s*{_SENT}\s*", " ", s)
