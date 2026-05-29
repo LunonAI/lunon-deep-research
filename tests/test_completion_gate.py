@@ -16,6 +16,15 @@ def test_approx_tokens_en_and_cjk():
     assert o._approx_tokens("研究背景与方法" * 10) > o._approx_tokens("x" * 70)  # CJK denser per char
 
 
+def test_approx_tokens_counts_cjk_extension_a():
+    """Greptile PR #69 round-1: CJK Extension A ideographs (U+3400–U+4DBF) are
+    billed at the dense CJK rate (~1.6 chars/token), not the sparse ~4 chars/token
+    'other' rate — matching cjk_despace._CJK. Before the fix an Ext-A char was
+    counted as 'other' and `_approx_tokens` matched the EN baseline exactly."""
+    # 16 Ext-A ideographs vs 16 ASCII chars: CJK rate must yield a higher estimate.
+    assert o._approx_tokens("㐀㐁㐂㐃㐄㐅㐆㐇㐈㐉㐊㐋㐌㐍㐎㐏") > o._approx_tokens("x" * 16)
+
+
 def test_approx_tokens_strips_heading_lines():
     body = "## 1 Heading That Is Quite Long And Wordy\n\nshort body."
     # Heading line excluded → count reflects body only, not the long heading.

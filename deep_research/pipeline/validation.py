@@ -1205,13 +1205,21 @@ def _validate_entity_coverage(article: str, entity_matrix) -> dict | None:
     # greptile regex-heading-coverage: cap at 6, not 4), so a per-entity section
     # heading counts but a matrix table row (a `| ... |` line) does not.
     heading_text = "\n".join(re.findall(r"(?m)^#{1,6}\s+(.+)$", article))
+    # Greptile PR #69 round-1 (2026-05-29): case-INSENSITIVE membership. The writer
+    # routinely re-cases an architect-declared entity ("IBM Quantum" -> heading
+    # "## IBM quantum"); a casing-only mismatch must NOT count the entity as missing,
+    # or a cluster of EN-named entities could push a near-compliant article below
+    # _ENTITY_COVERAGE_MIN_RATIO and force a needless regen. Mirrors the IGNORECASE
+    # treatment in _entity_axis_fragmentation above. `missing` keeps the original
+    # casing for readable telemetry.
+    heading_text_lc = heading_text.lower()
     n_expanded = 0
     missing: list[str] = []
     for ent in entities:
         e = str(ent).strip()
         if not e:
             continue
-        if e in heading_text:
+        if e.lower() in heading_text_lc:
             n_expanded += 1
         else:
             missing.append(e)

@@ -152,6 +152,30 @@ def test_l5_strips_zh_scaffolding_tokens():
     assert stats["scaffold_stripped"] >= 3
 
 
+def test_l5_strips_cjk_scaffolding_in_ja_too():
+    """Greptile PR #69 round-1: the scaffold strip is CJK-gated, not ZH-only. A
+    JA article that clears the CJK guard has rubric-id leaks (AC\\d/R-\\d) adjacent
+    to Han ideographs stripped just like ZH — the de-scaffolder follows
+    `_CJK_LANGS`, which includes ja/ko."""
+    padding = "技術評価基準分析結果報告書" * 5  # 65 Kanji → clears the 50-char CJK guard
+    out, stats = cjk_despace.despace(padding + "基準AC19達成、評価R-2基準", language="ja")
+    assert "AC19" not in out
+    assert "R-2" not in out
+    assert stats["scaffold_stripped"] >= 2
+
+
+def test_l5_strips_scaffold_adjacent_to_cjk_extension_a():
+    """Greptile PR #69 round-1: fix (B) widened the AC\\d/R-\\d adjacency class
+    from the main CJK block to the full `_CJK` constant (+ Extension A). This pins
+    that exact delta: a rubric-id leak flanked ONLY by Extension-A ideographs
+    (U+3400–U+4DBF) is stripped now but was NOT under the old main-block class
+    (the ja-gating test above passes pre- and post-fix and so can't pin it)."""
+    padding = "㐀㐁㐂㐃㐄㐅㐆㐇㐈㐉" * 6  # 60 Ext-A ideographs → clears the 50-char CJK guard
+    out, stats = cjk_despace.despace(padding + "㐀AC19㐁", language="zh")
+    assert "AC19" not in out, f"Ext-A-adjacent scaffold not stripped: {out!r}"
+    assert stats["scaffold_stripped"] >= 1
+
+
 def test_l5_preserves_en_tier_ranking_rubric_ids():
     """EN tier-ranking R-N (in tables / EN prose, never Hanzi-adjacent) must
     survive — the tier-ranking validator's R-N cross-reference depends on it."""

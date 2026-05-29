@@ -74,20 +74,30 @@ def _strip_boilerplate(text: str) -> tuple[str, int]:
 
 
 # L5 (2026-05-29): leaked internal scaffolding tokens that the Qianfan
-# head-to-head saw as reader-facing junk in ZH prose (本报告的契约, bare AC19/
+# head-to-head saw as reader-facing junk in CJK prose (本报告的契约, bare AC19/
 # R-1..R-6 rubric/criterion ids). Strip `本报告的契约` (always our literal
-# contract phrase) and bare AC\d / R-\d ONLY when adjacent to Hanzi (a ZH-prose
-# leak). EN tier-ranking R-N (in tables / EN prose, never Hanzi-adjacent) and
-# legitimate "AC"/"R-2" usage are untouched — and it runs on the MASKED text so
-# links/footnotes/code are shielded.
+# contract phrase) and bare AC\d / R-\d ONLY when adjacent to a CJK ideograph
+# (a CJK-prose leak). EN tier-ranking R-N (in tables / EN prose, never
+# CJK-adjacent) and legitimate "AC"/"R-2" usage are untouched — and it runs on
+# the MASKED text so links/footnotes/code are shielded.
+#
+# Greptile PR #69 round-1 (2026-05-29): this is CJK-gated, NOT strictly ZH. The
+# pass runs on any article that clears despace()'s CJK guard, and
+# `_CJK_LANGS = {zh, ja, ko}`, so JA/KO articles are de-scaffolded too. That is
+# intentional: an AC19/R-2 rubric id abutting a Han ideograph is a scaffolding
+# leak in Kanji/Hanja prose exactly as in Hanzi, and the ZH-only `本报告的契约`
+# literal simply never appears in JA/KO output (harmless there). The adjacency
+# class reuses `_CJK` (Unified Ideographs + Ext A) so it can never drift from the
+# de-spacer's own CJK definition — hence the rename from `_ZH_SCAFFOLD_RE`.
+#
 # `\b` can't be used as the token boundary here: CJK chars are word characters
-# in Unicode mode, so there is NO `\b` between a digit and an adjacent Hanzi.
-# Use explicit non-alnum guards instead so a Hanzi-sandwiched AC19/R-2 matches
+# in Unicode mode, so there is NO `\b` between a digit and an adjacent ideograph.
+# Use explicit non-alnum guards instead so a CJK-sandwiched AC19/R-2 matches
 # while EN tokens (preceded/followed by ASCII letters) are left intact.
-_ZH_SCAFFOLD_RE = re.compile(
+_CJK_SCAFFOLD_RE = re.compile(
     r"本报告的契约"
-    r"|(?<=[一-鿿])[ \t]*(?:AC\d{1,3}|R-\d{1,2})(?![A-Za-z0-9])"
-    r"|(?<![A-Za-z0-9])(?:AC\d{1,3}|R-\d{1,2})[ \t]*(?=[一-鿿])"
+    r"|(?<=[" + _CJK + r"])[ \t]*(?:AC\d{1,3}|R-\d{1,2})(?![A-Za-z0-9])"
+    r"|(?<![A-Za-z0-9])(?:AC\d{1,3}|R-\d{1,2})[ \t]*(?=[" + _CJK + r"])"
 )
 
 # Languages whose prose can carry CAPEL CJK spacing. A label outside this set
@@ -149,8 +159,8 @@ def despace(text: str, language: str | None = None) -> tuple[str, dict]:
     masked, n2 = re.subn(rf"(?<=[{_CJK_PUNCT}])[{_ABNORMAL_WS}]+(?=[{_CJK}])", "", masked)
     stats["cjk_space_collapsed"] = n1 + n2
 
-    # L5: strip leaked internal scaffolding tokens from ZH body prose.
-    masked, n3 = _ZH_SCAFFOLD_RE.subn("", masked)
+    # L5: strip leaked internal scaffolding tokens from CJK body prose (zh/ja/ko).
+    masked, n3 = _CJK_SCAFFOLD_RE.subn("", masked)
     stats["scaffold_stripped"] = n3
 
     return _restore(masked), stats

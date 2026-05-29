@@ -451,7 +451,12 @@ def _approx_tokens(text: str) -> int:
     if not text:
         return 0
     body = "\n".join(ln for ln in text.split("\n") if not ln.lstrip().startswith("#"))
-    cjk = sum(1 for ch in body if "一" <= ch <= "鿿")
+    # Count CJK Unified Ideographs (U+4E00–U+9FFF) AND Extension A (U+3400–U+4DBF).
+    # Greptile PR #69 round-1 (2026-05-29): the second range was missing, so Ext A
+    # Hanzi were billed at the ~4 chars/token "other" rate (≈0.25 tok/char) instead
+    # of the ~1.6 CJK rate — an Ext-A-heavy section under-counts and could be held
+    # as thin longer than warranted. These two ranges mirror `cjk_despace._CJK`.
+    cjk = sum(1 for ch in body if "一" <= ch <= "鿿" or "㐀" <= ch <= "䶿")
     other = len(body) - cjk
     return int(cjk / 1.6 + other / 4)
 
