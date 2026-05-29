@@ -125,8 +125,8 @@ from . import archetype as _arch
 from ._env import assert_phase, log_usage
 from .pipeline import (
     architect,
-    criteria_spec,
     cjk_despace,
+    criteria_spec,
     design_guide,
     evidence_dedup,
     footnote_normalize,
