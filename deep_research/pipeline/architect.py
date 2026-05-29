@@ -289,6 +289,16 @@ HARD RULES:
   contract with the reader — the reference's verified corpus-wide pattern
   (10/11 articles) and the single most distinguishing structural move
   separating their record-class scores from a survey-style report.
+- L2 NUMERIC SPINE (quantitative prompts — those whose core deliverable is a
+  headline count / total / market size / quantity): in the framing/methodology
+  chapter, anchor ONE base headline figure to a NAMED, CITED datapoint and a
+  stated derivation; that single figure (and anything derived from it) MUST be
+  reused VERBATIM in the abstract, every body chapter, and the forecast — never
+  re-derive a different total per chapter. A quantitative report must yield ONE
+  coherent, extractable headline answer; emitting multiple conflicting totals is
+  the worst possible instruction-following defect for a quantitative prompt.
+  Make the anchoring datapoint + derivation explicit in the plan so every
+  downstream chapter computes from the same base.
 - L7 META-CAUSAL SYNTHESIS (explain-mechanism / predict / trend archetypes):
   include a dedicated synthesis chapter near the end whose depth_seeds build an
   EXPLICIT causal scaffold — (a) enumerate the coupling paths among the
