@@ -220,14 +220,18 @@ def run(inp: ValidationInput) -> ValidationOutput:
         if not _section_present(inp.article, s.title):
             missing.append(s.section_id + ":" + s.title)
             continue
-        ok, body_tok = _section_length_ok(inp.article, s.title, s.expected_length_tokens)
+        # Greptile PR #69 round-2: read through ScaffoldSection.effective_length_tokens
+        # (the single-source-of-truth None/0→1200 fallback) so this length walk can
+        # never crash at `int(0.7 * …)` on an unset target — matching orchestrate's
+        # _expected_tok_for path.
+        ok, body_tok = _section_length_ok(inp.article, s.title, s.effective_length_tokens)
         if not ok:
             short.append(
                 {
                     "section": s.section_id,
                     "title": s.title,
                     "got_tok": body_tok,
-                    "min_tok": int(0.7 * s.expected_length_tokens),
+                    "min_tok": int(0.7 * s.effective_length_tokens),
                 }
             )
     counts["sections_missing"] = len(missing)

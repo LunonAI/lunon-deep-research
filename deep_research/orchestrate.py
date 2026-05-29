@@ -480,7 +480,11 @@ def _expected_tok_for(scaffold, sid: str) -> int:
     if scaffold:
         for sec in scaffold.sections:
             if sec.section_id == sid:
-                return sec.expected_length_tokens
+                # Greptile PR #69 round-2: go through the single-source-of-truth
+                # property so an unset/None/0 field falls back to 1200 (honoring
+                # the `-> int` contract) the SAME way validation.run does — never
+                # leak None to arithmetic callers like _write_with_guide.
+                return sec.effective_length_tokens
     return 1200
 
 
@@ -560,6 +564,17 @@ def _run_section_loop(s: PipelineState, query, language):
                         "degraded": False,
                     }
                 )
+                # L1 (Greptile PR #69 round-2): a draft that is BOTH grounding-
+                # deficient AND hollow must hear BOTH signals. Previously this
+                # branch rewrote on grounding-only feedback and `continue`d, so a
+                # thin+ungrounded section could burn every INNER_CAP pass on
+                # grounding rewrites and never be told to expand — it surfaced in
+                # final_thin telemetry but the targeted expand prompt was never
+                # injected. Combine the directives exactly as the scoring branch
+                # does below.
+                gfb = grounding.feedback_text(g)
+                if _section_too_thin(draft_s, expected_tok):
+                    gfb = (gfb + " " + _expand_feedback(expected_tok)).strip()
                 draft_s, stats = _write_with_guide(
                     u,
                     plan,
@@ -572,7 +587,7 @@ def _run_section_loop(s: PipelineState, query, language):
                     s.design_guide,
                     s.scaffold,
                     task_id=s.task_id,
-                    feedback=grounding.feedback_text(g),
+                    feedback=gfb,
                 )
                 _accum(stats)
                 continue
@@ -676,12 +691,11 @@ def _write_with_guide(
     (env `DR_CAPEL_G != off`); callers either record them in `s.capel_stats`
     or discard.
     """
-    expected_tok = 1200
-    if scaffold:
-        for sec in scaffold.sections:
-            if sec.section_id == u["id"]:
-                expected_tok = sec.expected_length_tokens
-                break
+    # Source-of-truth: reuse _expected_tok_for so the lookup + None→1200 fallback
+    # live in ONE place. The old inline copy here could assign None (unset
+    # expected_length_tokens), which then crashed at `int(0.7 * expected_tok)`
+    # below. (Greptile PR #69 round-2.)
+    expected_tok = _expected_tok_for(scaffold, u["id"])
     extra = ""
     if guide:
         extra = f"\n\nDESIGN GUIDE (apply to this section):\n{guide.as_writer_block()}"
