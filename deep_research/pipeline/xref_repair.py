@@ -9,11 +9,16 @@ PROSE_LEAD_RULE`:
      but a regression in writer model behaviour could re-introduce them
      silently. This repair detects + rewrites the offending sentence to a
      clean substantive intro derived from the chapter title.
-  2. Dangling forward-references — `§N` where N is not in the article's
-     heading set. The writer occasionally hallucinates forward refs to
-     chapters that never materialize (e.g. "§47 below" in an article that
-     ends at §40). Repair: either rewrite to "a later section" OR delete
-     the offending sentence if the §N is the only meaningful clause.
+  2. Dangling forward-references — `§N` / `§N.M` where the target is not in
+     the article's heading set. The writer occasionally hallucinates forward
+     refs to chapters that never materialize (e.g. "§47 below" in an article
+     that ends at §40, or "§5.16" when chapter 5 only renders §5.1–§5.4).
+     Repair (G2, 2026-05-28): EXCISE the dangling ref and clean up the orphan
+     glue it leaves (list commas, range dashes, empty parens) — NOT rewrite it
+     to "a later section" (which manufactured grammar breaks like "the Next
+     Dimension a later section cited on…" and range-collapse artifacts like
+     "§2–a later section"). If the ref is the sentence's only meaningful
+     clause, delete the sentence.
 
 Idempotent: running repair() twice produces the same output.
 
@@ -63,14 +68,21 @@ def repair(text: str) -> tuple[str, dict]:
     Returns (repaired_text, stats) where stats is:
       {
         "templates_repaired": int,    # "Building on §X" → topic-substantive intro
-        "dangling_refs_rewritten": int,  # §N → "a later section"
+        "dangling_refs_excised": int,  # §N / §N.M removed (orphan glue cleaned up)
         "sentences_deleted": int,     # sentences whose only meaningful clause was a dangling §N
       }
     """
     if not isinstance(text, str) or not text:
-        return text, {"templates_repaired": 0, "dangling_refs_rewritten": 0, "sentences_deleted": 0}
+        return text, {"templates_repaired": 0, "dangling_refs_excised": 0, "sentences_deleted": 0}
 
-    stats = {"templates_repaired": 0, "dangling_refs_rewritten": 0, "sentences_deleted": 0}
+    # G2 (Greptile PR #62): the `_SENT = "\x00"` excision marker assumes NUL
+    # never occurs in article text. Enforce that invariant at the entry point —
+    # if an upstream pass emits embedded NUL bytes, the `_cleanup_excised`
+    # regexes would silently mis-process those positions as if they were
+    # excision markers. Stripping NULs here keeps the sentinel unambiguous.
+    text = text.replace("\x00", "")
+
+    stats = {"templates_repaired": 0, "dangling_refs_excised": 0, "sentences_deleted": 0}
 
     # PASS 1: chapter-opening "Building on §X" templates.
     # The template typically takes the form:
@@ -89,8 +101,8 @@ def repair(text: str) -> tuple[str, dict]:
     # PASS 2: dangling forward-refs. Build heading set FIRST so the
     # repair below knows which §N targets are legitimate. Then scan
     # body for `(Section N)` / `(§N)` / `Section N` etc.; for each that's
-    # not in the heading set, either rewrite to "a later section" OR
-    # delete the sentence.
+    # not in the heading set, either excise the ref (G2) OR delete the
+    # sentence when the ref is its only meaningful clause.
     heading_ids = _heading_ids(text)
 
     # Match parenthetical and bare numeric §-refs; we don't repair ZH
@@ -106,14 +118,16 @@ def repair(text: str) -> tuple[str, dict]:
             return False
         if clean in heading_ids:
             return False
+        # `N.M` is valid only when a DEEPER heading `N.M(.x)` actually renders.
         if any(h.startswith(f"{clean}.") for h in heading_ids):
             return False
-        # `N.M` is not dangling when its top-level chapter `N` exists.
-        # The writer may reference a sub-section of an existing chapter
-        # even when that sub-section heading isn't explicitly rendered.
-        top = clean.split(".", 1)[0]
-        if top in heading_ids:
-            return False
+        # G12 (2026-05-28): the prior `top in heading_ids` exemption treated
+        # any `N.M` as valid whenever its top chapter `N` existed — so `§5.16`
+        # passed when chapter 5 rendered only §5.1–§5.4 (id=91 leaked §5.16/
+        # §5.31/§5.42; id=14/§9.3; id=37/§3.4.2). A reference to a sub-section
+        # that never materializes is a broken nav pointer. Strict rule (no
+        # top-chapter exemption, no flat-chapter carve-out): if neither the
+        # exact id nor a deeper id renders, it is dangling.
         return True
 
     # Sentence-aware repair: split on sentence boundaries, examine each
@@ -128,40 +142,83 @@ def repair(text: str) -> tuple[str, dict]:
     # markdown rendering for every paragraph that happened to end in
     # `.\n\n## `. The capture group `(...)` makes `re.split` emit
     # separators as interleaved entries: [sent, sep, sent, sep, ..., sent].
-    # Rewriter closure shared between the heading-guard path (round-3)
-    # and the regular rewrite path below. Defined ONCE before the loop
-    # so the heading guard on the very first iteration can call it —
-    # the prior definition was inside the loop, which meant a
-    # heading-rooted dangler in the first sentence would have hit a
-    # NameError before _rewrite was bound. `_looks_dangling` is closed
-    # over from the outer scope; `stats` is mutated via nonlocal.
-    def _rewrite(m: re.Match) -> str:
+    # G2 (2026-05-28): EXCISE dangling refs rather than rewrite them to
+    # "a later section". Each excised ref is first replaced by a private
+    # marker (`_SENT`, a NUL char that never occurs in article text); a
+    # second cleanup pass then absorbs the orphan GLUE the removed ref used
+    # to anchor — but ONLY glue directly adjacent to a marker, so legitimate
+    # em-dashes/commas elsewhere in the prose are untouched. This is what
+    # makes range cases ("§9–§15" with §15 dangling → "§9", not "§9–") and
+    # list cases ("across §5.16, §5.31, §5.42" → "across") clean instead of
+    # leaving orphan dashes/commas. Closures defined ONCE before the loop so
+    # the heading-guard path on the first iteration can call them.
+    _SENT = "\x00"
+
+    def _excise(m: re.Match) -> str:
         nonlocal stats
         num = m.group(1) or m.group(2) or m.group(3)
         if num and _looks_dangling(num):
-            stats["dangling_refs_rewritten"] += 1
-            # Preserve parenthesization if the original was parenthesized
-            if m.group(0).startswith("("):
-                return "(a later section)"
-            return "a later section"
+            stats["dangling_refs_excised"] += 1
+            return _SENT
         return m.group(0)
 
-    # Greptile PR #39 round-4: scope `ref_pattern.sub(_rewrite, …)` to
-    # body lines only. `ref_pattern`'s third alternation matches title
-    # words like "Chapter 47" / "Section 99" in headings (`## 5 Chapter
-    # 47 Overview`). A naive whole-sentence sub would rewrite those to
-    # "a later section", corrupting the navigational layer. Title text
-    # is naming the chapter, not navigating to it — the rewriter should
-    # leave it alone. The line-by-line filter applies `_rewrite` only
-    # to non-heading lines; heading-marker lines (`^#{2,4}\s+`) pass
-    # through verbatim. The hot-path check `re.search` avoids the
-    # split/join overhead for the common case of a token with no
-    # heading inside it.
-    def _rewrite_body_only(text: str) -> str:
+    def _cleanup_excised(s: str) -> str:
+        if _SENT not in s:
+            return s
+        # Absorb glue immediately adjacent to a marker (range dash either
+        # side, list comma either side, enclosing parens) BEFORE collapsing
+        # the marker itself. Each rule is anchored on `_SENT`, so a dash or
+        # comma that is NOT next to a removed ref is left alone.
+        s = re.sub(rf"{_SENT}\s*[–—-]", _SENT, s)
+        s = re.sub(rf"[–—-]\s*{_SENT}", _SENT, s)
+        s = re.sub(rf"{_SENT}\s*,", _SENT, s)
+        s = re.sub(rf",\s*{_SENT}", _SENT, s)
+        # G2 (Greptile PR #62 issue 1): absorb an English conjunction stranded
+        # next to a marker by the excision. After the comma rules above, an
+        # all-dangling list like "§5.16, §5.31, and §5.42" collapses to
+        # "\x00 \x00 and \x00", leaving "and" orphaned between markers — which
+        # would surface as prose like "scattered across and throughout". These
+        # rules absorb a conjunction ONLY when it is directly adjacent to a
+        # marker (whitespace-separated), so mid-sentence conjunctions in normal
+        # prose ("See \x00 today and tomorrow") are left untouched.
+        s = re.sub(rf"\b(?:and|or)\s+{_SENT}", _SENT, s, flags=re.I)
+        s = re.sub(rf"{_SENT}\s+(?:and|or)\b", _SENT, s, flags=re.I)
+        s = re.sub(rf"\(\s*{_SENT}\s*\)", _SENT, s)
+        # G2 (Greptile PR #62 issue 2): a marker at the very start/end of the
+        # (sub)string has no neighbouring token to join, so collapse it to
+        # nothing — otherwise the general interior rule below would leave a
+        # spurious leading/trailing space (e.g. "§99 explains this" → leading
+        # " explains this"). The `+` absorbs a whole RUN of leading/trailing
+        # markers in one pass, so consecutive dangling bare refs separated by
+        # only whitespace ("§5.16 §5.42 text" → "\x00 \x00 text") leave no
+        # residual leading space. Run before the interior collapse.
+        s = re.sub(rf"^(?:\s*{_SENT}\s*)+", "", s)
+        s = re.sub(rf"(?:\s*{_SENT}\s*)+$", "", s)
+        # Collapse every remaining (interior) marker (and surrounding
+        # whitespace) to one space.
+        s = re.sub(rf"\s*{_SENT}\s*", " ", s)
+        # Normalise the seams left behind.
+        s = re.sub(r"\(\s*\)", "", s)  # empty parens
+        s = re.sub(r"\s+([,.;:!?])", r"\1", s)  # space before punctuation
+        s = re.sub(r"\(\s+", "(", s)
+        s = re.sub(r"\s+\)", ")", s)
+        s = re.sub(r"[ \t]{2,}", " ", s)
+        return s
+
+    # Greptile PR #39 round-4: scope the sub to body lines only. `ref_pattern`'s
+    # third alternation matches title words like "Chapter 47" / "Section 99" in
+    # headings (`## 5 Chapter 47 Overview`). A naive whole-sentence sub would
+    # excise those, corrupting the navigational layer. Title text is naming the
+    # chapter, not navigating to it — leave it alone. The line-by-line filter
+    # applies excision only to non-heading lines; heading-marker lines
+    # (`^#{2,4}\s+`) pass through verbatim. The hot-path `re.search` avoids the
+    # split/join overhead for the common case of a token with no heading.
+    def _excise_body_only(text: str) -> str:
         if not re.search(r"(?m)^#{2,4}\s+", text):
-            return ref_pattern.sub(_rewrite, text)
+            return _cleanup_excised(ref_pattern.sub(_excise, text))
         return "\n".join(
-            line if re.match(r"^#{2,4}\s+", line) else ref_pattern.sub(_rewrite, line) for line in text.split("\n")
+            line if re.match(r"^#{2,4}\s+", line) else _cleanup_excised(ref_pattern.sub(_excise, line))
+            for line in text.split("\n")
         )
 
     tokens = re.split(r"((?<=[.!?])\s+)", text)
@@ -202,18 +259,18 @@ def repair(text: str) -> tuple[str, dict]:
             # includes the heading characters, e.g. `"## 1 Results\n\n
             # See (Section 99)."` → residual `"##1ResultsSee"` = 13
             # chars < 15 → token deleted, heading silently destroyed.
-            # The rewrite path handles this safely (heading preserved,
-            # dangler swapped for "a later section"), so we route
+            # The excise path handles this safely (heading preserved,
+            # dangler excised with glue cleanup), so we route
             # heading-rooted tokens there instead of deleting. We use
             # `(?m)^#{2,4}\s+` (multiline + 2-4 hashes) so any `##`/
             # `###`/`####` heading line inside the token survives.
             if re.search(r"(?m)^#{2,4}\s+", sentence):
-                # Greptile PR #39 round-4: scope rewrite to body lines only.
-                # See `_rewrite_body_only` docstring above the loop —
+                # Greptile PR #39 round-4: scope excision to body lines only.
+                # See `_excise_body_only` docstring above the loop —
                 # without this, heading titles containing "Chapter N" or
-                # "Section N" would be rewritten by `ref_pattern`'s third
+                # "Section N" would be excised by `ref_pattern`'s third
                 # alternation, silently corrupting the navigational layer.
-                out_tokens.append(_rewrite_body_only(sentence))
+                out_tokens.append(_excise_body_only(sentence))
                 out_tokens.append(sep)
                 continue
             # Sentence has no meaningful content after removing the
@@ -231,7 +288,7 @@ def repair(text: str) -> tuple[str, dict]:
             # Fix: carry the deleted sentence's sep forward onto the
             # preceding sep slot when it is more newline-rich, so the
             # next surviving sentence (or heading) retains its block-
-            # level prefix. The rewrite path already preserves sep
+            # level prefix. The excise path already preserves sep
             # unconditionally; this restores symmetry.
             if out_tokens and sep.count("\n") > out_tokens[-1].count("\n"):
                 out_tokens[-1] = sep
@@ -242,14 +299,14 @@ def repair(text: str) -> tuple[str, dict]:
                 out_tokens.append(sep)
             continue
 
-        # Rewrite each dangling ref to "a later section" / "another section".
-        # `_rewrite` is hoisted above the loop (round-3) so the heading-guard
-        # path can share the same closure. `_rewrite_body_only` (round-4)
+        # Excise each dangling ref (G2) and clean up the orphan glue.
+        # `_excise`/`_excise_body_only` are hoisted above the loop so the
+        # heading-guard path can share the same closures. `_excise_body_only`
         # scopes the sub to body lines so heading titles like "Chapter 47"
         # aren't corrupted — important here too because a long-bodied
         # sentence whose token includes a leading heading line still hits
         # this default branch (residual ≥ 15).
-        out_tokens.append(_rewrite_body_only(sentence))
+        out_tokens.append(_excise_body_only(sentence))
         out_tokens.append(sep)
     text = "".join(out_tokens)
 

@@ -135,7 +135,7 @@ def test_persist_drift_includes_xref_repair_stats(tmp_path, monkeypatch):
     state = _FakeState(
         xref_repair_stats={
             "templates_repaired": 2,
-            "dangling_refs_rewritten": 5,
+            "dangling_refs_excised": 5,
             "sentences_deleted": 1,
         }
     )
@@ -144,7 +144,7 @@ def test_persist_drift_includes_xref_repair_stats(tmp_path, monkeypatch):
     rec = _read_last_drift(drift_file)
     assert "xref_repair" in rec, f"drift record missing `xref_repair` key — got keys: {sorted(rec.keys())}"
     assert rec["xref_repair"]["templates_repaired"] == 2
-    assert rec["xref_repair"]["dangling_refs_rewritten"] == 5
+    assert rec["xref_repair"]["dangling_refs_excised"] == 5
     assert rec["xref_repair"]["sentences_deleted"] == 1
 
 
@@ -179,7 +179,7 @@ def test_xref_repair_repair_signature_matches_orchestrate_call():
     text, stats = out
     assert isinstance(text, str), f"first element must be str; got {type(text)}"
     assert isinstance(stats, dict), f"second element must be dict; got {type(stats)}"
-    assert set(stats.keys()) == {"templates_repaired", "dangling_refs_rewritten", "sentences_deleted"}, (
+    assert set(stats.keys()) == {"templates_repaired", "dangling_refs_excised", "sentences_deleted"}, (
         f"stats keys mismatch — drift logger forwards `xref_repair_stats` verbatim, "
         f"so renaming/adding keys requires the test to be updated; got: {sorted(stats.keys())}"
     )
@@ -198,7 +198,7 @@ def test_xref_repair_repair_idempotent_on_clean_article():
     out2, stats2 = xref_repair.repair(out1)
     assert out1 == out2, "repair() is not idempotent — running twice changed the text"
     assert stats2["templates_repaired"] == 0
-    assert stats2["dangling_refs_rewritten"] == 0
+    assert stats2["dangling_refs_excised"] == 0
     assert stats2["sentences_deleted"] == 0
 
 
@@ -209,9 +209,9 @@ def test_xref_repair_repair_handles_empty_and_none():
     (degenerate failure case), the post-pass must not raise."""
     out_empty, stats_empty = xref_repair.repair("")
     assert out_empty == ""
-    assert stats_empty == {"templates_repaired": 0, "dangling_refs_rewritten": 0, "sentences_deleted": 0}
+    assert stats_empty == {"templates_repaired": 0, "dangling_refs_excised": 0, "sentences_deleted": 0}
 
     # Non-string defensive path (e.g. upstream produced None)
     out_none, stats_none = xref_repair.repair(None)  # type: ignore[arg-type]
     assert out_none is None
-    assert stats_none == {"templates_repaired": 0, "dangling_refs_rewritten": 0, "sentences_deleted": 0}
+    assert stats_none == {"templates_repaired": 0, "dangling_refs_excised": 0, "sentences_deleted": 0}
