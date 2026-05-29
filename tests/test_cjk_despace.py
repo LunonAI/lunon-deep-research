@@ -82,6 +82,33 @@ def test_strips_per_the_rubric_scaffolding():
     assert "strong on the originality axis" in out
 
 
+def test_boilerplate_strip_at_paragraph_start_preserves_newline():
+    """Greptile PR #66 round-2: the leading whitespace in _BOILERPLATE_RE is
+    horizontal-only ([^\\S\\n]), so a scaffolding phrase at the start of a
+    paragraph cannot swallow the preceding newline and merge two paragraphs."""
+    text = "First paragraph ends here.\n\nPer the rubric, the second paragraph is strong."
+    out, stats = cjk_despace.despace(text)
+    assert stats["boilerplate_stripped"] >= 1
+    assert "Per the rubric" not in out
+    # The blank line between paragraphs must survive (no paragraph merge).
+    assert "\n\n" in out, f"paragraph break swallowed by boilerplate strip: {out!r}"
+    assert "ends here." in out and "the second paragraph is strong." in out
+
+
+def test_language_override_skips_cjk_despace():
+    """Greptile PR #66 round-2: `language` is now a real gate. A confidently
+    non-CJK label skips the CJK pass even on CJK-bearing text, while a CJK label
+    (or no label) lets the Hanzi-count guard run. Boilerplate strip is unaffected."""
+    cjk = "本 章 的 分 组 方 式" + "，" + "见 下 文。" * 20
+    out_en, stats_en = cjk_despace.despace(cjk, language="en")
+    assert stats_en["cjk_space_collapsed"] == 0, "en label should skip CJK de-spacing"
+    out_zh, stats_zh = cjk_despace.despace(cjk, language="zh")
+    assert stats_zh["cjk_space_collapsed"] >= 6, "zh label should de-space"
+    # Region subtag tolerated; None falls back to the Hanzi-count guard.
+    _, stats_region = cjk_despace.despace(cjk, language="zh-CN")
+    assert stats_region["cjk_space_collapsed"] >= 6
+
+
 def test_fail_soft_on_bad_input():
     assert cjk_despace.despace("") == ("", {"cjk_space_collapsed": 0, "boilerplate_stripped": 0})
     out, stats = cjk_despace.despace(None)
