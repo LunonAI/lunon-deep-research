@@ -25,7 +25,6 @@ from . import specialists
 from .memory_bank import MemoryBank
 from .specialists import research
 
-
 # Per-specialist wall-clock cap (2026-05-25 follow-up after the CAPEL smoke
 # hang on id=56 where horizon_scanner hung mid-flight, stalling the whole
 # task indefinitely). 4 min is sized to cover the worst nominal case at
@@ -64,13 +63,10 @@ def _specialist_timeout_from_env() -> int:
     try:
         val = int(raw)
     except ValueError:
-        raise ValueError(
-            f"DR_SPECIALIST_TIMEOUT_S must be an integer number of seconds; got {raw!r}"
-        ) from None
+        raise ValueError(f"DR_SPECIALIST_TIMEOUT_S must be an integer number of seconds; got {raw!r}") from None
     if not (_SPECIALIST_TIMEOUT_MIN_S <= val <= _SPECIALIST_TIMEOUT_MAX_S):
         raise ValueError(
-            f"DR_SPECIALIST_TIMEOUT_S out of range "
-            f"[{_SPECIALIST_TIMEOUT_MIN_S}, {_SPECIALIST_TIMEOUT_MAX_S}]: {val}"
+            f"DR_SPECIALIST_TIMEOUT_S out of range [{_SPECIALIST_TIMEOUT_MIN_S}, {_SPECIALIST_TIMEOUT_MAX_S}]: {val}"
         )
     return val
 
