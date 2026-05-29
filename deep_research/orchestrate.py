@@ -92,7 +92,7 @@ def _persist_drift(s, language: str, query: str) -> None:
             # modes the writer most often hits.
             "mermaid_validate": dict(getattr(s, "mermaid_validate_stats", {}) or {}),
             # P3-W3.b (2026-05-27): xref_repair safety-net post-pass
-            # stats {templates_repaired, dangling_refs_rewritten,
+            # stats {templates_repaired, dangling_refs_excised,
             # sentences_deleted}. The writer's in-prompt
             # _MID_PARAGRAPH_XREF_RULE is the primary force producing
             # clean cross-refs; non-zero stats here quantify how often
