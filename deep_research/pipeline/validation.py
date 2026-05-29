@@ -1100,9 +1100,10 @@ def _validate_micro_template(article: str, entity_matrix) -> dict | None:
     prose_subheaders micro-template.
 
     Returns None unless `entity_matrix` is in prose_subheaders mode with ≥3
-    entities and ≥1 named axis. Otherwise, for each axis_name, count its
-    canonical bold lead-in (`**axis.**` / `**axis:**` / `**axis**`, optional
-    terminal `. : 。 ：`) across the article and divide by the entity count
+    entities and ≥1 named axis. Otherwise, for each axis_name, count the
+    paragraphs it OPENS as a canonical bold lead-in (`**axis.**` / `**axis:**` /
+    `**axis**`, optional terminal `. : 。 ：`, at a line start) and divide by the
+    entity count
     (capped at 1.0). The match is intentionally case-insensitive: casing-only
     drift (e.g. `**Signature Techniques**`) is treated as a canonical hit to
     avoid false-positive fragmentation alerts, even though the writer is asked
@@ -1131,7 +1132,15 @@ def _validate_micro_template(article: str, entity_matrix) -> dict | None:
         # period/colon (EN or ZH) inside or just before the closing `**`.
         # Case-insensitive: we treat wrong capitalisation as canonical to
         # avoid false-positive fragmentation alerts on casing-only drift.
-        pat = re.compile(r"\*\*\s*" + re.escape(name) + r"\s*[.:。：]?\s*\*\*", re.IGNORECASE)
+        #
+        # Greptile PR #64 round-3 (2026-05-29): anchor to a paragraph LEAD-IN
+        # (`(?m)^[ \t]*`) so only labels that OPEN a line count. entity_matrix
+        # carries no chapter title to slice on, so a framing/rubric sentence
+        # that names the axes inline (e.g. "...evaluates **Signature techniques.**
+        # and **Key arc appearances.**") would otherwise add out-of-section hits
+        # that inflate coverage and mask a fragmented entity section. The
+        # lead-in anchor errs toward firing the failure, never suppressing it.
+        pat = re.compile(r"(?m)^[ \t]*\*\*\s*" + re.escape(name) + r"\s*[.:。：]?\s*\*\*", re.IGNORECASE)
         uses = len(pat.findall(article))
         axis_coverage[name] = round(min(uses / n_entities, 1.0), 3)
     min_cov = min(axis_coverage.values()) if axis_coverage else 0.0
