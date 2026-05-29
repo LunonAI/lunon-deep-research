@@ -1053,6 +1053,18 @@ _SKIM_LAYER_RULE = (
 )
 
 
+_NUMERIC_SPINE_RULE = (
+    "NUMERIC SPINE (L2 — quantitative reports only): if this report's core "
+    "deliverable is a headline quantity (a total / count / market size / annual "
+    "figure), there must be exactly ONE such headline figure across the whole "
+    "article. Derive it ONCE from a named, cited datapoint, state the derivation, "
+    "and reuse that SAME figure (and figures derived from it) VERBATIM in the "
+    "abstract, every body chapter, and the forecast. Do NOT re-derive a different "
+    "total in a later chapter — a reader must be able to extract ONE coherent "
+    "answer. Conflicting headline totals across chapters are a fatal defect."
+)
+
+
 def writer_system(
     archetype: str,
     domain: str,
@@ -1151,6 +1163,7 @@ def writer_system(
             _INSIGHT_MIN,
             _CHAPTER_SYNTHESIS_RULE,
             _SKIM_LAYER_RULE,
+            _NUMERIC_SPINE_RULE,
             CLEANING_RESISTANT_RULE,
             _EMDASH_RULE,
             _SECTION_OPENING_PROSE_LEAD_RULE,

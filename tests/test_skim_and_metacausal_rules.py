@@ -31,3 +31,13 @@ def test_l3_expand_every_entity_and_l4_deliverable_rules_present():
     assert "EXPAND EVERY ENTITY" in s
     assert "is NOT a substitute" in s  # a §1 matrix row != a body expansion
     assert "DELIVERABLE DECOMPOSITION" in s
+
+
+def test_l2_numeric_spine_in_prompts():
+    """L2: quantitative reports must pin ONE headline figure reused verbatim
+    across chapters (id44 emitted 3 contradictory totals)."""
+    from deep_research import writing_rules as wr
+    from deep_research.pipeline import architect
+
+    assert "L2 NUMERIC SPINE" in architect._SYSTEM
+    assert "NUMERIC SPINE" in wr.writer_system("trend", domain="default", language="zh", toc_titles=["A"])
