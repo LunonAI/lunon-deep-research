@@ -513,6 +513,21 @@ def test_audit_counts_deferral_tokens_inside_chapter():
     assert audit["deferral_hits"] >= 4, audit
 
 
+def test_deferral_regex_excludes_hopeful_dai_compounds():
+    """Greptile PR #64 round-2: the leading `待` alternation carries a negative
+    lookbehind `(?<![期对招款])` so hopeful compounds whose last char is `待`
+    (期待 / 对待 / 招待 / 款待) do NOT produce false-positive deferral hits, while
+    genuine deferrals — including `等待核实` (`等` is intentionally NOT excluded) —
+    still match. The `占位(?![置费])` round-1 lookahead is re-pinned here too."""
+    rx = validation._TIER_RANKING_DEFERRAL_RE
+    for s in ["期待完成", "期待核实", "对待验证", "招待补充", "款待完成"]:
+        assert not rx.search(s), f"hopeful compound wrongly matched: {s}"
+    for s in ["待核实", "待§2核实", "待§2–§7完成", "等待核实", "未核实", "证据缺口", "占位"]:
+        assert rx.search(s), f"genuine deferral missed: {s}"
+    for s in ["占位置", "占位费"]:
+        assert not rx.search(s), f"占位 compound wrongly matched: {s}"
+
+
 def test_audit_deferral_scoped_to_chapter_region():
     """G3: deferral tokens OUTSIDE the ranking chapter (e.g. a §1 roadmap)
     are NOT counted by deferral_hits — that case is caught instead by the

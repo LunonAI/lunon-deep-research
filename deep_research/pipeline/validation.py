@@ -916,7 +916,16 @@ _TIER_RANKING_NOISE_STRIP_RE = re.compile(r"\[\^[^\]]*\]|§\d+(?:\.\d+)*")
 # position") and `占位费` ("site/booth fee") are NOT — those two chars appearing as
 # a substring of a different word are false positives. Recall on the placeholder
 # sense and on the other tokens (`待…核实`, `未核实`, `证据缺口`) is unchanged.
-_TIER_RANKING_DEFERRAL_RE = re.compile(r"待[^，。；、\n]{0,10}(?:核实|完成|验证|补充)|未核实|证据缺口|占位(?![置费])")
+#
+# Greptile PR #64 round-2 (2026-05-29): the leading `待` alternation carries a
+# symmetric negative lookbehind `(?<![期对招款])` so hopeful compounds ending in
+# `待` — `期待` (look forward), `对待` (treat), `招待`/`款待` (entertain/host) —
+# do NOT contribute false-positive deferral hits (e.g. `期待完成` via `待完成`).
+# Genuine deferrals (`待核实`, `等待核实` — `等` is not in the exclusion set) still
+# match.
+_TIER_RANKING_DEFERRAL_RE = re.compile(
+    r"(?<![期对招款])待[^，。；、\n]{0,10}(?:核实|完成|验证|补充)|未核实|证据缺口|占位(?![置费])"
+)
 _TIER_RANKING_DEFERRAL_MAX = 2
 
 # G5 (2026-05-28): minimum per-axis canonical-label coverage for the
