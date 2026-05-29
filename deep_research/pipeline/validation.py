@@ -364,11 +364,19 @@ def run(inp: ValidationInput) -> ValidationOutput:
     if tr_audit is not None:
         counts["tier_ranking"] = tr_audit
         # G3 (2026-05-28): promote an UNCOMMITTED ranking to a HARD failure so
-        # the regen loop fixes it (the predict core payload). (a) requires a
-        # committed 2-decimal matrix ONLY when the architect actually computed
-        # scores (entities_scored populated) — so qualitative compare tiers and
-        # the fail-soft no-scores path don't loop. (b) fails a rendered-but-
-        # hedged ranking regardless.
+        # the regen loop fixes it (the predict core payload). Both conditions are
+        # guarded by `entities_scored_present` so they fire ONLY when the architect
+        # actually computed scores — qualitative compare tiers and the fail-soft
+        # no-scores path never loop the regenerator. (a) requires a committed
+        # 2-decimal matrix; (b) fails a rendered-but-hedged ranking.
+        #
+        # Greptile PR #64 issue #1 (2026-05-28): (b) previously carried NO
+        # entities_scored_present guard, so any article whose tier-ranking chapter
+        # contained >2 deferral/placeholder tokens — including qualitative compare
+        # articles that discuss uncertainty inline — would hard-fail and loop the
+        # regenerator. Guarding (b) symmetrically with (a) matches the PR's stated
+        # loop-protection intent: the deferral gate is only meaningful when there
+        # ARE computed scores that the writer is hedging away from committing.
         if tr_audit["entities_scored_present"] and (
             not tr_audit["scoring_table_present"] or tr_audit["two_decimal_cells"] == 0
         ):
@@ -385,7 +393,7 @@ def run(inp: ValidationInput) -> ValidationOutput:
                     ),
                 }
             )
-        if tr_audit["deferral_hits"] > _TIER_RANKING_DEFERRAL_MAX:
+        if tr_audit["entities_scored_present"] and tr_audit["deferral_hits"] > _TIER_RANKING_DEFERRAL_MAX:
             failures.append(
                 {
                     "check": "tier_ranking_deferred",
@@ -875,7 +883,14 @@ _TIER_RANKING_NOISE_STRIP_RE = re.compile(r"\[\^[^\]]*\]|§\d+(?:\.\d+)*")
 # non-predict dev4 articles (id8=1, id37=1, id91=0), so a low in-chapter ceiling
 # is regression-safe. `待…(核实|完成|验证|补充)` covers `待核实`, `待§2核实`, and
 # `待§2–§7完成`; the rest are literal placeholder markers.
-_TIER_RANKING_DEFERRAL_RE = re.compile(r"待[^，。；、\n]{0,10}(?:核实|完成|验证|补充)|未核实|证据缺口|占位")
+#
+# Greptile PR #64 issue #3 (2026-05-28): the trailing `占位` alternation carries a
+# negative lookahead `(?![置费])` so the placeholder sense (`占位`, `占位符`,
+# `占位说明`) is still counted while the unrelated compounds `占位置` ("occupy a
+# position") and `占位费` ("site/booth fee") are NOT — those two chars appearing as
+# a substring of a different word are false positives. Recall on the placeholder
+# sense and on the other tokens (`待…核实`, `未核实`, `证据缺口`) is unchanged.
+_TIER_RANKING_DEFERRAL_RE = re.compile(r"待[^，。；、\n]{0,10}(?:核实|完成|验证|补充)|未核实|证据缺口|占位(?![置费])")
 _TIER_RANKING_DEFERRAL_MAX = 2
 
 
