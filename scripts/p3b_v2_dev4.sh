@@ -133,4 +133,7 @@ else
     echo "[p3b-v2-dev4] GEMINI_RACE_MODEL unset → skipped the leaderboard (gemini) eval." | tee -a "$GEN_LOG"
 fi
 
-echo "[p3b-v2-dev4] ALL DONE $(date -Iseconds). Scores: results/race/${RUN_TAG}{,-gemini}/race_result.txt" | tee -a "$GEN_LOG"
+# Greptile PR #68 round-2: brace expansion `{,-gemini}` is suppressed inside
+# double quotes, so spell both result paths out explicitly.
+echo "[p3b-v2-dev4] ALL DONE $(date -Iseconds). Scores: results/race/${RUN_TAG}/race_result.txt" \
+    "(gemini: results/race/${RUN_TAG}-gemini/race_result.txt if run)" | tee -a "$GEN_LOG"
