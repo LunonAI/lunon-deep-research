@@ -69,9 +69,13 @@ def is_cjk_heavy(text: str) -> bool:
 def approx_words(text: str) -> int:
     """CJK-aware word count mirroring scripts/qianfan_style_profile.py: CJK has
     no spaces so .split() undercounts — approximate CJK words as chars/1.6 plus
-    Latin word runs; otherwise fall back to whitespace splitting. Always ≥1."""
-    if is_cjk_heavy(text):
-        cjk = len(_CJK_WORD_RE.findall(text))
+    Latin word runs; otherwise fall back to whitespace splitting. Always ≥1.
+
+    Inlines the ``is_cjk_heavy`` threshold (rather than calling it) so the CJK
+    scan runs once: the count it needs for the band math doubles as the
+    heavy-text test."""
+    cjk = len(_CJK_WORD_RE.findall(text))
+    if cjk > _CJK_HEAVY_FRACTION * max(len(text), 1):  # same test as is_cjk_heavy
         latin = len(_LATIN_WORD_RE.findall(text))
         return max(int(cjk / _CJK_CHARS_PER_WORD) + latin, 1)
     return max(len(text.split()), 1)
