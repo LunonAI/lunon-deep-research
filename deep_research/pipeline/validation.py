@@ -152,6 +152,11 @@ class ValidationInput:
     language: str
     domain: str
     task_id: str = ""
+    # Greptile PR #76 (2026-05-29): the deliverable archetype drives the
+    # opening verdict check in `check_opening`. Defaults to "" for back-compat
+    # with any caller/test that doesn't thread it — "" is non-deliverable, so
+    # the verdict element is treated as present and the check is unchanged.
+    archetype: str = ""
 
 
 @dataclass
@@ -279,8 +284,10 @@ def run(inp: ValidationInput) -> ValidationOutput:
             }
         )
 
-    # 5. Position-1 opening template (writing_rules; per item 17)
-    opn = wr.check_opening(inp.article)
+    # 5. Position-1 opening template (writing_rules; per item 17). Pass the
+    # archetype so the deliverable-archetype committed-verdict element (5) is
+    # validated, not silently accepted (Greptile PR #76).
+    opn = wr.check_opening(inp.article, inp.archetype)
     counts["opening"] = opn
     if not opn["within_300"]:
         failures.append({"check": "opening_template", "severity": "high", "detail": {"missing": opn["missing"]}})
