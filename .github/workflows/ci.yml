@@ -57,7 +57,12 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-          cache-dependency-path: requirements-dev.txt
+          # Hash BOTH manifests: requirements-dev.txt only does `-r requirements.txt`,
+          # so a floor bump in requirements.txt alone wouldn't change this file's
+          # content and the stale pip cache would be restored on a key match.
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
 
       - name: Install dependencies
         run: |
