@@ -351,11 +351,13 @@ def test_grounding_knobs_env_overridable_and_dev6_config_is_safe(monkeypatch):
 
 
 def test_specialist_timeout_misconfig_fails_loud(monkeypatch):
-    """P3b-v5: bumping the per-specialist search cap WITHOUT raising
-    DR_SPECIALIST_TIMEOUT_S must fail loud at orchestrator import — else a
-    specialist's wall-clock (~340s at searches=20) overruns the 240s default and
-    _research_with_timeout drops it silently (the CAPEL smoke incident). BUDGET
-    and the serialisation cap are raised here so this test isolates the timeout
+    """P3b-v5: bumping the per-specialist search cap while DR_SPECIALIST_TIMEOUT_S
+    is below the documented 360s floor must fail loud at orchestrator import —
+    else a specialist's wall-clock (~340s at searches=20) overruns the timeout and
+    _research_with_timeout drops it silently (the CAPEL smoke incident). The
+    inert default (_SPECIALIST_TIMEOUT_DEFAULT_S=1200) is safe, so the misconfig
+    is created explicitly by pinning the timeout to a sub-floor 240s. BUDGET and
+    the serialisation cap are raised here so this test isolates the timeout
     (co-knob #2) invariant from the other two."""
     import importlib
 
@@ -368,7 +370,7 @@ def test_specialist_timeout_misconfig_fails_loud(monkeypatch):
         monkeypatch.setenv("DR_MAX_SEARCHES_PER_SPECIALIST", "20")  # >12 inert default
         monkeypatch.setenv("DR_TOOL_CALL_BUDGET", "104")  # satisfy BUDGET invariant
         monkeypatch.setenv("DR_RESULTS_SERIALISATION_CAP", "400000")  # satisfy cap invariant
-        monkeypatch.delenv("DR_SPECIALIST_TIMEOUT_S", raising=False)  # left at 240s default
+        monkeypatch.setenv("DR_SPECIALIST_TIMEOUT_S", "240")  # below the 360s floor → the misconfig
         importlib.reload(sp)
         with pytest.raises(RuntimeError, match="DR_SPECIALIST_TIMEOUT_S"):
             importlib.reload(orch)
@@ -376,9 +378,10 @@ def test_specialist_timeout_misconfig_fails_loud(monkeypatch):
         monkeypatch.delenv("DR_MAX_SEARCHES_PER_SPECIALIST", raising=False)
         monkeypatch.delenv("DR_TOOL_CALL_BUDGET", raising=False)
         monkeypatch.delenv("DR_RESULTS_SERIALISATION_CAP", raising=False)
+        monkeypatch.delenv("DR_SPECIALIST_TIMEOUT_S", raising=False)
         importlib.reload(sp)
         importlib.reload(orch)
-    assert orch._SPECIALIST_TIMEOUT_S == 240 and sp._MAX_SEARCHES_PER_SPECIALIST == 12
+    assert orch._SPECIALIST_TIMEOUT_S == 1200 and sp._MAX_SEARCHES_PER_SPECIALIST == 12
 
 
 def test_grounding_misconfig_fails_loud(monkeypatch):
