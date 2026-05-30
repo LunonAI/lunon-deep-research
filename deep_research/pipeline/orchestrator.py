@@ -2,12 +2,15 @@
 
 Plan-once → research 3-5 cycles → one forced gap-review → ≤2 gap-fill → stop
 (AI-Q orchestrator.j2 shape). Enforces:
-- Hard tool-call budget = 64 (each Exa search = 1 tool call; halts, never
+- Hard tool-call budget BUDGET (each Exa search = 1 tool call; halts, never
   exceeds). Sized to fit 5 specialists × specialists._MAX_SEARCHES_PER_SPECIALIST
-  (12) + 2 gap-fill calls + 2 calls of headroom = 64. Made safe by the
-  per-specialist wall-clock timeout (_SPECIALIST_TIMEOUT_S) that bounds
-  any single specialist's research() call — the 2026-05-25 CAPEL smoke
-  incident proved the BUDGET bump alone was unsafe without it.
+  + 2 gap-fill calls + 2 calls of headroom. Both BUDGET (default 64) and the
+  per-specialist cap (default 12) are env-overridable (DR_TOOL_CALL_BUDGET /
+  DR_MAX_SEARCHES_PER_SPECIALIST); a module-level invariant fails loud if BUDGET
+  drops below 5×cap+2. Made safe by the per-specialist wall-clock timeout
+  (_SPECIALIST_TIMEOUT_S) that bounds any single specialist's research() call —
+  the 2026-05-25 CAPEL smoke incident proved the BUDGET bump alone was unsafe
+  without it.
 - Forced reflection: a `think` gap-review marking each acceptance criterion
   SATISFIED/PARTIAL/UNSAT, picking ≤2 critical gaps.
 - IterResearch compressed-report memory, bounded compaction every N=8 tool calls.
@@ -21,6 +24,7 @@ import os
 import sys
 
 from .. import llm
+from .._env import int_env
 from . import specialists
 from .memory_bank import MemoryBank
 from .specialists import research
@@ -129,7 +133,7 @@ def _research_with_timeout(role, qlist, *, language, domain, exa_mode, model_ove
 # sets =104 (fits 5×20 + 2 gap-fill). Fail-loud below the invariant rather than
 # let the dispatch slice (min(cap, BUDGET-tool_calls)) silently re-clamp the
 # per-specialist searches back down — the exact silent-drop the spec warns of.
-BUDGET = int(os.environ.get("DR_TOOL_CALL_BUDGET") or 64)
+BUDGET = int_env("DR_TOOL_CALL_BUDGET", 64)
 _MIN_BUDGET = 5 * specialists._MAX_SEARCHES_PER_SPECIALIST + 2
 if BUDGET < _MIN_BUDGET:
     raise RuntimeError(
