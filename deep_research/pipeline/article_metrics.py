@@ -169,6 +169,13 @@ def _spaced_cjk_rate(article):
 def _scaffold_residual(article):
     res = {k: len(p.findall(article)) for k, p in _SCAFFOLD_PATTERNS.items()}
     res["contract_phrase"] = article.count(_CONTRACT_PHRASE)
+    # P3b-v5 (2026-05-29): hedge-residual — evidence-gap announcements Qianfan
+    # NEVER makes (证据未覆盖/弱证据 = 0 across all 100 corpus articles) and the
+    # scope-deferral it uses sparingly (本节不). The COMMIT-FIRST register rule (L9)
+    # should drive these toward Qianfan's ~0; this measures whether it held.
+    res["evidence_uncovered"] = article.count("证据未覆盖")
+    res["weak_evidence"] = article.count("弱证据")
+    res["section_defers"] = article.count("本节不")
     return res
 
 

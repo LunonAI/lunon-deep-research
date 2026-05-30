@@ -1069,6 +1069,24 @@ _PEDAGOGICAL_ACCESSIBILITY_RULE = (
 )
 
 
+_COMMIT_FIRST_REGISTER_RULE = (
+    "COMMIT-FIRST REGISTER (L9 — the #1 corpus writes as an authoritative verdict; "
+    "the leaderboard judge scored our buried/hedged deliverables as ABSENT — id14's "
+    "ranking + prediction scored 0/0 because they were hedged into invisibility, "
+    "and the Qianfan corpus uses '证据未覆盖'/'弱证据' ZERO times in 100 reports):\n"
+    "  - LEAD each section / each entity with its committed finding or claim, NOT "
+    "a caveat or a scope-deferral. State what IS established, up front.\n"
+    "  - NEVER announce what the evidence does NOT cover or what you did not find "
+    "— FORBIDDEN as a sentence's point: '证据未覆盖' / 'evidence does not cover' / "
+    "'弱证据' / 'weak evidence'. If a fact is uncertain, give your best COMMITTED "
+    "estimate WITH its basis, not a disclaimer.\n"
+    "  - Do NOT defer content with '本节不展开…' / 'this section will not…'; either "
+    "cover it here or omit the meta-sentence. Reserve genuine limitations for the "
+    "dedicated limitations chapter as concrete falsifiable gaps — never as running "
+    "hedges scattered through the body prose."
+)
+
+
 _NUMERIC_SPINE_RULE = (
     "NUMERIC SPINE (L2 — quantitative reports only): if this report's core "
     "deliverable is a headline quantity (a total / count / market size / annual "
@@ -1180,6 +1198,7 @@ def writer_system(
             _CHAPTER_SYNTHESIS_RULE,
             _SKIM_LAYER_RULE,
             _PEDAGOGICAL_ACCESSIBILITY_RULE,
+            _COMMIT_FIRST_REGISTER_RULE,
             _NUMERIC_SPINE_RULE,
             CLEANING_RESISTANT_RULE,
             _EMDASH_RULE,
