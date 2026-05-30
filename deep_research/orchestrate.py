@@ -616,6 +616,9 @@ def _run_section_loop(s: PipelineState, query, language):
         # re-roll — especially at lower concurrency — recovers the full section,
         # whereas the grounding/expand loop can't fix a truncated generation and
         # would burn its bounded budget on it. No-op for complete drafts.
+        # NOTE: if all _TRUNC_RETRY_CAP re-rolls also return cut drafts (persistent
+        # stream contention), the quality loop runs on the last cut draft — the
+        # cap bounds re-roll cost, not acceptance.
         trunc_retries = 0
         while trunc_retries < _TRUNC_RETRY_CAP and _is_cut_generation(draft_s, expected_tok):
             trunc_retries += 1

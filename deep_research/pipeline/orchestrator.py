@@ -36,12 +36,11 @@ from .specialists import research
 # wall-clock bound; only the OpenRouter HTTP layer's 180s × 3 retries
 # capped any single LLM call, leaving inter-call hangs unbounded.
 #
-# Overridable via DR_SPECIALIST_TIMEOUT_S: the 240s default is sized for
-# low-concurrency runs, but at high article-level concurrency (e.g. the
-# full-100 at --workers 20) the shared API slows every Exa/extract call, so
-# specialists that finish fine solo blow past 240s and get dropped —
-# silently degrading coverage. Such runs should export a higher value
-# rather than lower --workers.
+# Overridable via DR_SPECIALIST_TIMEOUT_S: the 1200s default is sized to
+# avoid false drops under high concurrency (e.g. the full-100 at --workers 20)
+# where the shared API slows every Exa/extract call. Pair with sane concurrency
+# (6×4) rather than raising the timeout further; very long timeouts still cap
+# true hangs via _SPECIALIST_TIMEOUT_MAX_S.
 # PR-A (2026-05-29): raised 240→1200. The dev6 `lunon-p3b-v3-dev6` still dropped
 # an `evidence_gatherer` at the 600s the runner exported, almost certainly slow-
 # under-contention (concurrent `RemoteProtocolError` stream-drops) not hung — the
