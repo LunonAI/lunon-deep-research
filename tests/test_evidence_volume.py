@@ -318,9 +318,11 @@ def test_unknown_override_cap_safely_below_32k_ctx_budget():
 def test_grounding_knobs_env_overridable_and_dev6_config_is_safe(monkeypatch):
     """P3b-v5: the grounding volume knobs are env-overridable (default = current,
     so PR-2 lands inert). The intended dev6 arm (searches=20, budget=104,
-    serialisation cap=400k) must SATISFY both co-knob invariants — importing
-    specialists + orchestrator with that full config must NOT raise either
-    fail-loud guard (5×20+2=102 ≤ 104; cap 400k ≥ 20×10×1600=320k)."""
+    serialisation cap=400k, timeout=360s) must SATISFY all THREE co-knob
+    invariants — importing specialists + orchestrator with that full config must
+    NOT raise any fail-loud guard (5×20+2=102 ≤ 104; cap 400k ≥ 20×10×1600=320k;
+    timeout 360 ≥ 360 floor). The timeout MUST be set: at searches=20 the 240s
+    default would trip the co-knob #2 guard (the CAPEL smoke incident)."""
     import importlib
 
     from deep_research.pipeline import orchestrator as orch
@@ -330,19 +332,53 @@ def test_grounding_knobs_env_overridable_and_dev6_config_is_safe(monkeypatch):
         monkeypatch.setenv("DR_MAX_SEARCHES_PER_SPECIALIST", "20")
         monkeypatch.setenv("DR_TOOL_CALL_BUDGET", "104")
         monkeypatch.setenv("DR_RESULTS_SERIALISATION_CAP", "400000")
+        monkeypatch.setenv("DR_SPECIALIST_TIMEOUT_S", "360")
         importlib.reload(sp)  # would raise if the cap invariant were violated
-        importlib.reload(orch)  # would raise if the BUDGET invariant were violated
+        importlib.reload(orch)  # would raise if BUDGET or timeout invariant violated
         assert sp._MAX_SEARCHES_PER_SPECIALIST == 20
         assert sp._RESULTS_SERIALISATION_CAP == 400_000
         assert orch.BUDGET == 104
+        assert orch._SPECIALIST_TIMEOUT_S == 360
     finally:
         # restore the module-level defaults for the rest of the suite
         monkeypatch.delenv("DR_MAX_SEARCHES_PER_SPECIALIST", raising=False)
         monkeypatch.delenv("DR_TOOL_CALL_BUDGET", raising=False)
         monkeypatch.delenv("DR_RESULTS_SERIALISATION_CAP", raising=False)
+        monkeypatch.delenv("DR_SPECIALIST_TIMEOUT_S", raising=False)
         importlib.reload(sp)
         importlib.reload(orch)
     assert sp._MAX_SEARCHES_PER_SPECIALIST == 12 and orch.BUDGET == 64
+
+
+def test_specialist_timeout_misconfig_fails_loud(monkeypatch):
+    """P3b-v5: bumping the per-specialist search cap WITHOUT raising
+    DR_SPECIALIST_TIMEOUT_S must fail loud at orchestrator import — else a
+    specialist's wall-clock (~340s at searches=20) overruns the 240s default and
+    _research_with_timeout drops it silently (the CAPEL smoke incident). BUDGET
+    and the serialisation cap are raised here so this test isolates the timeout
+    (co-knob #2) invariant from the other two."""
+    import importlib
+
+    import pytest
+
+    from deep_research.pipeline import orchestrator as orch
+    from deep_research.pipeline import specialists as sp
+
+    try:
+        monkeypatch.setenv("DR_MAX_SEARCHES_PER_SPECIALIST", "20")  # >12 inert default
+        monkeypatch.setenv("DR_TOOL_CALL_BUDGET", "104")  # satisfy BUDGET invariant
+        monkeypatch.setenv("DR_RESULTS_SERIALISATION_CAP", "400000")  # satisfy cap invariant
+        monkeypatch.delenv("DR_SPECIALIST_TIMEOUT_S", raising=False)  # left at 240s default
+        importlib.reload(sp)
+        with pytest.raises(RuntimeError, match="DR_SPECIALIST_TIMEOUT_S"):
+            importlib.reload(orch)
+    finally:
+        monkeypatch.delenv("DR_MAX_SEARCHES_PER_SPECIALIST", raising=False)
+        monkeypatch.delenv("DR_TOOL_CALL_BUDGET", raising=False)
+        monkeypatch.delenv("DR_RESULTS_SERIALISATION_CAP", raising=False)
+        importlib.reload(sp)
+        importlib.reload(orch)
+    assert orch._SPECIALIST_TIMEOUT_S == 240 and sp._MAX_SEARCHES_PER_SPECIALIST == 12
 
 
 def test_grounding_misconfig_fails_loud(monkeypatch):

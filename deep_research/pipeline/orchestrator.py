@@ -142,6 +142,36 @@ if BUDGET < _MIN_BUDGET:
         f"DR_TOOL_CALL_BUDGET to ≥{_MIN_BUDGET} or the per-specialist search "
         f"cap is silently clamped (no new grounded atoms gathered)."
     )
+
+# P3b-v5 (2026-05-29): co-knob #2 invariant, fail-loud — completes the trio
+# alongside BUDGET (#1, above) and specialists._RESULTS_SERIALISATION_CAP (#3).
+# The per-specialist search cap and the specialist wall-clock are co-dependent:
+# at the raised cap (=20) a single research() call runs ~100s Exa + ~180s
+# extract + buffer ≈ 340s, past the 240s default — _research_with_timeout then
+# drops that specialist SILENTLY (TIMEOUT marker), the exact CAPEL-smoke
+# degradation specialists.py co-knob #2 warns of. Without this guard a developer
+# who follows the two OTHER explicit guards (raises BUDGET + the serialisation
+# cap) but forgets DR_SPECIALIST_TIMEOUT_S passes every import-time check yet
+# re-creates the incident at runtime. Enforce the documented ≥360s floor
+# whenever the search cap is raised above its inert default so the
+# misconfiguration surfaces at import, not as silently-dropped specialists.
+_SPECIALIST_SEARCH_CAP_INERT_DEFAULT = 12  # mirrors specialists int_env default
+_SPECIALIST_TIMEOUT_FLOOR_S = 360
+if (
+    specialists._MAX_SEARCHES_PER_SPECIALIST > _SPECIALIST_SEARCH_CAP_INERT_DEFAULT
+    and _SPECIALIST_TIMEOUT_S < _SPECIALIST_TIMEOUT_FLOOR_S
+):
+    raise RuntimeError(
+        f"orchestrator: DR_SPECIALIST_TIMEOUT_S={_SPECIALIST_TIMEOUT_S}s < "
+        f"{_SPECIALIST_TIMEOUT_FLOOR_S}s while "
+        f"specialists._MAX_SEARCHES_PER_SPECIALIST="
+        f"{specialists._MAX_SEARCHES_PER_SPECIALIST} > "
+        f"{_SPECIALIST_SEARCH_CAP_INERT_DEFAULT}: at the raised search cap a "
+        f"specialist's wall-clock (~100s Exa + ~180s extract + buffer ≈ 340s) "
+        f"exceeds the 240s default and _research_with_timeout drops it silently "
+        f"(the CAPEL smoke incident). Raise DR_SPECIALIST_TIMEOUT_S to "
+        f"≥{_SPECIALIST_TIMEOUT_FLOOR_S}."
+    )
 COMPACT_EVERY = 8
 
 # Per-archetype researcher routing (W9 diagnostic + dev6 paired test 2026-05-21):
