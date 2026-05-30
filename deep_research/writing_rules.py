@@ -1028,8 +1028,7 @@ def opening_directive(archetype: str = "") -> str:
         "must, in order, contain (1) a single declarative THESIS sentence, "
         "(2) a QUANTIFIED SCOPE claim with a concrete number, (3) a NAMED "
         "CONTRARIAN view ('despite the common claim that …'), (4) a "
-        "FORWARD-LOOKING DATE ANCHOR ('through 2030', 'by Q3 2026'). No "
-        "preamble before the thesis."
+        "FORWARD-LOOKING DATE ANCHOR ('through 2030', 'by Q3 2026')."
     )
     # P3b-v5 (2026-05-29): deliverable-bearing archetypes must FRONT-LOAD a
     # committed verdict. The Lunon-vs-reference head-to-head showed Lunon often HAS
@@ -1045,6 +1044,7 @@ def opening_directive(archetype: str = "") -> str:
             "then Y and Z'; NOT 'this report will assess'); the reader must see "
             "your answer here, never only in a late chapter."
         )
+    base += " No preamble before the thesis."
     return base
 
 
