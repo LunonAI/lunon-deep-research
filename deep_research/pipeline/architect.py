@@ -9,6 +9,7 @@ obligation, and per-section depth targets. Archetype-aware (item 16).
 """
 
 import json
+import os
 import re
 
 from .. import llm
@@ -347,8 +348,12 @@ _SEEDS_MAX = 4
 # "_format_retry_feedback must reference the same source of truth" rule —
 # if any future retry-feedback string interpolates the query band, it
 # pulls from here.
-_QUERIES_MIN = 48
-_QUERIES_MAX = 64
+# P3b-v5 (2026-05-29): env-overridable so the grounding arm authors enough
+# DISTINCT queries to feed a larger per-specialist search cap (else specialists
+# re-run duplicate/empty slots and gather no NEW atoms). Default 48/64 = inert;
+# dev6 arm sets 80/104.
+_QUERIES_MIN = int(os.environ.get("DR_QUERIES_MIN") or 48)
+_QUERIES_MAX = int(os.environ.get("DR_QUERIES_MAX") or 64)
 
 # P3-W0a (2026-05-27): per-archetype `query.type` minimum proportions.
 # The HARD RULES bullet "Distribute query type to cover all needed analytical
@@ -808,7 +813,12 @@ def _retry_is_better(retry_audit: dict, orig_audit: dict) -> bool:
 # at 20; new entries for predict/explain-mechanism/trend/recommend (which
 # also benefit from entity matrix when ≥3 sibling sub-chapters each name
 # a distinct entity — see _should_promote_entity_matrix below).
-_ENTITY_MATRIX_ENTITIES_MIN = 5
+# P3b-v5 (2026-05-29): env-overridable ENUMERATION FLOOR. The id8 teardown found
+# the reference gives a dedicated subsection to ~12 in-scope entities (material systems)
+# vs Lunon's 3 — breadth-of-entities at constant depth is a top Comprehensiveness
+# lever. Raising this floor forces the architect to enumerate the full set. Default
+# 5 = inert; dev6 arm sets =10. Bounded above by _ENTITY_MATRIX_ENTITIES_MAX.
+_ENTITY_MATRIX_ENTITIES_MIN = int(os.environ.get("DR_ENTITY_MATRIX_MIN") or 5)
 _ENTITY_MATRIX_ENTITIES_MAX = 20  # back-compat; tests reference this directly
 _ENTITY_MATRIX_ENTITIES_MAX_BY_ARCHETYPE: dict[str, int] = {
     "list-all": 30,
