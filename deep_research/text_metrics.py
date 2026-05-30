@@ -1,0 +1,42 @@
+"""Shared text-size heuristics (audit E2 / F2 consolidation).
+
+A single CJK-aware token estimator so the engine's completeness gates agree
+instead of disagreeing ~2.5× on CJK text (audit E2). Before this, the
+chapter-completion gate (orchestrate._section_too_thin) used a CJK-aware
+estimate (CJK ~1.6 chars/token, other ~4) while the validation length gate
+(validation._section_length_ok) used a uniform ``len // 4`` — so a ZH section
+could pass one gate and fail the other purely from the accounting mismatch,
+triggering wasted corrective refiner passes (or masking a genuinely thin one).
+
+CJK ideographs pack ~1.6 chars/token; other text ~4 chars/token. The CJK range
+is sourced from ``cjk_despace._CJK`` (Unified Ideographs + Extension A) — the
+single source of truth for the de-spacing pass — so token accounting can never
+drift from the character class the rest of the pipeline uses.
+"""
+
+import re
+
+from .pipeline.cjk_despace import _CJK as _CJK_RANGE
+
+_CJK_RE = re.compile(f"[{_CJK_RANGE}]")
+_CJK_CHARS_PER_TOKEN = 1.6
+_OTHER_CHARS_PER_TOKEN = 4
+
+
+def count_cjk(text: str) -> int:
+    """Number of CJK ideographs (Unified + Extension A) in ``text``."""
+    return len(_CJK_RE.findall(text)) if text else 0
+
+
+def approx_tokens(text: str) -> int:
+    """CJK-aware token estimate: CJK ~1.6 chars/token, other ~4 chars/token.
+
+    For pure non-CJK text this equals the prior ``len(text) // 4`` (CJK count is
+    0, so it reduces to ``int(len(text) / 4)``); only CJK text changes, which is
+    the point — it is no longer under-counted at the non-CJK rate.
+    """
+    if not text:
+        return 0
+    cjk = count_cjk(text)
+    other = len(text) - cjk
+    return int(cjk / _CJK_CHARS_PER_TOKEN + other / _OTHER_CHARS_PER_TOKEN)
