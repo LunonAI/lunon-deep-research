@@ -453,7 +453,9 @@ def write_section(
                     parts.append(f"  Rubric to publish: {rubric_summary}")
                     parts.append(
                         "  Render the rubric as a markdown table in §1.2 (columns: id, label, weight). "
-                        "Downstream chapters reference rubric items by `id`."
+                        "In PROSE (here and in every downstream chapter) refer to each item by its "
+                        "human-readable LABEL — the `R-N` id belongs ONLY in the §1.2 table's id column, "
+                        "never in reader-facing sentences."
                     )
                 framing_block = "\n".join(parts) + "\n"
         else:
@@ -470,8 +472,14 @@ def write_section(
                         "Qianfan's verified pattern is ~2-5 reuses per term across the article."
                     )
                 if rubric:
-                    rubric_summary = "; ".join(f"{r['id']}: {r.get('label', '')}" for r in rubric)
-                    parts.append(f"  Rubric items: {rubric_summary}")
+                    # PR-B (2026-05-29): expose only the LABELS here (not the `R-N`
+                    # ids) — the dev6 list-all (id91) leaked 129 bare R-N despite the
+                    # "use labels, not R-N" instruction below, because the ids were
+                    # still shown to the writer in this very line. Removing them at the
+                    # source removes the temptation; the id is needed only for the §1.2
+                    # table (S1 path above), never in entity-verdict prose.
+                    rubric_summary = "; ".join(str(r.get("label") or r["id"]) for r in rubric)
+                    parts.append(f"  Rubric criteria (name each by this label in prose): {rubric_summary}")
                     parts.append(
                         "  When a section evaluates an entity against a rubric item, render a "
                         "COMPARATIVE VERDICT (a pass/fail/degree judgment per axis), not "
@@ -513,6 +521,17 @@ def write_section(
         # so a naive `isinstance(v, (int, float))` would silently admit
         # `True`/`False` as weight values. Filter explicitly.
         weights = {k: v for k, v in weights_raw.items() if isinstance(v, (int, float)) and not isinstance(v, bool)}
+        # PR-B (2026-05-29): map each weight's internal `R-N` id → its §1
+        # human-readable label so the chapter opening names criteria in PROSE
+        # without leaking the scaffolding ids (the live GPT-5.5 judge dings bare
+        # `R-N` hard under Readability/Language-Fluency; dev6 still leaked 206).
+        # The id stays available for the scoring-table id column only.
+        _rubric_labels = {
+            r["id"]: str(r.get("label") or r["id"])
+            for r in ((fc or {}).get("published_rubric_items") or [])
+            if isinstance(r, dict) and r.get("id")
+        }
+        weights_labeled = {_rubric_labels.get(k, k): v for k, v in weights.items()}
         tiers = [t for t in (tr.get("tiers") or []) if isinstance(t, dict) and t.get("name")]
         sensitivity = tr.get("sensitivity_check") if isinstance(tr.get("sensitivity_check"), dict) else {}
         # Greptile PR #47 round-2: bool-subclass guard on perturbation_pp,
@@ -549,7 +568,9 @@ def write_section(
                 f"so readers can trace the math): {scoring_formula}"
             )
             parts.append(
-                f"  Weights (mirror §1 framing-chapter rubric items by id): {json.dumps(weights, ensure_ascii=False)}"
+                f"  Weights by §1 rubric LABEL — name each criterion by its LABEL in prose; "
+                f"the `R-N` id is internal (table id column only), NEVER write it in sentences: "
+                f"{json.dumps(weights_labeled, ensure_ascii=False)}"
             )
             parts.append(f"  Tiers and thresholds: {json.dumps(tiers, ensure_ascii=False)}")
             # P3b-OPT3 (2026-05-27): when the architect pre-computed per-entity
@@ -576,8 +597,12 @@ def write_section(
                         or not (isinstance(sf, (int, float)) and not isinstance(sf, bool))
                     ):
                         continue
+                    # Remap dimension-score keys R-N → §1 label (same mapping as
+                    # weights_labeled) so the verbatim-render table headers and the
+                    # label-keyed norm_weights below share one key schema and no
+                    # bare `R-N` id reaches the writer. (Greptile PR #72 round-2.)
                     dims = {
-                        k: f"{v:.2f}"
+                        _rubric_labels.get(k, k): f"{v:.2f}"
                         for k, v in (e.get("dimension_scores") or {}).items()
                         if isinstance(v, (int, float)) and not isinstance(v, bool)
                     }
@@ -601,8 +626,8 @@ def write_section(
                 # not sum to 1.0, e.g. {R-1:5, R-2:3, R-3:2}) would give a
                 # sensitivity baseline inconsistent with the main table, the very
                 # inconsistency this PR removes. (Greptile PR #51 round-2.)
-                _w_total = sum(weights.values()) or 1.0
-                norm_weights = {k: round(v / _w_total, 6) for k, v in weights.items()}
+                _w_total = sum(weights_labeled.values()) or 1.0
+                norm_weights = {k: round(v / _w_total, 6) for k, v in weights_labeled.items()}
                 parts.append(
                     "  PRE-COMPUTED SCORES — the scoring math is already done "
                     "for you. Render these EXACT values VERBATIM; do NOT "
@@ -612,8 +637,9 @@ def write_section(
                 parts.append(
                     "  REQUIRED chapter structure:\n"
                     "    1. Opening (~2 paragraphs): state the scoring formula "
-                    "explicitly + cite §1 rubric items by id (R-1, R-2, ...) so "
-                    "weights trace back to the published rubric.\n"
+                    "explicitly + refer to each §1 rubric item by its human-readable "
+                    "LABEL so the weights trace back to the published rubric — do "
+                    "NOT write the internal `R-N` id in prose.\n"
                     "    2. SCORING TABLE — render the PRE-COMPUTED SCORES above "
                     "as a markdown table: rows = entities, columns = entity name "
                     "+ each dimension score + S_final + tier. Copy every number "
@@ -648,8 +674,9 @@ def write_section(
                 parts.append(
                     "  REQUIRED chapter structure:\n"
                     "    1. Opening (~2 paragraphs): state the scoring formula "
-                    "explicitly + cite §1 rubric items by id (R-1, R-2, ...) so "
-                    "weights trace back to the published rubric.\n"
+                    "explicitly + refer to each §1 rubric item by its human-readable "
+                    "LABEL so the weights trace back to the published rubric — do "
+                    "NOT write the internal `R-N` id in prose.\n"
                     "    2. SCORING TABLE — markdown table:\n"
                     "       - Rows = entities (from §1 entity_matrix).\n"
                     "       - Columns = entity name + each rubric dimension score "
@@ -743,7 +770,8 @@ def write_section(
                 "one sentence on the bias direction.\n"
                 "    - falsifiers: name 2-3 SPECIFIC empirical observations that "
                 "would refute the article's main claims (drawing on §1.2 rubric "
-                "items for falsification axes — cite them by R-N id).\n"
+                "items for falsification axes — name each axis by its human-readable "
+                "LABEL, not the internal R-N id).\n"
                 "  Each sub-section: 150-300 words. Avoid the lazy form 'data "
                 "is limited / scope is constrained' — every sentence must point "
                 "to a concrete, checkable gap."
