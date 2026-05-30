@@ -25,7 +25,7 @@ _OTHER_CHARS_PER_TOKEN = 4
 
 def count_cjk(text: str) -> int:
     """Number of CJK ideographs (Unified + Extension A) in ``text``."""
-    return len(_CJK_RE.findall(text)) if text else 0
+    return sum(1 for _ in _CJK_RE.finditer(text)) if text else 0
 
 
 def approx_tokens(text: str) -> int:
