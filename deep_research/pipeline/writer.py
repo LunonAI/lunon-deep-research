@@ -976,16 +976,14 @@ def write_section(
     feedback_block = (
         f"\nREVISION FEEDBACK — fix these and integrate the cited evidence inline:\n{feedback}\n" if feedback else ""
     )
-    # P3b-v5 (2026-05-29): 14000 → 21000 in lockstep with init_format
-    # SECTION_BUDGET_CEILING 20000→30000 (30000×0.7=21000 keeps the validator's
-    # 0.7× passline reachable in one writer call). This is the LLM-call upper
-    # bound; with `DR_CAPEL_G=on` (default) the per-section CAPEL countdown —
-    # now driven by the LEAF-AWARE `target_tokens` (init_format scales the
-    # per-section budget by the planned leaf count) — is the OPERATIVE per-
-    # section cap, not max_tokens. The 21k headroom matters for (a) CAPEL
-    # disabled; (b) the deepest ZH chapters whose leaf-aware target approaches
-    # the 30000 ceiling; (c) refiner-pass growth. The ZH length uplift lands via
-    # the leaf-aware budget lifting the CAPEL target, not via this headroom.
+    # 2026-05-30 (Opus 4.8 + max effort): 21000 → 96000. CAPEL (SECTION_BUDGET_CEILING
+    # = 30000) remains the OPERATIVE per-section prose cap; max_tokens is raised to
+    # 96000 so adaptive thinking tokens and the visible output share the single
+    # max_tokens ceiling without truncating the chapter. The extra headroom is
+    # consumed by thinking, not by prose growth — the 30k CAPEL ceiling still limits
+    # actual prose length. The 0.7× validator pass-line (21000) is easily reachable
+    # within 96000. The ZH length uplift still lands via the leaf-aware CAPEL target,
+    # not via this headroom.
     raw = llm.call(
         "writer",
         user,
