@@ -11,8 +11,20 @@ import pytest
 
 from deep_research import llm
 
+# Prefix-only synthetic model ids: `_provider()` routes purely on the prefix
+# (gpt-* -> openai, claude* -> anthropic) and `raw_call` is stubbed below, so the
+# id is just a routing token — it never reaches a network or a real model.
+_PROVIDER_MODEL = {"anthropic_client": "claude-test", "openai_client": "gpt-test"}
 
-def _capture(monkeypatch, which):
+
+def _capture(monkeypatch, which, role):
+    """Stub `which`.raw_call to record forwarded kwargs, and pin `role` to a model
+    that routes to `which` (via the DR_ROLE_* override) so the assertion can't be
+    silently broken by a future role->provider remap in config — which would
+    reroute the call to an unstubbed client and surface as a confusing KeyError on
+    the empty `cap` rather than a clear failure.
+    """
+    monkeypatch.setenv(f"DR_ROLE_{role.upper()}", _PROVIDER_MODEL[which])
     cap = {}
 
     def fake(model, user, **kw):
@@ -36,26 +48,26 @@ def test_should_cache_system_unit():
 
 
 def test_large_system_auto_caches_on_anthropic(monkeypatch):
-    # architect routes to claude (anthropic); a >=min-size system auto-caches.
-    cap = _capture(monkeypatch, "anthropic_client")
+    # architect pinned to a claude-* model (anthropic); a >=min-size system auto-caches.
+    cap = _capture(monkeypatch, "anthropic_client", "architect")
     llm.call("architect", "u", system="x" * (llm._CACHE_SYSTEM_MIN_CHARS + 1))
     assert cap["cache_system"] is True
 
 
 def test_small_system_not_cached_on_anthropic(monkeypatch):
-    cap = _capture(monkeypatch, "anthropic_client")
+    cap = _capture(monkeypatch, "anthropic_client", "architect")
     llm.call("architect", "u", system="short system prompt")
     assert cap["cache_system"] is False
 
 
 def test_writer_always_caches_regardless_of_size(monkeypatch):
-    cap = _capture(monkeypatch, "anthropic_client")
+    cap = _capture(monkeypatch, "anthropic_client", "writer")
     llm.call("writer", "u", system="short")
     assert cap["cache_system"] is True
 
 
 def test_explicit_cache_override_respected(monkeypatch):
-    cap = _capture(monkeypatch, "anthropic_client")
+    cap = _capture(monkeypatch, "anthropic_client", "architect")
     llm.call("architect", "u", system="x" * (llm._CACHE_SYSTEM_MIN_CHARS + 1), cache_system=False)
     assert cap["cache_system"] is False
 
@@ -64,18 +76,18 @@ def test_explicit_cache_override_respected(monkeypatch):
 
 
 def test_seed_raises_on_anthropic(monkeypatch):
-    _capture(monkeypatch, "anthropic_client")
+    _capture(monkeypatch, "anthropic_client", "architect")
     with pytest.raises(ValueError, match="seed"):
         llm.call("architect", "u", system="s", seed=123)
 
 
 def test_no_seed_is_fine_on_anthropic(monkeypatch):
-    cap = _capture(monkeypatch, "anthropic_client")
+    cap = _capture(monkeypatch, "anthropic_client", "architect")
     llm.call("architect", "u", system="s")  # seed defaults to None
     assert cap["model"].startswith("claude")
 
 
 def test_seed_forwarded_on_openai(monkeypatch):
-    cap = _capture(monkeypatch, "openai_client")
-    llm.call("intent", "u", seed=7)  # intent -> gpt-5.5 (openai)
+    cap = _capture(monkeypatch, "openai_client", "intent")  # intent pinned to a gpt-* model -> openai
+    llm.call("intent", "u", seed=7)
     assert cap["seed"] == 7
