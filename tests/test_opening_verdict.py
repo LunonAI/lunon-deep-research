@@ -21,6 +21,6 @@ def test_verdict_clause_absent_for_non_deliverable_archetypes():
 def test_base_opening_contract_preserved():
     # the existing THESIS/SCOPE/CONTRARIAN/DATE contract is unchanged for all
     d = opening_directive("compare")
-    assert "THESIS" in d and "QUANTIFIED SCOPE" in d and "CONTRARIAN" in d
+    assert "THESIS" in d and "QUANTIFIED SCOPE" in d and "CONTRARIAN" in d and "DATE ANCHOR" in d
     # back-compat: callable with no archetype (defaults to no verdict clause)
     assert "THESIS" in opening_directive()
