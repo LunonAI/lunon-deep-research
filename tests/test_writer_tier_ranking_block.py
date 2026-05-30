@@ -80,6 +80,32 @@ def _full_tr(**overrides):
     return tr
 
 
+def _rubric_items_with_labels():
+    """§1 published_rubric_items mirroring the `_full_tr` R-N weight keys,
+    each carrying a human-readable label — the data `_rubric_labels` maps
+    R-N → label from. Labels are chosen to contain no `R-\\d` substring so
+    a leaked id is unambiguously detectable."""
+    return [
+        {"id": "R-1", "label": "Market Position", "weight": 0.4},
+        {"id": "R-2", "label": "Technical Moat", "weight": 0.35},
+        {"id": "R-3", "label": "Execution Risk", "weight": 0.25},
+    ]
+
+
+def _plan_with_framing_and_tier_ranking(tr):
+    """Production compare/predict case: §1 framing_chapter publishes the
+    rubric (R-N → label) AND the tier_ranking chapter scores entities
+    against those same R-N ids. This is the ONLY path where the PR-B
+    label-remap fires — `fc` present → `_rubric_labels` non-empty — so it's
+    what the fallback-only tests (no framing_chapter) cannot exercise."""
+    plan = _bare_plan_with_tier_ranking(tr)
+    plan["framing_chapter"] = {
+        "published_rubric_items": _rubric_items_with_labels(),
+        "published_vocabulary": [],
+    }
+    return plan
+
+
 # ---------- presence / gating ----------
 
 
@@ -290,3 +316,55 @@ def test_tier_ranking_directive_handles_non_dict_weights(monkeypatch):
     captured = _call_writer(monkeypatch, plan, sid="S7")
     user = captured[0]["user"]
     assert "TIER RANKING + SENSITIVITY CHECK CONTRACT" not in user
+
+
+# ---------- PR-B label-remap on the fc-present production path (Greptile #72 r3) ----------
+
+
+def test_tier_ranking_label_remap_fires_with_framing_chapter(monkeypatch):
+    """Greptile PR #72 round-3: the R-N → §1-label remap for `weights`,
+    `dimension_scores`, and `norm_weights` ONLY fires when a framing_chapter
+    publishes the rubric. Every other test here uses a plan without one, so
+    `_rubric_labels` is empty and they exercise the R-N fallback — never the
+    patched path. This pins the production (compare/predict) case end to end:
+    all three payloads must arrive in the prompt keyed by LABEL, and NO bare
+    `R-N` id may leak anywhere in it."""
+    tr = _full_tr(
+        entities_scored=[
+            {
+                "name": "Acme",
+                "S_final": 8.12,
+                "dimension_scores": {"R-1": 7.5, "R-2": 8.0, "R-3": 9.0},
+                "tier": "Tier 1",
+            },
+            {
+                "name": "Globex",
+                "S_final": 6.40,
+                "dimension_scores": {"R-1": 6.0, "R-2": 7.0, "R-3": 5.5},
+                "tier": "Tier 2",
+            },
+        ]
+    )
+    plan = _plan_with_framing_and_tier_ranking(tr)
+    captured = _call_writer(monkeypatch, plan, sid="S7")
+    user = captured[0]["user"]
+
+    # Directive + pre-computed-scores path both fired.
+    assert "TIER RANKING + SENSITIVITY CHECK CONTRACT" in user
+    assert "PRE-COMPUTED SCORES" in user
+
+    # Each criterion is named by its LABEL across all three payloads.
+    for label in ("Market Position", "Technical Moat", "Execution Risk"):
+        assert label in user, f"label `{label}` missing from prompt; got: {user[:3000]}"
+
+    # Targeted pins so a regression in any single remap is caught distinctly:
+    #   weights_labeled / norm_weights (sum to 1.0 → normalised identical),
+    assert '"Market Position": 0.4' in user, f"weights/norm_weights not label-keyed; got: {user[:3000]}"
+    #   and the pre-computed dimension_scores table.
+    assert '"Market Position": "7.50"' in user, f"dimension_scores not label-keyed; got: {user[:3000]}"
+
+    # The regression bar the fallback-only tests cannot enforce: NO bare
+    # R-N id (the actual ids, distinct from the allowed literal `R-N`
+    # template token in the instruction text) reaches the writer.
+    for rubric_id in ("R-1", "R-2", "R-3"):
+        assert rubric_id not in user, f"bare `{rubric_id}` leaked into fc-present prompt; got: {user[:3000]}"
