@@ -172,6 +172,41 @@ def _scaffold_residual(article):
     return res
 
 
+# P3b-v5 #2: a terminal LEAF = an H3+ heading with NO deeper child before the next
+# heading. A STUB leaf has a near-empty body — the dev6 found 17-33% of Lunon's
+# leaves were <120 chars (announce a number/table/timeline, deliver nothing),
+# while the reference's leaves are full ~700-1000 CJK essays. The length lever (PR #74)
+# should drive this toward 0 at the source; this measures whether it did.
+_STUB_LEAF_MIN_CONTENT_CHARS = 120
+# Distinct from _HEADING_RE (which captures the title text for the heading list).
+# _leaf_stub_stats slices each leaf's body by character offset, so it needs the
+# match SPAN (m.start()/m.end()), not the title — hence a separate pattern with no
+# capture group. [ \t]+ (vs _HEADING_RE's \s+) keeps the match on a single line so
+# m.end() lands at the heading's line end, exactly where the leaf body begins.
+_HEADING_LINE_RE = re.compile(r"(?m)^(#{1,6})[ \t]+.+$")
+
+
+def _leaf_stub_stats(article):
+    """Return (n_leaves, n_stub_leaves) over H3+ TERMINAL leaves (a heading whose
+    next heading is same-or-shallower, i.e. it has no child). A leaf is a stub if
+    its body has fewer than _STUB_LEAF_MIN_CONTENT_CHARS non-whitespace chars."""
+    heads = [(m.start(), m.end(), len(m.group(1))) for m in _HEADING_LINE_RE.finditer(article)]
+    n_leaves = n_stub = 0
+    for i, (_s, e, lvl) in enumerate(heads):
+        if lvl < 3:
+            continue
+        # container check: if the next heading is DEEPER, this heading has a child
+        # and is not a terminal leaf — skip it (its content lives in its children).
+        if i + 1 < len(heads) and heads[i + 1][2] > lvl:
+            continue
+        body_end = heads[i + 1][0] if i + 1 < len(heads) else len(article)
+        content = "".join(article[e:body_end].split())  # non-whitespace body chars
+        n_leaves += 1
+        if len(content) < _STUB_LEAF_MIN_CONTENT_CHARS:
+            n_stub += 1
+    return n_leaves, n_stub
+
+
 def compute(article, *, language=None):
     """Compute advisory final-article metrics. Returns a flat dict; never
     raises (returns partial results on any internal error)."""
@@ -185,6 +220,9 @@ def compute(article, *, language=None):
         metrics["n_top_chapters"] = len(chapters)
         metrics["frontload_ratio"] = _frontload_ratio(chapters)
         metrics["numbering_anomalies"] = _numbering_anomalies(chapters)
+        n_leaves, n_stub = _leaf_stub_stats(article)
+        metrics["n_leaves"] = n_leaves
+        metrics["stub_leaf_frac"] = round(n_stub / n_leaves, 3) if n_leaves else 0.0
 
         paras = _prose_paragraphs(article)
         plens = sorted(len(p) for p in paras)
