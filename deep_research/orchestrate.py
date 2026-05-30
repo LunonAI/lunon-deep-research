@@ -806,6 +806,7 @@ def _validation_loop(s: PipelineState, language: str) -> PipelineState:
                 design_guide=s.design_guide,
                 language=language,
                 domain=s.domain,
+                archetype=s.archetype.get("archetype", "") if isinstance(s.archetype, dict) else "",
             ),
         )
         s.validation_log.append(
