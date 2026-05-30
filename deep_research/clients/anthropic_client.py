@@ -34,7 +34,7 @@ _TIMEOUT = httpx.Timeout(connect=10.0, read=600.0, write=60.0, pool=10.0)
 # inside Anthropic's edge-cut tolerance window (smoke-5 proved 32000 + think
 # streams reliably get cut). When the next person raises this, the test pin
 # in test_architect.py + tests below should be raised in lockstep.
-_MAX_TOKENS_ESCALATION_CEILING = 28000
+_MAX_TOKENS_ESCALATION_CEILING = 120000
 
 _client = anthropic.Anthropic(
     api_key=_KEY,

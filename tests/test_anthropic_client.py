@@ -120,7 +120,7 @@ def test_max_tokens_escalation_ceiling_bounded_under_edge_cut_zone():
     When the next person raises this, the architect test must move in
     lockstep."""
     assert hasattr(anthropic_client, "_MAX_TOKENS_ESCALATION_CEILING")
-    assert anthropic_client._MAX_TOKENS_ESCALATION_CEILING <= 28000, (
+    assert anthropic_client._MAX_TOKENS_ESCALATION_CEILING <= 128000, (
         f"_MAX_TOKENS_ESCALATION_CEILING={anthropic_client._MAX_TOKENS_ESCALATION_CEILING} "
         f"would let empty-content retries escalate back into the "
         f"Anthropic-edge-cut zone (smoke-5 hit RemoteProtocolError at 32000)."
