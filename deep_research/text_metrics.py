@@ -53,6 +53,11 @@ def approx_tokens(text: str) -> int:
 _CJK_WORD_RE = re.compile(r"[一-鿿]")  # Unified Ideographs only — mirrors the profiler
 _LATIN_WORD_RE = re.compile(r"[A-Za-z]+")
 _CJK_HEAVY_FRACTION = 0.15
+# Dedicated word-count constant, NOT _CJK_CHARS_PER_TOKEN: the word counter and
+# the token estimator have different sources of truth (profiler vs de-spacing),
+# so the separation is structural — tuning one tokenizer constant must not
+# silently move the other. They happen to share the value 1.6 today.
+_CJK_CHARS_PER_WORD = 1.6
 
 
 def is_cjk_heavy(text: str) -> bool:
@@ -68,5 +73,5 @@ def approx_words(text: str) -> int:
     if is_cjk_heavy(text):
         cjk = len(_CJK_WORD_RE.findall(text))
         latin = len(_LATIN_WORD_RE.findall(text))
-        return max(int(cjk / _CJK_CHARS_PER_TOKEN) + latin, 1)
+        return max(int(cjk / _CJK_CHARS_PER_WORD) + latin, 1)
     return max(len(text.split()), 1)
