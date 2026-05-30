@@ -1,5 +1,5 @@
 # Dev / CI dependencies. Install with: pip install -r requirements-dev.txt
 -r requirements.txt
 
-pytest
+pytest>=8.3,<9   # floor = current 8.x line; <9 guards against a breaking major on clean CI installs
 ruff==0.14.11   # matches the version pinned in .github/workflows/ci.yml
