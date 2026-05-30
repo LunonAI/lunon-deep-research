@@ -85,6 +85,7 @@ def call(
     seed: forwarded on the openai/openrouter paths for best-effort determinism.
     The anthropic path RAISES if seed is not None — the Messages API has no seed
     parameter, so honoring the determinism contract there is impossible (B3).
+
     cache_ttl: anthropic cache lifetime — "5m" (GA default, refresh-on-use,
     covers the back-to-back writer calls within a task) or "1h" (extended,
     for callers that batch with longer idle gaps). Only used when caching
@@ -102,8 +103,6 @@ def call(
     prov = _provider(model)
     tag = note or role
     eff = reasoning_effort or effort
-    cache = cache_system if cache_system is not None else _should_cache_system(role, system)
-    cache_u = cache_user if cache_user is not None else (role == "writer")
     # Only the anthropic client supports the cached-user-block + uncached-suffix
     # split. For other providers (and uncached anthropic), concatenate so the
     # model sees identical content.
@@ -135,6 +134,10 @@ def call(
                 f"honor a determinism seed. Drop seed for this role, or route it "
                 f"to a provider that supports seeding (openai/openrouter)."
             )
+        # cache_system / cache_user are anthropic-only — resolve them here so the
+        # openai/openrouter paths don't do the dead computation.
+        cache = cache_system if cache_system is not None else _should_cache_system(role, system)
+        cache_u = cache_user if cache_user is not None else (role == "writer")
         text, _ = anthropic_client.raw_call(
             model,
             user,
