@@ -385,8 +385,9 @@ def test_grounding_misconfig_fails_loud(monkeypatch):
     """P3b-v5: bumping the per-specialist search cap WITHOUT raising BUDGET must
     fail loud at orchestrator import (else the dispatch slice silently re-clamps
     the searches and gathers no new atoms — a silent grounding no-op). The
-    serialisation cap is raised here so this test isolates the BUDGET invariant;
-    the serialisation-cap invariant has its own test below."""
+    serialisation cap AND the specialist timeout are raised here so this test
+    isolates the BUDGET invariant; the serialisation-cap invariant has its own
+    test below."""
     import importlib
 
     import pytest
@@ -397,6 +398,7 @@ def test_grounding_misconfig_fails_loud(monkeypatch):
     try:
         monkeypatch.setenv("DR_MAX_SEARCHES_PER_SPECIALIST", "20")  # 5×20+2=102 > default 64
         monkeypatch.setenv("DR_RESULTS_SERIALISATION_CAP", "400000")  # satisfy the cap invariant
+        monkeypatch.setenv("DR_SPECIALIST_TIMEOUT_S", "360")  # satisfy co-knob #2 so BUDGET guard fires first
         monkeypatch.delenv("DR_TOOL_CALL_BUDGET", raising=False)
         importlib.reload(sp)
         with pytest.raises(RuntimeError, match="silently clamped"):
@@ -404,6 +406,7 @@ def test_grounding_misconfig_fails_loud(monkeypatch):
     finally:
         monkeypatch.delenv("DR_MAX_SEARCHES_PER_SPECIALIST", raising=False)
         monkeypatch.delenv("DR_RESULTS_SERIALISATION_CAP", raising=False)
+        monkeypatch.delenv("DR_SPECIALIST_TIMEOUT_S", raising=False)
         importlib.reload(sp)
         importlib.reload(orch)
     assert orch.BUDGET == 64
