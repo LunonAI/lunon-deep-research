@@ -1053,6 +1053,22 @@ _SKIM_LAYER_RULE = (
 )
 
 
+_PEDAGOGICAL_ACCESSIBILITY_RULE = (
+    "READER ACCESSIBILITY (L8 — the #1 corpus reads like an accessible textbook "
+    "for an INFORMED GENERALIST; the leaderboard judge dinged us for 'expert-only "
+    "monograph density, unfriendly to general readers' — our weakest dimension):\n"
+    "  - Define each domain-specific or technical term in plain language at its "
+    "FIRST use in the body (one clause is enough) — never assume the reader already "
+    "knows the jargon. This is IN ADDITION to the §1 vocabulary glossary, and only "
+    "fires where such terms actually appear.\n"
+    "  - When introducing an abstract construct, ground it with one concrete "
+    "example, number, or short analogy so a non-specialist can follow the reasoning.\n"
+    "  - This does NOT mean dumbing down or cutting analysis — depth, rigor, and "
+    "evidence density stay exactly as required. It means making the EXISTING depth "
+    "legible to an informed generalist, step by step, not removing it."
+)
+
+
 _NUMERIC_SPINE_RULE = (
     "NUMERIC SPINE (L2 — quantitative reports only): if this report's core "
     "deliverable is a headline quantity (a total / count / market size / annual "
@@ -1163,6 +1179,7 @@ def writer_system(
             _INSIGHT_MIN,
             _CHAPTER_SYNTHESIS_RULE,
             _SKIM_LAYER_RULE,
+            _PEDAGOGICAL_ACCESSIBILITY_RULE,
             _NUMERIC_SPINE_RULE,
             CLEANING_RESISTANT_RULE,
             _EMDASH_RULE,
