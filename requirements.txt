@@ -6,15 +6,15 @@
 # one of the two reasons the 71-file test suite never ran in CI. This file
 # enumerates the third-party imports actually used by the package.
 #
-# Versions are intentionally left as lower-bound floors; pin them to the
-# exact resolved versions once confirmed in an environment with network
-# access (this audit pass ran in a no-network container and could not resolve
-# the installed versions).
+# Versions are pinned with a compatible-release floor: `>=` the version
+# resolved + verified against the suite on 2026-05-30, `<` the next major so
+# CI stays reproducible without silently absorbing a breaking major bump.
+# Bump the floors deliberately when upgrading.
 
-anthropic            # clients/anthropic_client.py (messages.stream, output_config, cache_control)
-httpx                # clients/anthropic_client.py (layered timeouts on the streaming path)
-requests             # clients/openai_client.py, clients/openrouter_client.py, retrieval/*
+anthropic>=0.105.2,<1.0    # clients/anthropic_client.py (messages.stream, output_config, cache_control)
+httpx>=0.28.1,<1.0         # clients/anthropic_client.py (layered timeouts on the streaming path)
+requests>=2.33.1,<3.0      # clients/openai_client.py, clients/openrouter_client.py, retrieval/*
 
 # Optional but recommended: evidence_dedup.py uses numpy for the vectorized
 # cosine pass and falls back to a slower pure-Python path without it.
-numpy
+numpy>=2.4.6,<3.0
