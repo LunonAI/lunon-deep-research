@@ -213,13 +213,13 @@ def raw_call(
             return text, usage
         last = f"empty content (stop={resp.stop_reason})"
         # Greptile PR #26 follow-up (2026-05-26): empty-content escalation
-        # cap held at _MAX_TOKENS_ESCALATION_CEILING (28000), matching the
-        # `architect max_tokens ≤ 28000` pin in tests/test_architect.py.
-        # Pre-fix the cap was 32000 — exactly the value smoke-5 proved
-        # Anthropic's edge cuts. With messages.create() the SDK's pre-flight
-        # guard would refuse a 32000-token non-streaming retry; with
-        # messages.stream() (the smoke-5 follow-up switch) that guard is
-        # absent, so an empty-content retry could escalate the architect's
-        # initial 24000 → 32000 → re-enter the same edge-cut failure mode.
+        # cap held at _MAX_TOKENS_ESCALATION_CEILING (120000), matching the
+        # `architect max_tokens ≤ 128000` pin in tests/test_architect.py and
+        # staying ≤ Opus 4.8's 128 k output limit. Pre-Opus-4.8 the cap was
+        # 28000 to stay inside Anthropic's edge-cut tolerance window
+        # (smoke-5 proved 32000 + think streams reliably get cut on Opus 4.7).
+        # On Opus 4.8 the streaming ceiling was verified clean at max_tokens=96000
+        # (probe: 16.7k / 19.6k output tokens, clean sentence endings), so the
+        # cap was raised to 120000 in lockstep with the new architect/writer budgets.
         kw["max_tokens"] = min(int(kw["max_tokens"] * 1.6), _MAX_TOKENS_ESCALATION_CEILING)
     raise RuntimeError(f"Anthropic {model} failed after {max_retries} retries: {last}")
