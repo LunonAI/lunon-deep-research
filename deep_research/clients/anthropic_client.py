@@ -197,6 +197,17 @@ def raw_call(
         log_usage(model, usage, note=note or "claude")
         text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
         if text:
+            # PR-A (2026-05-29): flag a genuine output-ceiling truncation so it's
+            # visible in run logs (the caller can't see stop_reason — `llm.call`
+            # returns text only). A `max_tokens` stop means the section was cut
+            # at the 14k ceiling; the inner-loop CUT-detector re-rolls it.
+            if getattr(resp, "stop_reason", None) == "max_tokens":
+                print(
+                    f"[anthropic_client] note={note!r} stop_reason=max_tokens — output hit the "
+                    f"{kw['max_tokens']}-token ceiling, likely truncated",
+                    file=sys.stderr,
+                    flush=True,
+                )
             return text, usage
         last = f"empty content (stop={resp.stop_reason})"
         # Greptile PR #26 follow-up (2026-05-26): empty-content escalation
