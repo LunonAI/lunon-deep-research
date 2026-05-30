@@ -17,4 +17,7 @@ requests>=2.33.1,<3.0      # clients/openai_client.py, clients/openrouter_client
 
 # Optional but recommended: evidence_dedup.py uses numpy for the vectorized
 # cosine pass and falls back to a slower pure-Python path without it.
-numpy>=2.4.6,<3.0
+# Floor is >=2.0 (not the 2.4.6 resolved on 3.12) because numpy>=2.3 requires
+# Python>=3.11 — an exact-newest pin is uninstallable on the 3.10 matrix leg.
+# numpy 2.x is API-stable for the cosine path across 3.10 (≤2.2.6) and 3.12.
+numpy>=2.0,<3.0
