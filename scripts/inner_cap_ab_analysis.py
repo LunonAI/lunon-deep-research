@@ -62,11 +62,11 @@ def analyze(drift_path: Path) -> dict:
             continue
         it2 = by_i[2]
         it1 = by_i.get(1)
-        # Exclude degraded i==2 entries: score_section returns a synthetic
-        # ok=True / min_score=10.0 when the inner-scorer LLM call fails. Counting
-        # that as a genuine "the 3rd pass saved this section" would bias the
-        # verdict toward KEEP cap=3. Drop from numerator AND denominator AND the
-        # score-gain samples. (Greptile PR #50.)
+        # Exclude degraded i==2 entries: score_section returns ok=True /
+        # min_score=None (UNVALIDATED, E1 fix PR #81) when the inner-scorer LLM
+        # call fails. Counting that as a genuine "the 3rd pass saved this
+        # section" would bias the verdict toward KEEP cap=3. Drop from numerator
+        # AND denominator AND the score-gain samples. (Greptile PR #50.)
         if it2.get("degraded"):
             degraded_idx2 += 1
             continue
@@ -124,7 +124,7 @@ def main() -> None:
 
     r = analyze(drift_path)
     print(f"  sections analyzed:              {r['total_sections']}")
-    print(f"  degraded i==2 excluded:         {r['degraded_idx2_excluded']} (inner-scorer LLM failed → synthetic pass)")
+    print(f"  degraded i==2 excluded:         {r['degraded_idx2_excluded']} (inner-scorer LLM failed → shipped UNVALIDATED, E1 fix)")
     print(
         f"  reached the 3rd pass (i>=2):    {r['reached_idx2']} ({r['reached_fraction'] * 100:.1f}% of all sections; only possible at cap=3)"
     )

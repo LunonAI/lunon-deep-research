@@ -18,6 +18,7 @@ import json
 import os
 import pathlib
 import re
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -722,9 +723,9 @@ def _run_section_loop(s: PipelineState, query, language):
                     "scored": True,
                     "score_ok": bool(r.get("ok")),
                     "min_score": r.get("min_score"),
-                    # score_section returns a synthetic ok=True / min_score=10.0
-                    # when the inner-scorer LLM call fails. Forward that flag so
-                    # the analysis script can exclude these from the cap=2
+                    # score_section returns ok=True / min_score=None (UNVALIDATED)
+                    # when the inner-scorer LLM call fails (E1 fix, PR #81). Forward
+                    # that flag so the analysis script can exclude these from the cap=2
                     # verdict — a degraded "pass" is not a genuine one and would
                     # otherwise bias toward KEEP cap=3. (Greptile PR #50.)
                     "degraded": bool(r.get("degraded")),
@@ -775,7 +776,11 @@ def _run_section_loop(s: PipelineState, query, language):
     results.sort(key=lambda r: order_ix.get(r[0], 1e9))
 
     sections, score_summary, failing = [], [], []
-    completion = {"n_sections": 0, "n_hollow_final": 0, "hollow_sections": [], "sections": []}
+    # E1: n_degraded counts sections whose FINAL inner-loop score came from a
+    # degraded (failed) scorer call — they shipped unvalidated, not at a genuine
+    # quality bar. Surfaced in completion_stats + a run-level stderr warning so a
+    # scorer outage is visible instead of laundered into silent passes.
+    completion = {"n_sections": 0, "n_hollow_final": 0, "hollow_sections": [], "n_degraded": 0, "sections": []}
     for idx, (sid, u, draft_s, last, stats, traj, final_thin, sec_meta) in enumerate(results):
         sections.append(draft_s)
         completion["n_sections"] += 1
@@ -792,6 +797,8 @@ def _run_section_loop(s: PipelineState, query, language):
         if stats and (stats.get("n_markers_stripped") or stats.get("n_violations")):
             s.capel_stats[sid] = stats
         if last:
+            if last.get("degraded"):
+                completion["n_degraded"] += 1
             score_summary.append(
                 {
                     "section": sid,
@@ -802,6 +809,18 @@ def _run_section_loop(s: PipelineState, query, language):
             )
             for f in last.get("fail", []):
                 failing.append(f"[{sid}] {f.get('criterion')}: {f.get('rationale', '')}")
+    # E1: a degraded scorer ships sections unvalidated. Keep the run fail-soft,
+    # but make the outage loud at run level rather than invisible-except-in-drift.
+    if completion["n_degraded"]:
+        print(
+            f"[orchestrate] WARNING: inner-scorer degraded for "
+            f"{completion['n_degraded']}/{completion['n_sections']} sections — "
+            f"they shipped UNVALIDATED (scorer outage), not at a verified quality "
+            f"bar. Check the scorer model/availability before trusting this run's "
+            f"quality gate.",
+            file=sys.stderr,
+            flush=True,
+        )
     s.completion_stats = completion
     return sections, score_summary, failing
 
