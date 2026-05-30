@@ -178,6 +178,11 @@ def _scaffold_residual(article):
 # while Qianfan's leaves are full ~700-1000 CJK essays. The length lever (PR #74)
 # should drive this toward 0 at the source; this measures whether it did.
 _STUB_LEAF_MIN_CONTENT_CHARS = 120
+# Distinct from _HEADING_RE (which captures the title text for the heading list).
+# _leaf_stub_stats slices each leaf's body by character offset, so it needs the
+# match SPAN (m.start()/m.end()), not the title — hence a separate pattern with no
+# capture group. [ \t]+ (vs _HEADING_RE's \s+) keeps the match on a single line so
+# m.end() lands at the heading's line end, exactly where the leaf body begins.
 _HEADING_LINE_RE = re.compile(r"(?m)^(#{1,6})[ \t]+.+$")
 
 
