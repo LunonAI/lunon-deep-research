@@ -20,6 +20,14 @@ def test_openai_embedding_prefix_no_longer_falls_through():
     assert llm._provider("text-embedding-3-small") == "openai"
 
 
+def test_openai_o_series_prefixes():
+    # o1/o3/o4 families don't start with gpt- and have no slug — must route to
+    # openai, not hit the ValueError.
+    assert llm._provider("o1") == "openai"
+    assert llm._provider("o3-mini") == "openai"
+    assert llm._provider("o4-mini") == "openai"
+
+
 def test_anthropic_prefix():
     assert llm._provider("claude-opus-4-7") == "anthropic"
 
