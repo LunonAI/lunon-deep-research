@@ -1,0 +1,5 @@
+# Dev / CI dependencies. Install with: pip install -r requirements-dev.txt
+-r requirements.txt
+
+pytest
+ruff==0.14.11   # matches the version pinned in .github/workflows/ci.yml
