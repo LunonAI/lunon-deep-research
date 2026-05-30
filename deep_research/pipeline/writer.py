@@ -946,20 +946,17 @@ def write_section(
     feedback_block = (
         f"\nREVISION FEEDBACK — fix these and integrate the cited evidence inline:\n{feedback}\n" if feedback else ""
     )
-    # Bumped from 7000 → 14000 to accommodate the deeper H3→H4 tree the
-    # depth_seeds drive. This is the LLM-call upper bound; in production with
-    # `DR_CAPEL_G=on` (the default) the per-section CAPEL countdown — driven
-    # by `target_tokens` ≈ length_ceiling/0.75/n_top_sections (≈2.5-3.5k tokens
-    # for the typical 8-12-section plan) — is the OPERATIVE per-section cap,
-    # not max_tokens. The 14k headroom matters in three cases: (a) CAPEL
-    # disabled (`DR_CAPEL_G=off`); (b) degenerate TOCs with <=4 sections where
-    # weight-share + `SECTION_BUDGET_CEILING=20_000` push target_tokens past
-    # 7k; (c) refiner-pass output that needs room to grow. The "depth uplift"
-    # PR #20 promises lands primarily via (i) the architect's deeper outline
-    # (more sections × more H3 × explicit depth_seeds payload) and (ii) the
-    # length_ceiling 4.0× bump that lifts the per-section CAPEL target —
-    # NOT primarily via this max_tokens headroom.
-    raw = llm.call("writer", user, system=sys, max_tokens=14000, note=f"writer.sec.{sid}", user_suffix=feedback_block)
+    # P3b-v5 (2026-05-29): 14000 → 21000 in lockstep with init_format
+    # SECTION_BUDGET_CEILING 20000→30000 (30000×0.7=21000 keeps the validator's
+    # 0.7× passline reachable in one writer call). This is the LLM-call upper
+    # bound; with `DR_CAPEL_G=on` (default) the per-section CAPEL countdown —
+    # now driven by the LEAF-AWARE `target_tokens` (init_format scales the
+    # per-section budget by the planned leaf count) — is the OPERATIVE per-
+    # section cap, not max_tokens. The 21k headroom matters for (a) CAPEL
+    # disabled; (b) the deepest ZH chapters whose leaf-aware target approaches
+    # the 30000 ceiling; (c) refiner-pass growth. The ZH length uplift lands via
+    # the leaf-aware budget lifting the CAPEL target, not via this headroom.
+    raw = llm.call("writer", user, system=sys, max_tokens=21000, note=f"writer.sec.{sid}", user_suffix=feedback_block)
     if capel_active:
         text, stats = strip_capel_markers(raw)
     else:
