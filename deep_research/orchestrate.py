@@ -723,9 +723,9 @@ def _run_section_loop(s: PipelineState, query, language):
                     "scored": True,
                     "score_ok": bool(r.get("ok")),
                     "min_score": r.get("min_score"),
-                    # score_section returns a synthetic ok=True / min_score=10.0
-                    # when the inner-scorer LLM call fails. Forward that flag so
-                    # the analysis script can exclude these from the cap=2
+                    # score_section returns ok=True / min_score=None (UNVALIDATED)
+                    # when the inner-scorer LLM call fails (E1 fix, PR #81). Forward
+                    # that flag so the analysis script can exclude these from the cap=2
                     # verdict — a degraded "pass" is not a genuine one and would
                     # otherwise bias toward KEEP cap=3. (Greptile PR #50.)
                     "degraded": bool(r.get("degraded")),
