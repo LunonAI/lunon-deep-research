@@ -491,9 +491,7 @@ def _trunc_retry_cap_from_env() -> int:
     except ValueError:
         raise ValueError(f"DR_TRUNC_RETRY_CAP must be a non-negative integer; got {raw!r}") from None
     if not (_TRUNC_RETRY_CAP_MIN <= val <= _TRUNC_RETRY_CAP_MAX):
-        raise ValueError(
-            f"DR_TRUNC_RETRY_CAP out of range [{_TRUNC_RETRY_CAP_MIN}, {_TRUNC_RETRY_CAP_MAX}]: {val}"
-        )
+        raise ValueError(f"DR_TRUNC_RETRY_CAP out of range [{_TRUNC_RETRY_CAP_MIN}, {_TRUNC_RETRY_CAP_MAX}]: {val}")
     return val
 
 
