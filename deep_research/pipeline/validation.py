@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from .. import writing_rules as wr
 from ..node_wrap import node
 from ..state import DesignGuide, Scaffold
-from ..text_metrics import approx_tokens
+from ..text_metrics import approx_tokens, approx_words
 
 _FAIL_LOG = pathlib.Path(__file__).resolve().parent.parent.parent / "p1_artifacts" / "validation_failures.jsonl"
 _FAIL_LOG.parent.mkdir(parents=True, exist_ok=True)
@@ -542,16 +542,9 @@ def _validate_prose_form(article: str) -> dict:
     # corpus target.
     paras = [p for p in re.split(r"\n\s*\n", article) if p.strip() and not p.strip().startswith("#")]
 
-    def _wc(p: str) -> int:
-        # CJK-aware word count mirroring the profiler (CJK has no spaces, so
-        # .split() undercounts; approximate as chars/1.6).
-        cjk = len(re.findall(r"[一-鿿]", p))
-        if cjk > 0.15 * max(len(p), 1):
-            latin = len(re.findall(r"[A-Za-z]+", p))
-            return max(int(cjk / 1.6) + latin, 1)
-        return max(len(p.split()), 1)
-
-    lens = sorted(_wc(p) for p in paras)
+    # F2: shared CJK-aware word count (was a byte-identical copy here and in
+    # style_clamp._words; both now call text_metrics.approx_words).
+    lens = sorted(approx_words(p) for p in paras)
     if lens:
         mid = len(lens) // 2
         median_words = lens[mid] if len(lens) % 2 else (lens[mid - 1] + lens[mid]) // 2
