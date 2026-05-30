@@ -466,7 +466,38 @@ _COMPLETION_MIN_RATIO = 0.5  # below the 0.7x stated target — only SEVERE shor
 # (no feedback) before the grounding/score loop, bounded by this cap, so a cut
 # generation never reaches acceptance. The quality (expand/grounding) loop then
 # handles genuine under-production (thin BUT sentence-complete) as before.
-_TRUNC_RETRY_CAP = int(os.environ.get("DR_TRUNC_RETRY_CAP", "2"))
+_TRUNC_RETRY_CAP_DEFAULT = 2
+_TRUNC_RETRY_CAP_MIN = 0  # 0 = explicit kill-switch (re-rolls disabled)
+_TRUNC_RETRY_CAP_MAX = 5  # bound cost: each re-roll is a full section regeneration
+
+
+def _trunc_retry_cap_from_env() -> int:
+    """Resolve the cut-generation re-roll cap from DR_TRUNC_RETRY_CAP.
+
+    Mirrors `_specialist_timeout_from_env()` (pipeline/orchestrator.py): fail
+    loud with a clear message on a non-integer value rather than letting a bare
+    ``int()`` raise a cryptic ValueError at module-import time (which would crash
+    the whole orchestrate module), and guard the range so a negative value
+    (silently disables re-rolls from the first ``trunc_retries < cap`` check) or
+    an absurdly large one (e.g. 50 — up to 50 full-section regenerations per
+    section under persistent stream-drops, exactly the high-contention case this
+    feature addresses) can't slip through. 0 is allowed as an explicit
+    kill-switch; the [0, 5] band still admits modest bumps above the default."""
+    raw = os.environ.get("DR_TRUNC_RETRY_CAP")
+    if raw is None:
+        return _TRUNC_RETRY_CAP_DEFAULT
+    try:
+        val = int(raw)
+    except ValueError:
+        raise ValueError(f"DR_TRUNC_RETRY_CAP must be a non-negative integer; got {raw!r}") from None
+    if not (_TRUNC_RETRY_CAP_MIN <= val <= _TRUNC_RETRY_CAP_MAX):
+        raise ValueError(
+            f"DR_TRUNC_RETRY_CAP out of range [{_TRUNC_RETRY_CAP_MIN}, {_TRUNC_RETRY_CAP_MAX}]: {val}"
+        )
+    return val
+
+
+_TRUNC_RETRY_CAP = _trunc_retry_cap_from_env()
 
 
 def _approx_tokens(text: str) -> int:
