@@ -62,11 +62,11 @@ def analyze(drift_path: Path) -> dict:
             continue
         it2 = by_i[2]
         it1 = by_i.get(1)
-        # Exclude degraded i==2 entries: score_section returns a synthetic
-        # ok=True / min_score=10.0 when the inner-scorer LLM call fails. Counting
-        # that as a genuine "the 3rd pass saved this section" would bias the
-        # verdict toward KEEP cap=3. Drop from numerator AND denominator AND the
-        # score-gain samples. (Greptile PR #50.)
+        # Exclude degraded i==2 entries: score_section returns ok=True /
+        # min_score=None (UNVALIDATED, E1 fix PR #81) when the inner-scorer LLM
+        # call fails. Counting that as a genuine "the 3rd pass saved this
+        # section" would bias the verdict toward KEEP cap=3. Drop from numerator
+        # AND denominator AND the score-gain samples. (Greptile PR #50.)
         if it2.get("degraded"):
             degraded_idx2 += 1
             continue
