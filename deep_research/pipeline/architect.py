@@ -9,10 +9,10 @@ obligation, and per-section depth targets. Archetype-aware (item 16).
 """
 
 import json
-import os
 import re
 
 from .. import llm
+from .._env import int_env
 from . import tier_ranking_score
 
 # query.type -> researcher specialist (1:1, per AI-Q + technique 16)
@@ -352,8 +352,13 @@ _SEEDS_MAX = 4
 # DISTINCT queries to feed a larger per-specialist search cap (else specialists
 # re-run duplicate/empty slots and gather no NEW atoms). Default 48/64 = inert;
 # dev6 arm sets 80/104.
-_QUERIES_MIN = int(os.environ.get("DR_QUERIES_MIN") or 48)
-_QUERIES_MAX = int(os.environ.get("DR_QUERIES_MAX") or 64)
+_QUERIES_MIN = int_env("DR_QUERIES_MIN", 48)
+_QUERIES_MAX = int_env("DR_QUERIES_MAX", 64)
+if _QUERIES_MIN > _QUERIES_MAX:
+    raise RuntimeError(
+        f"DR_QUERIES_MIN={_QUERIES_MIN} > DR_QUERIES_MAX={_QUERIES_MAX}: the "
+        f"Architect's query band is inverted — set DR_QUERIES_MIN ≤ DR_QUERIES_MAX."
+    )
 
 # P3-W0a (2026-05-27): per-archetype `query.type` minimum proportions.
 # The HARD RULES bullet "Distribute query type to cover all needed analytical
@@ -818,7 +823,7 @@ def _retry_is_better(retry_audit: dict, orig_audit: dict) -> bool:
 # vs Lunon's 3 — breadth-of-entities at constant depth is a top Comprehensiveness
 # lever. Raising this floor forces the architect to enumerate the full set. Default
 # 5 = inert; dev6 arm sets =10. Bounded above by _ENTITY_MATRIX_ENTITIES_MAX.
-_ENTITY_MATRIX_ENTITIES_MIN = int(os.environ.get("DR_ENTITY_MATRIX_MIN") or 5)
+_ENTITY_MATRIX_ENTITIES_MIN = int_env("DR_ENTITY_MATRIX_MIN", 5)
 _ENTITY_MATRIX_ENTITIES_MAX = 20  # back-compat; tests reference this directly
 _ENTITY_MATRIX_ENTITIES_MAX_BY_ARCHETYPE: dict[str, int] = {
     "list-all": 30,

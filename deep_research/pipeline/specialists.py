@@ -14,10 +14,10 @@ available").
 """
 
 import json
-import os
 import sys
 
 from .. import llm
+from .._env import int_env
 from ..retrieval import domain_routed
 
 # Adapted from AI-Q researcher_agent/prompts/*.j2 (aiq_teardown.md §4).
@@ -105,7 +105,7 @@ def _sanitize_chain(value) -> list:
 # padding. Default 12 = inert (PR lands dark); the dev6 arm sets =20. NOTE:
 # orchestrator.BUDGET must be ≥ 5×this + 2 (enforced fail-loud there) or the
 # dispatch silently re-clamps the per-specialist slice.
-_MAX_SEARCHES_PER_SPECIALIST = int(os.environ.get("DR_MAX_SEARCHES_PER_SPECIALIST") or 12)
+_MAX_SEARCHES_PER_SPECIALIST = int_env("DR_MAX_SEARCHES_PER_SPECIALIST", 12)
 _RESULTS_PER_SEARCH = 10
 
 # P2-Option-A-#4 Greptile PR #22 follow-up (2026-05-25): named cap on the
