@@ -155,7 +155,7 @@ if BUDGET < _MIN_BUDGET:
 # re-creates the incident at runtime. Enforce the documented ≥360s floor
 # whenever the search cap is raised above its inert default so the
 # misconfiguration surfaces at import, not as silently-dropped specialists.
-_SPECIALIST_SEARCH_CAP_INERT_DEFAULT = 12  # mirrors specialists int_env default
+_SPECIALIST_SEARCH_CAP_INERT_DEFAULT = specialists._MAX_SEARCHES_PER_SPECIALIST_DEFAULT  # single source of truth
 _SPECIALIST_TIMEOUT_FLOOR_S = 360
 if (
     specialists._MAX_SEARCHES_PER_SPECIALIST > _SPECIALIST_SEARCH_CAP_INERT_DEFAULT
