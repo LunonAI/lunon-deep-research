@@ -38,14 +38,34 @@ def _should_cache_system(role: str, system) -> bool:
     return isinstance(system, str) and len(system) >= _CACHE_SYSTEM_MIN_CHARS
 
 
+# Explicit model-id → provider routing (B4). Ordered prefix rules, then the
+# OpenRouter "org/model" slug convention, then a clear, actionable error. Prefer
+# adding a rule here over scattering prefix checks elsewhere.
+# `text-embedding-` is listed so _provider() itself never raises on an embedding
+# id; note embed() still keeps its own `text-embedding-` guard because it needs
+# the OpenAI-specific embeddings endpoint (not just the provider), so that id is
+# intentionally known in both places.
+_PROVIDER_PREFIXES = (
+    ("gpt-", "openai"),
+    ("o1", "openai"),  # OpenAI o-series reasoning models (o1, o3-mini, o4-mini, …)
+    ("o3", "openai"),
+    ("o4", "openai"),
+    ("text-embedding-", "openai"),
+    ("claude", "anthropic"),
+)
+
+
 def _provider(model: str) -> str:
-    if model.startswith("gpt-"):
-        return "openai"
-    if model.startswith("claude"):
-        return "anthropic"
-    if "/" in model:
+    for prefix, prov in _PROVIDER_PREFIXES:
+        if model.startswith(prefix):
+            return prov
+    if "/" in model:  # OpenRouter org/model slug convention
         return "openrouter"
-    raise ValueError(f"cannot infer provider for model {model!r}")
+    raise ValueError(
+        f"cannot infer provider for model {model!r}: no matching prefix in "
+        f"_PROVIDER_PREFIXES {[p for p, _ in _PROVIDER_PREFIXES]} and no '/' "
+        f"OpenRouter slug. Add an explicit prefix rule to _PROVIDER_PREFIXES."
+    )
 
 
 def call(
