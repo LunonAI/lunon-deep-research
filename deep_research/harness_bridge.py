@@ -28,19 +28,24 @@ import functools
 import os
 import sys
 
-# DRB harness location discovery. Honor `$DRB_REPO` first (the repo
-# convention), then probe well-known per-machine locations. When none of the
-# candidates resolve, `_harness()` raises a clear deferred error rather than
-# letting a bare top-level import crash collection of every test that
-# transitively imports this module.
-_DRB_CANDIDATES = (
-    os.environ.get("DRB_REPO"),
-    os.path.expanduser("~/dev/deep_research_bench"),
-    "/home/connor/dev/deep_research_bench",  # legacy Linux path
-)
-
 # Names that trigger the deferred harness import on first attribute access.
 _LAZY_ATTRS = frozenset({"CRITERIA_PROMPTS", "WEIGHT_PROMPT", "format_criteria_list", "extract_json_from_markdown"})
+
+
+def _drb_candidates() -> tuple:
+    """Resolve candidate harness locations at CALL time, not import time.
+
+    Honors `$DRB_REPO` first (the repo convention), then probes well-known
+    per-machine locations. Evaluating these inside `_harness()` (rather than
+    binding them to a module-level constant at import) means a caller that sets
+    `$DRB_REPO` *after* importing this module — but before the first criteria
+    regeneration — is still honored.
+    """
+    return (
+        os.environ.get("DRB_REPO"),
+        os.path.expanduser("~/dev/deep_research_bench"),
+        "/home/connor/dev/deep_research_bench",  # legacy Linux path
+    )
 
 
 @functools.lru_cache(maxsize=1)
@@ -48,11 +53,13 @@ def _harness() -> dict:
     """Import the external DRB harness prompt modules on FIRST USE.
 
     Cached, so the import + sys.path insertion happen at most once. Raises a
-    clear, deferred ModuleNotFoundError when the harness repo isn't on disk —
-    naming the env var and the searched paths — instead of the opaque
-    top-of-import-graph failure this module used to produce.
+    clear, deferred ImportError when the harness repo isn't on disk OR is
+    present but missing an expected symbol — naming the env var and the searched
+    paths — instead of the opaque top-of-import-graph failure this module used
+    to produce.
     """
-    drb = next((p for p in _DRB_CANDIDATES if p and os.path.isdir(p)), None)
+    candidates = _drb_candidates()
+    drb = next((p for p in candidates if p and os.path.isdir(p)), None)
     if drb and drb not in sys.path:
         sys.path.insert(0, drb)
     try:
@@ -90,12 +97,15 @@ def _harness() -> dict:
         from prompt.score_prompt_en import generate_merged_score_prompt as en_score
         from prompt.score_prompt_zh import generate_merged_score_prompt as zh_score
         from utils.json_extractor import extract_json_from_markdown
-    except ModuleNotFoundError as e:
-        raise ModuleNotFoundError(
+    except ImportError as e:
+        # ImportError (not just ModuleNotFoundError) so a harness that is on
+        # disk but missing an expected symbol surfaces here with context,
+        # rather than as a bare ImportError deep in the import machinery.
+        raise ImportError(
             "DRB harness prompt machinery is not importable. Criteria "
             "regeneration (deep_research.pipeline.criteria_spec) requires the "
             "external deep_research_bench repo on disk. Set $DRB_REPO or place "
-            f"it at ~/dev/deep_research_bench. Searched: {_DRB_CANDIDATES}. "
+            f"it at ~/dev/deep_research_bench. Searched: {candidates}. "
             f"Underlying import error: {e}"
         ) from e
     return {
