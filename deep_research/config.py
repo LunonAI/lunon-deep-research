@@ -18,7 +18,11 @@ OPUS = "claude-opus-4-7"
 NEMOTRON = "nvidia/nemotron-3-super-120b-a12b"  # OpenRouter PAID slug (decision #1)
 
 # ZH writer-pass candidates (OpenRouter); winner wired in after W6 smoke.
-ZH_WRITER_CANDIDATES = ["qwen/qwen3-235b-a22b", "deepseek/deepseek-v3.2-exp"]
+# AUDIT F3 (2026-05-30): the shipped default (zh_writer below) is
+# deepseek-v4-pro, but it was missing from this candidate list, so a re-run of
+# select_zh_writer() could never re-pick the model actually in production. Added
+# it as the first candidate (it won W6 by +0.60).
+ZH_WRITER_CANDIDATES = ["deepseek/deepseek-v4-pro", "qwen/qwen3-235b-a22b", "deepseek/deepseek-v3.2-exp"]
 
 _DEFAULTS = {
     "orchestrator": OPUS,
