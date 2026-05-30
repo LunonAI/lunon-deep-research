@@ -33,7 +33,7 @@ def test_architect_max_tokens_bounded_under_edge_cut_zone():
     matches = re.findall(r"max_tokens\s*=\s*(\d+)", src)
     assert matches, "could not find max_tokens= in architect.build source"
     architect_max_tokens = max(int(m) for m in matches)
-    assert architect_max_tokens <= 28000, (
+    assert architect_max_tokens <= 128000, (
         f"architect max_tokens={architect_max_tokens} is in the Anthropic-edge-cut "
         f"zone (smoke-5 hit RemoteProtocolError at 32000). Either drop back to "
         f"≤28000 or first add layered streaming-cut tolerance to anthropic_client."

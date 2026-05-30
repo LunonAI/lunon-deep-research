@@ -23,7 +23,7 @@ import json
 import os
 import sys
 
-from .. import llm
+from .. import config, llm
 from .._env import int_env
 from . import specialists
 from .memory_bank import MemoryBank
@@ -399,7 +399,13 @@ def _gap_review(plan, digest_parts):
     )
     try:
         return llm.call_json(
-            "orchestrator", user, system=_GAP_SYSTEM, max_tokens=8000, think=True, effort="low", note="orch.gapreview"
+            "orchestrator",
+            user,
+            system=_GAP_SYSTEM,
+            max_tokens=32000,
+            think=True,
+            effort=config.effort_for("orchestrator"),
+            note="orch.gapreview",
         )
     except Exception:  # noqa: BLE001
         return {"review": [], "gap_fill": []}

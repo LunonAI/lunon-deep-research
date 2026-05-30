@@ -13,7 +13,7 @@ obligation, and per-section depth targets. Archetype-aware (item 16).
 import json
 import re
 
-from .. import llm
+from .. import config, llm
 from .._env import int_env
 from . import tier_ranking_score
 
@@ -711,7 +711,13 @@ def build(
     #   completes in 5-8 min — well inside Anthropic's stream-duration
     #   tolerance.
     plan = llm.call_json(
-        "architect", user, system=_SYSTEM, max_tokens=24000, effort="low", think=True, note="architect"
+        "architect",
+        user,
+        system=_SYSTEM,
+        max_tokens=64000,
+        effort=config.effort_for("architect"),
+        think=True,
+        note="architect",
     )
     plan = _coerce_to_dict(plan)
     _normalize(plan, archetype=archetype)
@@ -739,8 +745,8 @@ def build(
             "architect",
             retry_user,
             system=_SYSTEM,
-            max_tokens=24000,
-            effort="low",
+            max_tokens=64000,
+            effort=config.effort_for("architect"),
             think=True,
             note="architect.retry",
         )
