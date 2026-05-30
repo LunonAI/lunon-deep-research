@@ -45,8 +45,7 @@ from .specialists import research
 # an `evidence_gatherer` at the 600s the runner exported, almost certainly slow-
 # under-contention (concurrent `RemoteProtocolError` stream-drops) not hung — the
 # research loop is bounded by the 64-tool-call budget so it can't spin forever.
-# 1200s makes a single research call essentially never falsely dropped; pair with
-# sane concurrency (6×4) rather than relying on the cap alone.
+# 1200s makes a single research call essentially never falsely dropped.
 _SPECIALIST_TIMEOUT_DEFAULT_S = 1200
 _SPECIALIST_TIMEOUT_MIN_S = 60
 _SPECIALIST_TIMEOUT_MAX_S = 3600

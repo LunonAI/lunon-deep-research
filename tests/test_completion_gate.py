@@ -205,6 +205,8 @@ def test_is_cut_generation_distinguishes_cut_from_under_production():
     assert o._is_cut_generation("A complete but short sentence.", expected) is False
     # full + complete → not a cut
     assert o._is_cut_generation(("word " * 2000).strip() + ".", expected) is False
+    # mid-sentence but NOT thin (e.g. large ceiling hit above 0.5×expected) → not a cut
+    assert o._is_cut_generation(("word " * 2000).strip() + " truncated mid", expected) is False
 
 
 def test_cut_draft_is_rerolled_fresh(monkeypatch):
