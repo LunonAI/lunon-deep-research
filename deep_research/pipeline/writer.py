@@ -622,8 +622,8 @@ def write_section(
                 # not sum to 1.0, e.g. {R-1:5, R-2:3, R-3:2}) would give a
                 # sensitivity baseline inconsistent with the main table, the very
                 # inconsistency this PR removes. (Greptile PR #51 round-2.)
-                _w_total = sum(weights.values()) or 1.0
-                norm_weights = {k: round(v / _w_total, 6) for k, v in weights.items()}
+                _w_total = sum(weights_labeled.values()) or 1.0
+                norm_weights = {k: round(v / _w_total, 6) for k, v in weights_labeled.items()}
                 parts.append(
                     "  PRE-COMPUTED SCORES — the scoring math is already done "
                     "for you. Render these EXACT values VERBATIM; do NOT "
