@@ -67,8 +67,9 @@ def test_trajectory_entry_shape():
     agree."""
     # A passing-on-first-try section produces one scored entry.
     # The `degraded` flag (Greptile PR #50) distinguishes a genuine pass from
-    # score_section's synthetic ok=True/min_score=10.0 fallback when the
-    # inner-scorer LLM call fails — the analysis script excludes degraded i==2.
+    # score_section's ok=True / min_score=None (UNVALIDATED, E1 fix PR #81)
+    # fallback when the inner-scorer LLM call fails — the analysis script
+    # excludes degraded i==2.
     expected_keys = {"i", "grounding_ok", "scored", "score_ok", "min_score", "degraded"}
     entry = {"i": 0, "grounding_ok": True, "scored": True, "score_ok": True, "min_score": 8.5, "degraded": False}
     assert set(entry.keys()) == expected_keys

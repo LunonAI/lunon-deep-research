@@ -58,7 +58,15 @@ def score_section(
             "inner_scorer", user, system=_SYSTEM, max_tokens=7000, seed=_SEED, effort="medium", note=note
         )
     except Exception:  # noqa: BLE001
-        return {"ok": True, "scores": [], "min_score": 10.0, "fail": [], "degraded": True}
+        # E1: the scorer LLM call failed (e.g. a transient GPT-5.5 outage). Stay
+        # fail-soft — never crash the task — but do NOT launder the outage into a
+        # synthetic 10/10. `min_score=None` marks the section UNVALIDATED so the
+        # run-level degraded tally (orchestrate) and the drift logs reflect
+        # reality instead of a perfect score. `ok=True` still lets the section
+        # ship (re-writing a probably-fine section while the scorer is down would
+        # just burn the inner-loop budget) — but it ships honestly labelled, not
+        # as a top-quality pass.
+        return {"ok": True, "scores": [], "min_score": None, "fail": [], "degraded": True}
     scores = obj.get("scores", []) if isinstance(obj, dict) else []
     nums = [float(s.get("score", 0)) for s in scores if isinstance(s, dict)]
     mn = min(nums) if nums else 10.0
