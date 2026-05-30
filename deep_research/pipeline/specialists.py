@@ -110,8 +110,9 @@ def _sanitize_chain(value) -> list:
 #   2. DR_SPECIALIST_TIMEOUT_S ≥ 360s — at =20 the specialist wall-clock is
 #      ~100s Exa + ~180s Nemotron + ~60s buffer ≈ 340s, past the 240s default
 #      (the CAPEL smoke incident dropped specialists exactly this way).
-#   3. DR_RESULTS_SERIALISATION_CAP ≥ ~400k — at =20 the ~320k-char payload
-#      overflows the 240k default (see the cap definition below).
+#   3. DR_RESULTS_SERIALISATION_CAP — enforced fail-loud at the cap definition
+#      below (cap ≥ searches×results×~1,600); at =20 that floor is ~320k, past
+#      the 240k default, so set ≥~400k for headroom.
 _MAX_SEARCHES_PER_SPECIALIST = int_env("DR_MAX_SEARCHES_PER_SPECIALIST", 12)
 _RESULTS_PER_SEARCH = 10
 
@@ -141,6 +142,24 @@ _RESULTS_PER_SEARCH = 10
 # Tongyi caps (400k ≈ 100k input tokens — still within both models' 128k/131k
 # contexts).
 _RESULTS_SERIALISATION_CAP = int_env("DR_RESULTS_SERIALISATION_CAP", 240_000)
+
+# P3b-v5 (2026-05-29): co-knob invariant, fail-loud — mirrors orchestrator.BUDGET.
+# The cap and _MAX_SEARCHES_PER_SPECIALIST are co-dependent: the
+# json.dumps(results)[:payload_cap] slice below truncates SILENTLY, so raising the
+# search cap without raising the serialisation cap drops the tail searches' hits
+# AFTER Exa cost was incurred (the PR #22 failure mode). Enforce cap ≥ the maximal
+# expected payload (searches × results × ~1,600 chars/result) at import so the
+# misconfiguration surfaces before any search runs, not silently mid-extraction.
+_MIN_SERIALISATION_CAP = _MAX_SEARCHES_PER_SPECIALIST * _RESULTS_PER_SEARCH * 1_600
+if _RESULTS_SERIALISATION_CAP < _MIN_SERIALISATION_CAP:
+    raise RuntimeError(
+        f"specialists._RESULTS_SERIALISATION_CAP={_RESULTS_SERIALISATION_CAP} < "
+        f"_MAX_SEARCHES_PER_SPECIALIST({_MAX_SEARCHES_PER_SPECIALIST})×"
+        f"_RESULTS_PER_SEARCH({_RESULTS_PER_SEARCH})×1600={_MIN_SERIALISATION_CAP}: "
+        f"raise DR_RESULTS_SERIALISATION_CAP to ≥{_MIN_SERIALISATION_CAP} or the "
+        f"json.dumps(results) slice silently drops the tail searches' hits with "
+        f"Exa cost already incurred."
+    )
 
 # P2-Option-A-#4 Greptile PR #22 follow-up round 2 (2026-05-25):
 # Per-model serialised-payload cap (chars). Sized so the payload fits

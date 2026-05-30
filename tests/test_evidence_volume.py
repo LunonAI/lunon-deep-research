@@ -317,9 +317,10 @@ def test_unknown_override_cap_safely_below_32k_ctx_budget():
 
 def test_grounding_knobs_env_overridable_and_dev6_config_is_safe(monkeypatch):
     """P3b-v5: the grounding volume knobs are env-overridable (default = current,
-    so PR-2 lands inert). The intended dev6 arm (searches=20, budget=104) must
-    SATISFY the BUDGET ≥ 5×cap+2 invariant — i.e. importing the orchestrator with
-    that config must NOT raise the fail-loud guard (5×20+2=102 ≤ 104)."""
+    so PR-2 lands inert). The intended dev6 arm (searches=20, budget=104,
+    serialisation cap=400k) must SATISFY both co-knob invariants — importing
+    specialists + orchestrator with that full config must NOT raise either
+    fail-loud guard (5×20+2=102 ≤ 104; cap 400k ≥ 20×10×1600=320k)."""
     import importlib
 
     from deep_research.pipeline import orchestrator as orch
@@ -328,14 +329,17 @@ def test_grounding_knobs_env_overridable_and_dev6_config_is_safe(monkeypatch):
     try:
         monkeypatch.setenv("DR_MAX_SEARCHES_PER_SPECIALIST", "20")
         monkeypatch.setenv("DR_TOOL_CALL_BUDGET", "104")
-        importlib.reload(sp)
-        importlib.reload(orch)  # would raise if the invariant were violated
+        monkeypatch.setenv("DR_RESULTS_SERIALISATION_CAP", "400000")
+        importlib.reload(sp)  # would raise if the cap invariant were violated
+        importlib.reload(orch)  # would raise if the BUDGET invariant were violated
         assert sp._MAX_SEARCHES_PER_SPECIALIST == 20
+        assert sp._RESULTS_SERIALISATION_CAP == 400_000
         assert orch.BUDGET == 104
     finally:
         # restore the module-level defaults for the rest of the suite
         monkeypatch.delenv("DR_MAX_SEARCHES_PER_SPECIALIST", raising=False)
         monkeypatch.delenv("DR_TOOL_CALL_BUDGET", raising=False)
+        monkeypatch.delenv("DR_RESULTS_SERIALISATION_CAP", raising=False)
         importlib.reload(sp)
         importlib.reload(orch)
     assert sp._MAX_SEARCHES_PER_SPECIALIST == 12 and orch.BUDGET == 64
@@ -344,7 +348,9 @@ def test_grounding_knobs_env_overridable_and_dev6_config_is_safe(monkeypatch):
 def test_grounding_misconfig_fails_loud(monkeypatch):
     """P3b-v5: bumping the per-specialist search cap WITHOUT raising BUDGET must
     fail loud at orchestrator import (else the dispatch slice silently re-clamps
-    the searches and gathers no new atoms — a silent grounding no-op)."""
+    the searches and gathers no new atoms — a silent grounding no-op). The
+    serialisation cap is raised here so this test isolates the BUDGET invariant;
+    the serialisation-cap invariant has its own test below."""
     import importlib
 
     import pytest
@@ -354,12 +360,37 @@ def test_grounding_misconfig_fails_loud(monkeypatch):
 
     try:
         monkeypatch.setenv("DR_MAX_SEARCHES_PER_SPECIALIST", "20")  # 5×20+2=102 > default 64
+        monkeypatch.setenv("DR_RESULTS_SERIALISATION_CAP", "400000")  # satisfy the cap invariant
         monkeypatch.delenv("DR_TOOL_CALL_BUDGET", raising=False)
         importlib.reload(sp)
         with pytest.raises(RuntimeError, match="silently clamped"):
             importlib.reload(orch)
     finally:
         monkeypatch.delenv("DR_MAX_SEARCHES_PER_SPECIALIST", raising=False)
+        monkeypatch.delenv("DR_RESULTS_SERIALISATION_CAP", raising=False)
         importlib.reload(sp)
         importlib.reload(orch)
     assert orch.BUDGET == 64
+
+
+def test_serialisation_cap_misconfig_fails_loud(monkeypatch):
+    """P3b-v5: bumping the per-specialist search cap WITHOUT raising the
+    serialisation cap must fail loud at specialists import — else the
+    json.dumps(results)[:cap] slice silently drops the tail searches' hits
+    AFTER Exa cost is incurred (the PR #22 failure mode). Mirrors the BUDGET
+    invariant: co-dependent knobs are enforced, not left to silent truncation."""
+    import importlib
+
+    import pytest
+
+    from deep_research.pipeline import specialists as sp
+
+    try:
+        monkeypatch.setenv("DR_MAX_SEARCHES_PER_SPECIALIST", "20")  # 20×10×1600=320k > 240k default
+        monkeypatch.delenv("DR_RESULTS_SERIALISATION_CAP", raising=False)
+        with pytest.raises(RuntimeError, match="DR_RESULTS_SERIALISATION_CAP"):
+            importlib.reload(sp)
+    finally:
+        monkeypatch.delenv("DR_MAX_SEARCHES_PER_SPECIALIST", raising=False)
+        importlib.reload(sp)
+    assert sp._RESULTS_SERIALISATION_CAP == 240_000 and sp._MAX_SEARCHES_PER_SPECIALIST == 12
