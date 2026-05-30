@@ -117,9 +117,7 @@ def _sanitize_chain(value) -> list:
 # timeout guard imports this constant so the "is the cap raised above inert?"
 # threshold can never drift from the default applied here.
 _MAX_SEARCHES_PER_SPECIALIST_DEFAULT = 12
-_MAX_SEARCHES_PER_SPECIALIST = int_env(
-    "DR_MAX_SEARCHES_PER_SPECIALIST", _MAX_SEARCHES_PER_SPECIALIST_DEFAULT
-)
+_MAX_SEARCHES_PER_SPECIALIST = int_env("DR_MAX_SEARCHES_PER_SPECIALIST", _MAX_SEARCHES_PER_SPECIALIST_DEFAULT)
 _RESULTS_PER_SEARCH = 10
 
 # P2-Option-A-#4 Greptile PR #22 follow-up (2026-05-25): named cap on the
