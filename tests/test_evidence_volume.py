@@ -313,3 +313,53 @@ def test_unknown_override_cap_safely_below_32k_ctx_budget():
         f"unknown-override cap {specialists._UNKNOWN_OVERRIDE_PAYLOAD_CAP_CHARS} "
         f"exceeds the 32k-ctx free-input budget ({free_input_chars_32k_model} chars)"
     )
+
+
+def test_grounding_knobs_env_overridable_and_dev6_config_is_safe(monkeypatch):
+    """P3b-v5: the grounding volume knobs are env-overridable (default = current,
+    so PR-2 lands inert). The intended dev6 arm (searches=20, budget=104) must
+    SATISFY the BUDGET ≥ 5×cap+2 invariant — i.e. importing the orchestrator with
+    that config must NOT raise the fail-loud guard (5×20+2=102 ≤ 104)."""
+    import importlib
+
+    from deep_research.pipeline import orchestrator as orch
+    from deep_research.pipeline import specialists as sp
+
+    try:
+        monkeypatch.setenv("DR_MAX_SEARCHES_PER_SPECIALIST", "20")
+        monkeypatch.setenv("DR_TOOL_CALL_BUDGET", "104")
+        importlib.reload(sp)
+        importlib.reload(orch)  # would raise if the invariant were violated
+        assert sp._MAX_SEARCHES_PER_SPECIALIST == 20
+        assert orch.BUDGET == 104
+    finally:
+        # restore the module-level defaults for the rest of the suite
+        monkeypatch.delenv("DR_MAX_SEARCHES_PER_SPECIALIST", raising=False)
+        monkeypatch.delenv("DR_TOOL_CALL_BUDGET", raising=False)
+        importlib.reload(sp)
+        importlib.reload(orch)
+    assert sp._MAX_SEARCHES_PER_SPECIALIST == 12 and orch.BUDGET == 64
+
+
+def test_grounding_misconfig_fails_loud(monkeypatch):
+    """P3b-v5: bumping the per-specialist search cap WITHOUT raising BUDGET must
+    fail loud at orchestrator import (else the dispatch slice silently re-clamps
+    the searches and gathers no new atoms — a silent grounding no-op)."""
+    import importlib
+
+    import pytest
+
+    from deep_research.pipeline import orchestrator as orch
+    from deep_research.pipeline import specialists as sp
+
+    try:
+        monkeypatch.setenv("DR_MAX_SEARCHES_PER_SPECIALIST", "20")  # 5×20+2=102 > default 64
+        monkeypatch.delenv("DR_TOOL_CALL_BUDGET", raising=False)
+        importlib.reload(sp)
+        with pytest.raises(RuntimeError, match="silently clamped"):
+            importlib.reload(orch)
+    finally:
+        monkeypatch.delenv("DR_MAX_SEARCHES_PER_SPECIALIST", raising=False)
+        importlib.reload(sp)
+        importlib.reload(orch)
+    assert orch.BUDGET == 64

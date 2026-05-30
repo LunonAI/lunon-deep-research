@@ -14,6 +14,7 @@ available").
 """
 
 import json
+import os
 import sys
 
 from .. import llm
@@ -98,7 +99,13 @@ def _sanitize_chain(value) -> list:
 # The AI-Q "<=5 sequential searches per specialist" guideline reflected the
 # original 24-32-query budget; with #4's 48-64 query budget, each specialist
 # is assigned ~10-13 queries and the cap moves to match.
-_MAX_SEARCHES_PER_SPECIALIST = 12
+# P3b-v5 (2026-05-29): env-overridable to GROUND the leaf-aware length lever
+# (PR-1). The Qianfan-replication build needs ~1.5-2× more grounded atoms to
+# fill the longer ZH chapters with named/dated/cited primaries instead of prose
+# padding. Default 12 = inert (PR lands dark); the dev6 arm sets =20. NOTE:
+# orchestrator.BUDGET must be ≥ 5×this + 2 (enforced fail-loud there) or the
+# dispatch silently re-clamps the per-specialist slice.
+_MAX_SEARCHES_PER_SPECIALIST = int(os.environ.get("DR_MAX_SEARCHES_PER_SPECIALIST") or 12)
 _RESULTS_PER_SEARCH = 10
 
 # P2-Option-A-#4 Greptile PR #22 follow-up (2026-05-25): named cap on the

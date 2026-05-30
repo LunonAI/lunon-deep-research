@@ -123,7 +123,21 @@ def _research_with_timeout(role, qlist, *, language, domain, exa_mode, model_ove
 # indefinitely on horizon_scanner; with the bound, the worst case is one
 # specialist's findings dropped (digest gets a TIMEOUT marker) and the
 # task completes on the other 4 specialists' evidence.
-BUDGET = 64
+# P3b-v5 (2026-05-29): env-overridable in lockstep with
+# specialists.DR_MAX_SEARCHES_PER_SPECIALIST so the grounding arm can raise the
+# tool-call ceiling for the longer ZH chapters. Default 64 = inert; dev6 arm
+# sets =104 (fits 5×20 + 2 gap-fill). Fail-loud below the invariant rather than
+# let the dispatch slice (min(cap, BUDGET-tool_calls)) silently re-clamp the
+# per-specialist searches back down — the exact silent-drop the spec warns of.
+BUDGET = int(os.environ.get("DR_TOOL_CALL_BUDGET") or 64)
+_MIN_BUDGET = 5 * specialists._MAX_SEARCHES_PER_SPECIALIST + 2
+if BUDGET < _MIN_BUDGET:
+    raise RuntimeError(
+        f"orchestrator.BUDGET={BUDGET} < 5×_MAX_SEARCHES_PER_SPECIALIST"
+        f"({specialists._MAX_SEARCHES_PER_SPECIALIST})+2={_MIN_BUDGET}: raise "
+        f"DR_TOOL_CALL_BUDGET to ≥{_MIN_BUDGET} or the per-specialist search "
+        f"cap is silently clamped (no new grounded atoms gathered)."
+    )
 COMPACT_EVERY = 8
 
 # Per-archetype researcher routing (W9 diagnostic + dev6 paired test 2026-05-21):
