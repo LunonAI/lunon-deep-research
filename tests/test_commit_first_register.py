@@ -23,7 +23,27 @@ def test_scaffold_residual_counts_hedges():
     assert r["weak_evidence"] == 1
     assert r["section_defers"] == 1
     clean = am.compute("# T\n\n一个干净的、自信的论断句子。")["scaffold_residual"]
-    assert clean["evidence_uncovered"] == 0 and clean["section_defers"] == 0
+    assert clean["evidence_uncovered"] == 0 and clean["weak_evidence"] == 0 and clean["section_defers"] == 0
+
+
+def test_commit_first_limitations_clause_gated_on_chapter():
+    """Greptile PR #77 issue #2: the de-hedge rule fires for every archetype,
+    but its closing clause may only point at the limitations chapter when the
+    plan actually carries one. trend / recommend (has_limitations_chapter=False)
+    must get an in-place phrasing instead of a dangling chapter reference."""
+    ded = "dedicated limitations chapter"
+    # trend never carries a limitations chapter
+    trend = wr.writer_system("trend", "default", "zh", ["A", "B"])
+    assert ded not in trend
+    assert "state it once in place" in trend
+    # predict WITH the chapter present keeps the chapter reference
+    pred = wr.writer_system(
+        "predict", "default", "zh", ["A", "B"], has_limitations_chapter=True
+    )
+    assert ded in pred
+    # the de-hedge body is identical for both regardless of the clause
+    for sysd in (trend, pred):
+        assert "COMMIT-FIRST REGISTER" in sysd and "本节不" in sysd
 
 
 def test_does_not_strip_legit_qianfan_vocabulary():
