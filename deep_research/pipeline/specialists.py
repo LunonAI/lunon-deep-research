@@ -103,8 +103,15 @@ def _sanitize_chain(value) -> list:
 # (PR-1). The Qianfan-replication build needs ~1.5-2× more grounded atoms to
 # fill the longer ZH chapters with named/dated/cited primaries instead of prose
 # padding. Default 12 = inert (PR lands dark); the dev6 arm sets =20. NOTE:
-# orchestrator.BUDGET must be ≥ 5×this + 2 (enforced fail-loud there) or the
-# dispatch silently re-clamps the per-specialist slice.
+# raising this >12 requires THREE co-knobs moved together or results are
+# silently lost:
+#   1. orchestrator.BUDGET ≥ 5×this + 2 (enforced fail-loud there) or the
+#      dispatch silently re-clamps the per-specialist slice.
+#   2. DR_SPECIALIST_TIMEOUT_S ≥ 360s — at =20 the specialist wall-clock is
+#      ~100s Exa + ~180s Nemotron + ~60s buffer ≈ 340s, past the 240s default
+#      (the CAPEL smoke incident dropped specialists exactly this way).
+#   3. DR_RESULTS_SERIALISATION_CAP ≥ ~400k — at =20 the ~320k-char payload
+#      overflows the 240k default (see the cap definition below).
 _MAX_SEARCHES_PER_SPECIALIST = int_env("DR_MAX_SEARCHES_PER_SPECIALIST", 12)
 _RESULTS_PER_SEARCH = 10
 
@@ -124,7 +131,16 @@ _RESULTS_PER_SEARCH = 10
 # 192k × 1.25 ≈ 240k chars. At ~4 chars/token, that's ~60k input tokens,
 # well within Nemotron-3-Super-120B's 128k context (system+brief add ~5k
 # tokens; output budget is 14k; total ~79k < 128k).
-_RESULTS_SERIALISATION_CAP = 240_000
+#
+# P3b-v5 (2026-05-29): env-overridable alongside DR_MAX_SEARCHES_PER_SPECIALIST.
+# At =20 searches the payload is 20×10×~1,600 ≈ 320k chars, overflowing the 240k
+# default and silently slicing the last ~5 searches at json.dumps(results)[:cap]
+# below (the exact PR #22 failure). The dev6 arm must set
+# DR_RESULTS_SERIALISATION_CAP ≥ 320k × 1.25 ≈ 400k; both _MODEL_PAYLOAD_CAP_CHARS
+# entries reference this constant, so the override propagates to the Nemotron +
+# Tongyi caps (400k ≈ 100k input tokens — still within both models' 128k/131k
+# contexts).
+_RESULTS_SERIALISATION_CAP = int_env("DR_RESULTS_SERIALISATION_CAP", 240_000)
 
 # P2-Option-A-#4 Greptile PR #22 follow-up round 2 (2026-05-25):
 # Per-model serialised-payload cap (chars). Sized so the payload fits
