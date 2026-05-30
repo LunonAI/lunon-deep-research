@@ -169,18 +169,20 @@ def test_specialist_timeout_constant_is_set_and_sane(monkeypatch):
     override higher; the override path is covered separately below."""
     monkeypatch.delenv("DR_SPECIALIST_TIMEOUT_S", raising=False)
     assert hasattr(orchestrator, "_SPECIALIST_TIMEOUT_S")
-    assert orchestrator._specialist_timeout_from_env() == 240
+    # PR-A (2026-05-29): default raised 240→1200 (dev6 still dropped a specialist
+    # at 600s under 6×6 contention — slow-not-hung; 1200s avoids false drops).
+    assert orchestrator._specialist_timeout_from_env() == 1200
 
 
 def test_specialist_timeout_reads_env_override(monkeypatch):
-    """DR_SPECIALIST_TIMEOUT_S overrides the 240s default so high-concurrency
+    """DR_SPECIALIST_TIMEOUT_S overrides the 1200s default so high-concurrency
     runs can raise the cap instead of dropping specialists. Tested via the
     helper (not a module reload) so it can't perturb other tests' module
     state."""
     monkeypatch.setenv("DR_SPECIALIST_TIMEOUT_S", "450")
     assert orchestrator._specialist_timeout_from_env() == 450
     monkeypatch.delenv("DR_SPECIALIST_TIMEOUT_S", raising=False)
-    assert orchestrator._specialist_timeout_from_env() == 240
+    assert orchestrator._specialist_timeout_from_env() == 1200
 
 
 @pytest.mark.parametrize("raw", ["600s", "", "ten minutes", "4.5", "0x10", "  "])

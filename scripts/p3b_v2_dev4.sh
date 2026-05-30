@@ -32,7 +32,9 @@
 #   WORKERS   (default: 4)                          PY       (default: repo .venv)
 #   DRB_REPO  (default: ~/dev/deep_research_bench)  RACE_MODEL (gpt-5.5 internal gate)
 #   GEMINI_RACE_MODEL (unset → skip the gemini eval; set to your leaderboard judge id)
-#   DR_SPECIALIST_TIMEOUT_S (default: 600)
+#   DR_SPECIALIST_TIMEOUT_S (default: 1200 — PR-A: a single research call under
+#     high concurrency can legitimately run long; 1200s avoids false drops that
+#     thin a chapter's evidence. Pair with 6×4 (not 6×6) to cut contention.)
 #
 # Cost: ~$80-120 (4 tasks). Wall-clock: ~45-90 min gen + ~15-25 min per eval.
 
@@ -50,7 +52,7 @@ fi
 export DRB_REPO
 export DRB_PHASE="${DRB_PHASE:-P3}"
 # PR #61: keep specialists from being dropped under concurrent API load.
-export DR_SPECIALIST_TIMEOUT_S="${DR_SPECIALIST_TIMEOUT_S:-600}"
+export DR_SPECIALIST_TIMEOUT_S="${DR_SPECIALIST_TIMEOUT_S:-1200}"
 
 IDS="${IDS:-8,14,37,91}"
 WORKERS="${WORKERS:-4}"
