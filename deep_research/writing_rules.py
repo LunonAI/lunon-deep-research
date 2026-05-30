@@ -48,6 +48,8 @@ def _en_domain_medians():
     overall = [r.get("word_len", 0) for r in en]
     med["_overall"] = int(statistics.median(overall)) if overall else _FALLBACK_OVERALL_MEDIAN
     return med
+
+
 # coarse runtime domain -> closest reference_catalog domain (decision #5)
 _DOMAIN_KEY = {
     "finance": "Finance & Business",
