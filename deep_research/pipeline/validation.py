@@ -25,10 +25,10 @@ from dataclasses import dataclass
 from .. import writing_rules as wr
 from ..node_wrap import node
 from ..state import DesignGuide, Scaffold
+from ..text_metrics import approx_tokens
 
 _FAIL_LOG = pathlib.Path(__file__).resolve().parent.parent.parent / "p1_artifacts" / "validation_failures.jsonl"
 _FAIL_LOG.parent.mkdir(parents=True, exist_ok=True)
-_TOK = 4  # ~chars-per-token heuristic; cheap, scoring uses the harness cleaner
 
 # Greptile PR #42 round-8 issue #1: extracted as module-level constant so
 # the value is visible + tuneable. Body extraction in
@@ -209,7 +209,10 @@ def _section_length_ok(text: str, title: str, expected_tok: int) -> tuple:
     else:
         nxt = re.search(r"\n#+\s", rest)
     body = rest[: nxt.start()] if nxt else rest
-    body_tok = len(body) // _TOK
+    # E2: use the shared CJK-aware estimator so this gate and orchestrate's
+    # chapter-completion gate agree. For non-CJK bodies this equals the prior
+    # len(body) // 4; ZH bodies are no longer under-counted ~2.5×.
+    body_tok = approx_tokens(body)
     return body_tok >= int(0.7 * expected_tok), body_tok
 
 

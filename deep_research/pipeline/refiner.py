@@ -73,7 +73,7 @@ opening verbatim. Obey the source-attribution rule below.
 # the path to actually deduping reference-length articles — deferred, evidence-gated.)
 _MAX_OUT_TOKENS = 32000
 _REVERT_RATIO = 0.70
-_TOK = 4  # ~chars-per-token heuristic (matches validation._TOK)
+_TOK = 4  # ~chars-per-token heuristic (non-CJK rate; cf. text_metrics.approx_tokens)
 
 
 def refine(draft: str, *, archetype: str, language: str, section_scores=None, failing_rationales=None) -> dict:
