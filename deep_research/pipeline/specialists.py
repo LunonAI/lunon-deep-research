@@ -17,6 +17,7 @@ import json
 import sys
 
 from .. import llm
+from .._env import int_env
 from ..retrieval import domain_routed
 
 # Adapted from AI-Q researcher_agent/prompts/*.j2 (aiq_teardown.md §4).
@@ -98,7 +99,25 @@ def _sanitize_chain(value) -> list:
 # The AI-Q "<=5 sequential searches per specialist" guideline reflected the
 # original 24-32-query budget; with #4's 48-64 query budget, each specialist
 # is assigned ~10-13 queries and the cap moves to match.
-_MAX_SEARCHES_PER_SPECIALIST = 12
+# P3b-v5 (2026-05-29): env-overridable to GROUND the leaf-aware length lever
+# (PR-1). The reference-replication build needs ~1.5-2× more grounded atoms to
+# fill the longer ZH chapters with named/dated/cited primaries instead of prose
+# padding. Default 12 = inert (PR lands dark); the dev6 arm sets =20. NOTE:
+# raising this >12 requires THREE co-knobs moved together or results are
+# silently lost:
+#   1. orchestrator.BUDGET ≥ 5×this + 2 (enforced fail-loud there) or the
+#      dispatch silently re-clamps the per-specialist slice.
+#   2. DR_SPECIALIST_TIMEOUT_S ≥ 360s — at =20 the specialist wall-clock is
+#      ~100s Exa + ~180s Nemotron + ~60s buffer ≈ 340s, past the 240s default
+#      (the CAPEL smoke incident dropped specialists exactly this way).
+#   3. DR_RESULTS_SERIALISATION_CAP — enforced fail-loud at the cap definition
+#      below (cap ≥ searches×results×~1,600); at =20 that floor is ~320k, past
+#      the 240k default, so set ≥~400k for headroom.
+# Single source of truth for the inert default — orchestrator's co-knob #2
+# timeout guard imports this constant so the "is the cap raised above inert?"
+# threshold can never drift from the default applied here.
+_MAX_SEARCHES_PER_SPECIALIST_DEFAULT = 12
+_MAX_SEARCHES_PER_SPECIALIST = int_env("DR_MAX_SEARCHES_PER_SPECIALIST", _MAX_SEARCHES_PER_SPECIALIST_DEFAULT)
 _RESULTS_PER_SEARCH = 10
 
 # P2-Option-A-#4 Greptile PR #22 follow-up (2026-05-25): named cap on the
@@ -117,7 +136,34 @@ _RESULTS_PER_SEARCH = 10
 # 192k × 1.25 ≈ 240k chars. At ~4 chars/token, that's ~60k input tokens,
 # well within Nemotron-3-Super-120B's 128k context (system+brief add ~5k
 # tokens; output budget is 14k; total ~79k < 128k).
-_RESULTS_SERIALISATION_CAP = 240_000
+#
+# P3b-v5 (2026-05-29): env-overridable alongside DR_MAX_SEARCHES_PER_SPECIALIST.
+# At =20 searches the payload is 20×10×~1,600 ≈ 320k chars, overflowing the 240k
+# default and silently slicing the last ~5 searches at json.dumps(results)[:cap]
+# below (the exact PR #22 failure). The dev6 arm must set
+# DR_RESULTS_SERIALISATION_CAP ≥ 320k × 1.25 ≈ 400k; both _MODEL_PAYLOAD_CAP_CHARS
+# entries reference this constant, so the override propagates to the Nemotron +
+# Tongyi caps (400k ≈ 100k input tokens — still within both models' 128k/131k
+# contexts).
+_RESULTS_SERIALISATION_CAP = int_env("DR_RESULTS_SERIALISATION_CAP", 240_000)
+
+# P3b-v5 (2026-05-29): co-knob invariant, fail-loud — mirrors orchestrator.BUDGET.
+# The cap and _MAX_SEARCHES_PER_SPECIALIST are co-dependent: the
+# json.dumps(results)[:payload_cap] slice below truncates SILENTLY, so raising the
+# search cap without raising the serialisation cap drops the tail searches' hits
+# AFTER Exa cost was incurred (the PR #22 failure mode). Enforce cap ≥ the maximal
+# expected payload (searches × results × ~1,600 chars/result) at import so the
+# misconfiguration surfaces before any search runs, not silently mid-extraction.
+_MIN_SERIALISATION_CAP = _MAX_SEARCHES_PER_SPECIALIST * _RESULTS_PER_SEARCH * 1_600
+if _RESULTS_SERIALISATION_CAP < _MIN_SERIALISATION_CAP:
+    raise RuntimeError(
+        f"specialists._RESULTS_SERIALISATION_CAP={_RESULTS_SERIALISATION_CAP} < "
+        f"_MAX_SEARCHES_PER_SPECIALIST({_MAX_SEARCHES_PER_SPECIALIST})×"
+        f"_RESULTS_PER_SEARCH({_RESULTS_PER_SEARCH})×1600={_MIN_SERIALISATION_CAP}: "
+        f"raise DR_RESULTS_SERIALISATION_CAP to ≥{_MIN_SERIALISATION_CAP} or the "
+        f"json.dumps(results) slice silently drops the tail searches' hits with "
+        f"Exa cost already incurred."
+    )
 
 # P2-Option-A-#4 Greptile PR #22 follow-up round 2 (2026-05-25):
 # Per-model serialised-payload cap (chars). Sized so the payload fits

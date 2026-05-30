@@ -562,3 +562,23 @@ def test_writer_handles_empty_entity_matrix_gracefully(monkeypatch):
     # Sanity: the rest of the prompt still has the section/subs payload.
     payload = json.loads(captured_user["text"].split("SUBSECTIONS")[1].split("\n", 1)[0].split(": ", 1)[1])
     assert payload[0]["id"] == "S1.1"
+
+
+def test_entity_matrix_min_above_max_fails_loud(monkeypatch):
+    """P3b-v5: an inverted entity-matrix band must fail loud at architect import,
+    mirroring the DR_QUERIES_MIN > DR_QUERIES_MAX guard. Setting
+    DR_ENTITY_MATRIX_MIN above the back-compat max (20) would otherwise let the
+    floor exceed the ceiling silently — the architect is told to enumerate more
+    entities than the audit's own max allows."""
+    import importlib
+
+    import pytest
+
+    try:
+        monkeypatch.setenv("DR_ENTITY_MATRIX_MIN", "25")  # > _ENTITY_MATRIX_ENTITIES_MAX (20)
+        with pytest.raises(RuntimeError, match="entity-matrix band is inverted"):
+            importlib.reload(architect)
+    finally:
+        monkeypatch.delenv("DR_ENTITY_MATRIX_MIN", raising=False)
+        importlib.reload(architect)
+    assert architect._ENTITY_MATRIX_ENTITIES_MIN == 5
