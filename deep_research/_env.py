@@ -36,6 +36,26 @@ def get(key: str, default: str = "") -> str:
     return ENV.get(key) or os.environ.get(key, default)
 
 
+def int_env(name: str, default: int) -> int:
+    """Parse an integer engine knob from the process environment, failing loud
+    with a clear, actionable message naming the env var rather than letting a
+    bare ``int()`` raise a cryptic ``ValueError`` at module-import time (which
+    would crash the whole pipeline before any user-facing error handling runs).
+
+    An unset or empty value falls back to ``default``, preserving the historical
+    ``int(os.environ.get(name) or default)`` semantics these knobs used. Reads
+    ``os.environ`` only (not the .env file) to keep that behaviour identical."""
+    raw = os.environ.get(name)
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        raise RuntimeError(
+            f"{name} must be an integer; got {raw!r}. Unset it to use the default ({default})."
+        ) from None
+
+
 def assert_phase() -> str:
     """Fail loud if DRB_PHASE is unset or unexpected (plan point 9)."""
     phase = os.environ.get("DRB_PHASE", "").strip()

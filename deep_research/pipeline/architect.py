@@ -1,9 +1,11 @@
 """Architect subagent (p1-checklist items 6 + 14; adapts AI-Q architect.j2).
 
 Turns the Scout landscape + extracted intents + regenerated criteria into a
-STRICT JSON plan: hierarchical TOC, 48-64 typed queries (1:1 mapped to the 5
-researcher specialists; pre-#4 was 24-32, doubled to feed the depth_seeds
-H4-leaf payload from PR #20), 24-32 acceptance criteria that FOLD IN every
+STRICT JSON plan: hierarchical TOC, a typed-query band (default 48-64, 1:1
+mapped to the 5 researcher specialists; pre-#4 was 24-32, doubled to feed the
+depth_seeds H4-leaf payload from PR #20; env-tunable via DR_QUERIES_MIN/MAX and
+interpolated into the _SYSTEM prompt + audit in lockstep), 24-32 acceptance
+criteria that FOLD IN every
 regenerated sub-criterion and every extracted intent as an explicit coverage
 obligation, and per-section depth targets. Archetype-aware (item 16).
 """
@@ -12,6 +14,7 @@ import json
 import re
 
 from .. import llm
+from .._env import int_env
 from . import tier_ranking_score
 
 # query.type -> researcher specialist (1:1, per AI-Q + technique 16)
@@ -115,7 +118,7 @@ criteria into a STRICT JSON research plan. Output ONLY this JSON object:
     "target_sections": ["S1", ...]} ... 24-32 ],
  "queries": [ {"id": "Q1", "text": str,
     "type": "factual"|"causal"|"comparative"|"critical"|"trend",
-    "target_sections": ["S1", ...], "rationale": str } ... 48-64 ],
+    "target_sections": ["S1", ...], "rationale": str } ... __QUERY_BAND__ ],
  "framing_chapter": {              /* P3-W2 (2026-05-27): §1 contract.
                                       Populated for ALL archetypes EXCEPT
                                       single-axis trend tasks (where the
@@ -237,7 +240,7 @@ HARD RULES:
   prompt asks for a "模型准确度评估"/"accuracy evaluation", that is its own chapter,
   not scattered lines). List the parsed deliverables verbatim in
   `_outline_audit.deliverables` so each can be checked against a heading.
-- 48-64 queries AND 24-32 acceptance_criteria. Every query maps to >=1 TOC
+- __QUERY_BAND__ queries AND 24-32 acceptance_criteria. Every query maps to >=1 TOC
   section. Distribute query `type` to cover all needed analytical functions.
   (Query count doubled from 24-32 post-#4: the depth_seeds H4-leaf payload
   from PR #20 expects 200-450 leaves per article, each needing 3-5 evidence
@@ -347,8 +350,27 @@ _SEEDS_MAX = 4
 # "_format_retry_feedback must reference the same source of truth" rule —
 # if any future retry-feedback string interpolates the query band, it
 # pulls from here.
-_QUERIES_MIN = 48
-_QUERIES_MAX = 64
+# P3b-v5 (2026-05-29): env-overridable so the grounding arm authors enough
+# DISTINCT queries to feed a larger per-specialist search cap (else specialists
+# re-run duplicate/empty slots and gather no NEW atoms). Default 48/64 = inert;
+# dev6 arm sets 80/104.
+_QUERIES_MIN = int_env("DR_QUERIES_MIN", 48)
+_QUERIES_MAX = int_env("DR_QUERIES_MAX", 64)
+if _QUERIES_MIN > _QUERIES_MAX:
+    raise RuntimeError(
+        f"DR_QUERIES_MIN={_QUERIES_MIN} > DR_QUERIES_MAX={_QUERIES_MAX}: the "
+        f"Architect's query band is inverted — set DR_QUERIES_MIN ≤ DR_QUERIES_MAX."
+    )
+
+# P3b-v5 (2026-05-29): inject the LIVE band into the LLM-facing prompt so the
+# architect is INSTRUCTED to produce _QUERIES_MIN.._QUERIES_MAX queries — not
+# merely audited against it after the fact. Without this, raising the band for
+# the dev6 arm (80/104) would still yield ~48-64 queries (the only count _SYSTEM
+# ever advertised), leaving the larger per-specialist search cap with no extra
+# DISTINCT queries to consume. The `__QUERY_BAND__` sentinel marks the two
+# _SYSTEM injection points; the user-prompt fragment interpolates it directly.
+_QUERY_BAND = f"{_QUERIES_MIN}-{_QUERIES_MAX}"
+_SYSTEM = _SYSTEM.replace("__QUERY_BAND__", _QUERY_BAND)
 
 # P3-W0a (2026-05-27): per-archetype `query.type` minimum proportions.
 # The HARD RULES bullet "Distribute query type to cover all needed analytical
@@ -635,7 +657,7 @@ def build(
         f"underwrite RACE Insight criteria 2 (causal reasoning) and 3 "
         f"(problem insight):\n"
         f"  {q_dist_lines}\n"
-        f"Across all 48-64 queries combined, the FRACTIONS (not the absolute "
+        f"Across all {_QUERY_BAND} queries combined, the FRACTIONS (not the absolute "
         f"counts) must satisfy each floor. The audit surfaces shortfalls "
         f"as advisory drift entries — they do not currently trigger a retry, "
         f"but they ARE measured against this contract by the post-write "
@@ -808,8 +830,20 @@ def _retry_is_better(retry_audit: dict, orig_audit: dict) -> bool:
 # at 20; new entries for predict/explain-mechanism/trend/recommend (which
 # also benefit from entity matrix when ≥3 sibling sub-chapters each name
 # a distinct entity — see _should_promote_entity_matrix below).
-_ENTITY_MATRIX_ENTITIES_MIN = 5
+# P3b-v5 (2026-05-29): env-overridable ENUMERATION FLOOR. The id8 teardown found
+# Qianfan gives a dedicated subsection to ~12 in-scope entities (material systems)
+# vs Lunon's 3 — breadth-of-entities at constant depth is a top Comprehensiveness
+# lever. Raising this floor forces the architect to enumerate the full set. Default
+# 5 = inert; dev6 arm sets =10. Bounded above by _ENTITY_MATRIX_ENTITIES_MAX.
+_ENTITY_MATRIX_ENTITIES_MIN = int_env("DR_ENTITY_MATRIX_MIN", 5)
 _ENTITY_MATRIX_ENTITIES_MAX = 20  # back-compat; tests reference this directly
+if _ENTITY_MATRIX_ENTITIES_MIN > _ENTITY_MATRIX_ENTITIES_MAX:
+    raise RuntimeError(
+        f"DR_ENTITY_MATRIX_MIN={_ENTITY_MATRIX_ENTITIES_MIN} > "
+        f"_ENTITY_MATRIX_ENTITIES_MAX={_ENTITY_MATRIX_ENTITIES_MAX}: the entity-"
+        f"matrix band is inverted — set DR_ENTITY_MATRIX_MIN ≤ "
+        f"{_ENTITY_MATRIX_ENTITIES_MAX}."
+    )
 _ENTITY_MATRIX_ENTITIES_MAX_BY_ARCHETYPE: dict[str, int] = {
     "list-all": 30,
     "compare": 20,
