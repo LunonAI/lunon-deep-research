@@ -171,11 +171,14 @@ def _scaffold_residual(article):
     res["contract_phrase"] = article.count(_CONTRACT_PHRASE)
     # P3b-v5 (2026-05-29): hedge-residual — evidence-gap announcements Qianfan
     # NEVER makes (证据未覆盖/弱证据 = 0 across all 100 corpus articles) and the
-    # scope-deferral it uses sparingly (本节不). The COMMIT-FIRST register rule (L9)
-    # should drive these toward Qianfan's ~0; this measures whether it held.
+    # scope-deferral it uses sparingly (本节不展开). The COMMIT-FIRST register rule
+    # (L9) should drive these toward Qianfan's ~0; this measures whether it held.
+    # Match the full scope-deferral phrase the L9 rule targets — a bare "本节不"
+    # prefix would also count rhetorical prose like "本节不仅…" ("not only…") /
+    # "本节不止…", inflating the counter with acceptable writing.
     res["evidence_uncovered"] = article.count("证据未覆盖")
     res["weak_evidence"] = article.count("弱证据")
-    res["section_defers"] = article.count("本节不")
+    res["section_defers"] = article.count("本节不展开")
     return res
 
 

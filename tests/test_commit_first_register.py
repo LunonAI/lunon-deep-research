@@ -24,6 +24,10 @@ def test_scaffold_residual_counts_hedges():
     assert r["section_defers"] == 1
     clean = am.compute("# T\n\n一个干净的、自信的论断句子。")["scaffold_residual"]
     assert clean["evidence_uncovered"] == 0 and clean["weak_evidence"] == 0 and clean["section_defers"] == 0
+    # Greptile PR #77: rhetorical "本节不仅…" ("not only…") is acceptable prose and
+    # must NOT register as a scope-deferral — the counter matches "本节不展开" only.
+    rhetorical = am.compute("# T\n\n本节不仅分析了X，还讨论了Y。")["scaffold_residual"]
+    assert rhetorical["section_defers"] == 0
 
 
 def test_commit_first_limitations_clause_gated_on_chapter():
