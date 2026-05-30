@@ -26,12 +26,17 @@ def _writer_max_tokens() -> int:
     Done by string search rather than calling the function (which requires
     network + provider keys) so the test stays fast and offline.
     """
-    import pathlib
+    import inspect
 
-    src = (pathlib.Path(__file__).resolve().parent.parent / "deep_research" / "pipeline" / "writer.py").read_text()
-    # Find the `max_tokens=NNNN` argument inside the `write_section` call.
-    matches = re.findall(r'max_tokens=(\d+),\s*note=f"writer\.sec\.', src)
+    from deep_research.pipeline import writer
+
+    # Read write_section's source (not a file-wide single-line regex) so the probe
+    # survives the writer.sec call being formatted across multiple lines. The
+    # function issues exactly one LLM call, so its sole max_tokens= literal is it.
+    fn_src = inspect.getsource(writer.write_section)
+    matches = re.findall(r"max_tokens=(\d+)", fn_src)
     assert matches, "could not locate writer.write_section max_tokens literal"
+    assert len(matches) == 1, f"expected one max_tokens in write_section, found {matches}"
     return int(matches[0])
 
 
@@ -67,10 +72,11 @@ from deep_research.pipeline import init_format as initf  # noqa: E402
 
 def _toc_section(sid, n_subs, seeds_per_sub, depth="broad"):
     return {
-        "id": sid, "title": sid, "depth_target": depth,
+        "id": sid,
+        "title": sid,
+        "depth_target": depth,
         "subsections": [
-            {"title": f"{sid}.{j}", "depth_seeds": [f"s{k}" for k in range(seeds_per_sub)]}
-            for j in range(n_subs)
+            {"title": f"{sid}.{j}", "depth_seeds": [f"s{k}" for k in range(seeds_per_sub)]} for j in range(n_subs)
         ],
     }
 

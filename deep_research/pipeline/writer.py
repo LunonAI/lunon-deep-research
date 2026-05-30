@@ -18,7 +18,7 @@ import json
 import os
 import re
 
-from .. import llm
+from .. import config, llm
 from .. import writing_rules as wr
 from ._capel_strip import strip_capel_markers
 
@@ -130,7 +130,9 @@ def write_opening(plan, prompt, language, archetype, domain, digest, *, task_id=
         f"(~200 tokens, hard max ~300). Then STOP — sections follow "
         f"separately."
     )
-    return llm.call("writer", user, system=sys, max_tokens=1400, note="writer.open")
+    return llm.call(
+        "writer", user, system=sys, max_tokens=24000, think=True, effort=config.effort_for("writer"), note="writer.open"
+    )
 
 
 def write_section(
@@ -984,7 +986,16 @@ def write_section(
     # disabled; (b) the deepest ZH chapters whose leaf-aware target approaches
     # the 30000 ceiling; (c) refiner-pass growth. The ZH length uplift lands via
     # the leaf-aware budget lifting the CAPEL target, not via this headroom.
-    raw = llm.call("writer", user, system=sys, max_tokens=21000, note=f"writer.sec.{sid}", user_suffix=feedback_block)
+    raw = llm.call(
+        "writer",
+        user,
+        system=sys,
+        max_tokens=96000,
+        think=True,
+        effort=config.effort_for("writer"),
+        note=f"writer.sec.{sid}",
+        user_suffix=feedback_block,
+    )
     if capel_active:
         text, stats = strip_capel_markers(raw)
     else:

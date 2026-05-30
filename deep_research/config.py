@@ -14,7 +14,7 @@ Model stack (p1-checklist:13-18; divergences logged in plan + SUMMARY):
 import os
 
 GPT55 = "gpt-5.5"
-OPUS = "claude-opus-4-7"
+OPUS = "claude-opus-4-8"  # 2026-05-30: 4.7->4.8 (same $5/$25 price, same tokenizer; better effort calibration, adaptive-thinking efficiency, 128k output, cleaner high-max_tokens streaming verified by probe)
 NEMOTRON = "nvidia/nemotron-3-super-120b-a12b"  # OpenRouter PAID slug (decision #1)
 
 # ZH writer-pass candidates (OpenRouter); winner wired in after W6 smoke.
@@ -64,3 +64,19 @@ def model_for(role: str) -> str:
 
 def all_roles() -> dict:
     return {r: model_for(r) for r in _DEFAULTS}
+
+
+# Reasoning effort for the Opus generation roles (2026-05-30). Opus 4.8 accepts
+# low|medium|high|xhigh|max ("high" == omitting the param). We default the
+# report-content roles to `max`: the leaderboard score, not cost, is the
+# objective, and effort carries NO per-token premium -- it only changes how many
+# tokens are spent (billed at the standard $5/$25). A/B by setting DR_OPUS_EFFORT
+# (global) or DR_EFFORT_<ROLE> (per role), e.g. DR_EFFORT_ARCHITECT=xhigh.
+#
+# Applied ONLY on the anthropic path (see llm.call -> anthropic_client): xhigh/max
+# are anthropic-only effort levels, and only when think=True is the effort passed
+# through (output_config.effort). The gpt-5.5 / openrouter roles never receive it.
+def effort_for(role: str) -> str:
+    """Resolve the reasoning-effort level for an Opus generation `role`.
+    Precedence: DR_EFFORT_<ROLE> -> DR_OPUS_EFFORT -> 'max'."""
+    return os.environ.get(f"DR_EFFORT_{role.upper()}") or os.environ.get("DR_OPUS_EFFORT") or "max"
