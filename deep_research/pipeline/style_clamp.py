@@ -30,6 +30,8 @@ from __future__ import annotations
 
 import re
 
+from ..text_metrics import approx_words
+
 # Mirror footnote_normalize: inline marker = [^token] NOT followed by ':'
 # (the lookahead excludes definition lines).
 _INLINE_RE = re.compile(r"\[\^([A-Za-z0-9._-]+)\](?!:)")
@@ -82,21 +84,6 @@ _EMDASH_PAIR_RE = re.compile(rf"(?<=\S)[ \t]{_EMDASH}[ \t](?P<mid>[^{_EMDASH}\n]
 # Corpus-median ceilings (per language) from reference_style_targets.json.
 _CITE_CEIL = {"en": 7.0, "zh": 13.0}  # EN median 6.29, ZH 12.18 (+ small headroom)
 _EMDASH_CEIL = {"en": 12.45, "zh": 21.54}  # corpus medians; EN is a no-op (body ~10.6)
-
-
-def _is_cjk(t: str) -> bool:
-    cjk = len(re.findall(r"[一-鿿]", t))
-    return cjk > 0.15 * max(len(t), 1)
-
-
-def _words(t: str) -> int:
-    """Word count mirroring scripts/reference_style_profile.py: CJK has no
-    spaces so .split() undercounts — approximate CJK words as chars/1.6."""
-    if _is_cjk(t):
-        cjk = len(re.findall(r"[一-鿿]", t))
-        latin = len(re.findall(r"[A-Za-z]+", t))
-        return max(int(cjk / 1.6) + latin, 1)
-    return max(len(t.split()), 1)
 
 
 def _protected_ranges(body: str) -> list[tuple[int, int]]:
@@ -191,7 +178,7 @@ def clamp_citations(article: str, *, language: str = "en", max_per_1k: float | N
 
     # Candidate (non-protected) inline markers, in document order.
     cands = [(m.start(), m.end()) for m in _INLINE_RE.finditer(body) if not _in_ranges(m.start(), protected)]
-    words = _words(body)
+    words = approx_words(body)
     markers_before = len(cands)
     if markers_before == 0:
         st = _zero_cite_stats(language)
@@ -308,7 +295,7 @@ def clamp_emdash(article: str, *, language: str = "en", max_per_1k: float | None
 
     body = article  # whole article; protected spans cover any References block
     protected = _protected_ranges(body)
-    words = _words(body)
+    words = approx_words(body)
     before = _emdash_count(body, protected)
     density_before = round(before / words * 1000, 2)
     if before == 0 or density_before <= ceiling:
