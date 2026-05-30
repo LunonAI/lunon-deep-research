@@ -597,8 +597,12 @@ def write_section(
                         or not (isinstance(sf, (int, float)) and not isinstance(sf, bool))
                     ):
                         continue
+                    # Remap dimension-score keys R-N → §1 label (same mapping as
+                    # weights_labeled) so the verbatim-render table headers and the
+                    # label-keyed norm_weights below share one key schema and no
+                    # bare `R-N` id reaches the writer. (Greptile PR #72 round-2.)
                     dims = {
-                        k: f"{v:.2f}"
+                        _rubric_labels.get(k, k): f"{v:.2f}"
                         for k, v in (e.get("dimension_scores") or {}).items()
                         if isinstance(v, (int, float)) and not isinstance(v, bool)
                     }
