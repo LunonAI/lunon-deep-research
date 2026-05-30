@@ -1,9 +1,11 @@
 """Architect subagent (p1-checklist items 6 + 14; adapts AI-Q architect.j2).
 
 Turns the Scout landscape + extracted intents + regenerated criteria into a
-STRICT JSON plan: hierarchical TOC, 48-64 typed queries (1:1 mapped to the 5
-researcher specialists; pre-#4 was 24-32, doubled to feed the depth_seeds
-H4-leaf payload from PR #20), 24-32 acceptance criteria that FOLD IN every
+STRICT JSON plan: hierarchical TOC, a typed-query band (default 48-64, 1:1
+mapped to the 5 researcher specialists; pre-#4 was 24-32, doubled to feed the
+depth_seeds H4-leaf payload from PR #20; env-tunable via DR_QUERIES_MIN/MAX and
+interpolated into the _SYSTEM prompt + audit in lockstep), 24-32 acceptance
+criteria that FOLD IN every
 regenerated sub-criterion and every extracted intent as an explicit coverage
 obligation, and per-section depth targets. Archetype-aware (item 16).
 """
@@ -116,7 +118,7 @@ criteria into a STRICT JSON research plan. Output ONLY this JSON object:
     "target_sections": ["S1", ...]} ... 24-32 ],
  "queries": [ {"id": "Q1", "text": str,
     "type": "factual"|"causal"|"comparative"|"critical"|"trend",
-    "target_sections": ["S1", ...], "rationale": str } ... 48-64 ],
+    "target_sections": ["S1", ...], "rationale": str } ... __QUERY_BAND__ ],
  "framing_chapter": {              /* P3-W2 (2026-05-27): §1 contract.
                                       Populated for ALL archetypes EXCEPT
                                       single-axis trend tasks (where the
@@ -238,7 +240,7 @@ HARD RULES:
   prompt asks for a "模型准确度评估"/"accuracy evaluation", that is its own chapter,
   not scattered lines). List the parsed deliverables verbatim in
   `_outline_audit.deliverables` so each can be checked against a heading.
-- 48-64 queries AND 24-32 acceptance_criteria. Every query maps to >=1 TOC
+- __QUERY_BAND__ queries AND 24-32 acceptance_criteria. Every query maps to >=1 TOC
   section. Distribute query `type` to cover all needed analytical functions.
   (Query count doubled from 24-32 post-#4: the depth_seeds H4-leaf payload
   from PR #20 expects 200-450 leaves per article, each needing 3-5 evidence
@@ -359,6 +361,16 @@ if _QUERIES_MIN > _QUERIES_MAX:
         f"DR_QUERIES_MIN={_QUERIES_MIN} > DR_QUERIES_MAX={_QUERIES_MAX}: the "
         f"Architect's query band is inverted — set DR_QUERIES_MIN ≤ DR_QUERIES_MAX."
     )
+
+# P3b-v5 (2026-05-29): inject the LIVE band into the LLM-facing prompt so the
+# architect is INSTRUCTED to produce _QUERIES_MIN.._QUERIES_MAX queries — not
+# merely audited against it after the fact. Without this, raising the band for
+# the dev6 arm (80/104) would still yield ~48-64 queries (the only count _SYSTEM
+# ever advertised), leaving the larger per-specialist search cap with no extra
+# DISTINCT queries to consume. The `__QUERY_BAND__` sentinel marks the two
+# _SYSTEM injection points; the user-prompt fragment interpolates it directly.
+_QUERY_BAND = f"{_QUERIES_MIN}-{_QUERIES_MAX}"
+_SYSTEM = _SYSTEM.replace("__QUERY_BAND__", _QUERY_BAND)
 
 # P3-W0a (2026-05-27): per-archetype `query.type` minimum proportions.
 # The HARD RULES bullet "Distribute query type to cover all needed analytical
@@ -645,7 +657,7 @@ def build(
         f"underwrite RACE Insight criteria 2 (causal reasoning) and 3 "
         f"(problem insight):\n"
         f"  {q_dist_lines}\n"
-        f"Across all 48-64 queries combined, the FRACTIONS (not the absolute "
+        f"Across all {_QUERY_BAND} queries combined, the FRACTIONS (not the absolute "
         f"counts) must satisfy each floor. The audit surfaces shortfalls "
         f"as advisory drift entries — they do not currently trigger a retry, "
         f"but they ARE measured against this contract by the post-write "
