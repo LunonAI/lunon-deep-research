@@ -124,7 +124,7 @@ def main() -> None:
 
     r = analyze(drift_path)
     print(f"  sections analyzed:              {r['total_sections']}")
-    print(f"  degraded i==2 excluded:         {r['degraded_idx2_excluded']} (inner-scorer LLM failed → synthetic pass)")
+    print(f"  degraded i==2 excluded:         {r['degraded_idx2_excluded']} (inner-scorer LLM failed → shipped UNVALIDATED, E1 fix)")
     print(
         f"  reached the 3rd pass (i>=2):    {r['reached_idx2']} ({r['reached_fraction'] * 100:.1f}% of all sections; only possible at cap=3)"
     )
