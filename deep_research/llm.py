@@ -40,11 +40,16 @@ def _should_cache_system(role: str, system) -> bool:
 
 # Explicit model-id → provider routing (B4). Ordered prefix rules, then the
 # OpenRouter "org/model" slug convention, then a clear, actionable error. Prefer
-# adding a rule here over scattering prefix checks elsewhere — e.g. embed()
-# historically had to sidestep _provider for `text-embedding-*`; listing it here
-# means embedder ids route correctly instead of falling through to the error.
+# adding a rule here over scattering prefix checks elsewhere.
+# `text-embedding-` is listed so _provider() itself never raises on an embedding
+# id; note embed() still keeps its own `text-embedding-` guard because it needs
+# the OpenAI-specific embeddings endpoint (not just the provider), so that id is
+# intentionally known in both places.
 _PROVIDER_PREFIXES = (
     ("gpt-", "openai"),
+    ("o1", "openai"),  # OpenAI o-series reasoning models (o1, o3-mini, o4-mini, …)
+    ("o3", "openai"),
+    ("o4", "openai"),
     ("text-embedding-", "openai"),
     ("claude", "anthropic"),
 )
