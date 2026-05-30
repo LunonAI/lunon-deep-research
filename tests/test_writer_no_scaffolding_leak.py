@@ -38,6 +38,25 @@ def test_no_echoable_scaffolding_in_insight_min():
     assert "Where one might expect" not in wr._INSIGHT_MIN
 
 
+def test_no_rn_citation_instructions_remain():
+    """PR-B (2026-05-29): the prompts must not INSTRUCT the writer to cite rubric
+    items by the internal `R-N` id, nor EXPOSE the ids in the entity-evaluation
+    path — both drove the residual 206 bare-R-N leak on the dev6 (id91=129 EN,
+    id14=69 ZH) that the live GPT-5.5 judge dings under Readability. Source pin so
+    a future edit can't silently re-introduce an R-N citation directive."""
+    combined = _WRITER_SRC + inspect.getsource(wr)
+    forbidden = (
+        "cite §1 rubric items by id",   # tier-ranking opening (writer + writing_rules)
+        "cite them by R-N id",          # limitations falsifiers
+        "rubric items by id (R-1",      # writing_rules tier-ranking rule
+        "Downstream chapters reference rubric items by `id`",  # framing-chapter prose ref
+    )
+    for s in forbidden:
+        assert s not in combined, f"R-N citation instruction still present: {s!r}"
+    # the corrective directive (name criteria by their human-readable LABEL) is present
+    assert "human-readable LABEL" in combined
+
+
 def test_rubric_verdict_directive_kept_but_sanitized():
     """The Insight-earning comparative-verdict requirement must SURVIVE (we win
     Insight on the leaderboard — don't regress it); only the echoable literal +

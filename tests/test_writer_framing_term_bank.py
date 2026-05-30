@@ -92,7 +92,10 @@ def test_non_s1_section_receives_named_term_bank(monkeypatch):
     user = captured[0]["user"]
     assert "NAMED TERM BANK" in user, f"term bank missing; got: {user[:2000]}"
     assert "axiom1" in user
-    assert "R-1" in user
+    # PR-B (2026-05-29): the entity-evaluation path now exposes only the rubric
+    # LABEL, not the `R-N` id (the id drove the bare-R-N leak in prose).
+    assert "Quality" in user  # the rubric item's label
+    assert "R-1" not in user  # the internal id must NOT be shown here
     # P3b-D1: rubric directive is a COMPARATIVE VERDICT, not descriptive narration.
     assert "COMPARATIVE VERDICT" in user
     assert "cite the item" not in user  # old descriptive phrasing retired
@@ -169,6 +172,8 @@ def test_rubric_only_no_vocab(monkeypatch):
     captured = _call_writer(monkeypatch, plan, sid="S2")
     user = captured[0]["user"]
     assert "NAMED TERM BANK" in user
-    assert "R-1" in user
+    # PR-B: rubric exposed by LABEL, not the `R-N` id.
+    assert "Quality" in user
+    assert "R-1" not in user
     # The "Vocabulary:" line should NOT appear because vocab is empty.
     assert "Vocabulary:" not in user
