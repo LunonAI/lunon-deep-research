@@ -13,6 +13,30 @@ from .clients import anthropic_client, openai_client, openrouter_client
 
 _JSON_FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 
+# Anthropic only caches a prompt block that is at least 1024 tokens; below that
+# a `cache_control` marker buys nothing (and adds the one-time cache-write
+# surcharge). 4096 chars ≈ 1024 tokens at the ~4 chars/token of the English
+# instruction prompts here (CJK packs more tokens per char, so this is a safe
+# lower bound). Measured system blocks: architect ~16k chars / ~4k tok and the
+# writer block ~27k chars clear it; scout/design_guide/grounding/inner_scorer
+# are all ≤1.3k chars (~100-300 tok) and stay uncached by design.
+_CACHE_SYSTEM_MIN_CHARS = 4096
+
+
+def _should_cache_system(role: str, system) -> bool:
+    """Auto-enable anthropic system-prompt caching when it actually pays off.
+
+    True for the `writer` (its large per-task-stable block was the original
+    cached call) and for any call whose system prompt clears the anthropic
+    minimum cacheable size — which today captures the architect's ~4k-token
+    static `_SYSTEM`, re-sent on every plan, on its shortfall-retry, and across
+    every task (B1). Caching is output-invariant: the model sees identical
+    tokens, so this never changes results, only cost.
+    """
+    if role == "writer":
+        return True
+    return isinstance(system, str) and len(system) >= _CACHE_SYSTEM_MIN_CHARS
+
 
 def _provider(model: str) -> str:
     if model.startswith("gpt-"):
@@ -50,11 +74,17 @@ def call(
     alias for openai callers.
 
     cache_system: anthropic-only prompt-cache toggle. `None` (default) auto-
-    enables caching for the `writer` role — whose 27.5 KB system prompt is
-    byte-identical across every section write within a task, the one place
-    caching meaningfully pays off. Other roles have smaller, per-call-unique
-    system prompts. Caching is output-invariant (the model sees identical
+    enables caching via `_should_cache_system()`: the `writer` role plus any
+    call whose system block clears the anthropic minimum cacheable size
+    (~1024 tokens). That covers the writer's 27.5 KB block and the architect's
+    ~4k-token static `_SYSTEM` (B1) — the two calls where the byte-identical,
+    frequently re-sent prefix makes caching pay off; the smaller per-role
+    prompts stay uncached. Caching is output-invariant (the model sees identical
     tokens), so this never affects quality. Pass an explicit bool to override.
+
+    seed: forwarded on the openai/openrouter paths for best-effort determinism.
+    The anthropic path RAISES if seed is not None — the Messages API has no seed
+    parameter, so honoring the determinism contract there is impossible (B3).
     cache_ttl: anthropic cache lifetime — "5m" (GA default, refresh-on-use,
     covers the back-to-back writer calls within a task) or "1h" (extended,
     for callers that batch with longer idle gaps). Only used when caching
@@ -72,7 +102,7 @@ def call(
     prov = _provider(model)
     tag = note or role
     eff = reasoning_effort or effort
-    cache = cache_system if cache_system is not None else (role == "writer")
+    cache = cache_system if cache_system is not None else _should_cache_system(role, system)
     cache_u = cache_user if cache_user is not None else (role == "writer")
     # Only the anthropic client supports the cached-user-block + uncached-suffix
     # split. For other providers (and uncached anthropic), concatenate so the
@@ -92,6 +122,19 @@ def call(
         )
         return text
     if prov == "anthropic":
+        # B3: the Anthropic Messages API has no `seed` parameter, so a seed here
+        # cannot produce determinism. The openai/openrouter branches forward
+        # `seed`; this branch used to drop it SILENTLY, so a caller adding a
+        # seeded Opus call expecting reproducibility would get none and never
+        # know. Fail loud instead — the contract is now honest. (No current
+        # caller hits this: every seed= site routes to openai/openrouter.)
+        if seed is not None:
+            raise ValueError(
+                f"seed={seed!r} passed for role {role!r}, which routes to the "
+                f"anthropic model {model!r}; the Anthropic Messages API cannot "
+                f"honor a determinism seed. Drop seed for this role, or route it "
+                f"to a provider that supports seeding (openai/openrouter)."
+            )
         text, _ = anthropic_client.raw_call(
             model,
             user,
