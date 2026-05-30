@@ -145,9 +145,9 @@ criteria into a STRICT JSON research plan. Output ONLY this JSON object:
    "published_rubric_items": [        /* 4-6 items WHEN applicable
                                           (compare/predict/recommend
                                           archetypes; omit or empty for
-                                          others). Each item is referenced
-                                          by id from downstream entity
-                                          evaluations.                  */
+                                          others). In prose each item is named
+                                          by its human-readable label, NOT the
+                                          R-N id.                        */
      {"id": "R-1", "label": str, "weight": float}, ...
    ]
  } | null,
