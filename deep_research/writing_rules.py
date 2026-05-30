@@ -1024,16 +1024,39 @@ def capel_directive(target_tokens: int) -> str:
     )
 
 
-def opening_directive() -> str:
-    return (
+# P3b-v5 (2026-05-29): archetypes whose opening must FRONT-LOAD a committed
+# verdict (element 5). Single source of truth shared by `opening_directive`
+# (which emits the instruction) and `check_opening` (which validates it) so the
+# two cannot drift — adding an archetype here updates both the prompt and the
+# recovery-ladder check in lockstep.
+_VERDICT_ARCHETYPES = ("compare", "predict", "recommend", "list-all")
+
+
+def opening_directive(archetype: str = "") -> str:
+    base = (
         "POSITION-1 OPENING (the first ~200 tokens, hard max ~300; this report "
         "is always article_1, write to dominate the comparison): the opening "
         "must, in order, contain (1) a single declarative THESIS sentence, "
         "(2) a QUANTIFIED SCOPE claim with a concrete number, (3) a NAMED "
         "CONTRARIAN view ('despite the common claim that …'), (4) a "
-        "FORWARD-LOOKING DATE ANCHOR ('through 2030', 'by Q3 2026'). No "
-        "preamble before the thesis."
+        "FORWARD-LOOKING DATE ANCHOR ('through 2030', 'by Q3 2026')."
     )
+    # P3b-v5 (2026-05-29): deliverable-bearing archetypes must FRONT-LOAD a
+    # committed verdict. The Lunon-vs-Qianfan head-to-head showed Lunon often HAS
+    # the ranking/prediction/recommendation but buries it deep + hedged, so the
+    # pairwise judge perceives it as absent (id14's actually-present ranking +
+    # prediction scored 0.0). Stating it outright in the opening surfaces the
+    # answer for a skimming judge — the deliverable already exists, this only
+    # re-places it (no new content, no Insight-register softening).
+    if archetype in _VERDICT_ARCHETYPES:
+        base += (
+            " (5) a COMMITTED ONE-SENTENCE VERDICT — the report's headline "
+            "ranking / prediction / recommendation stated OUTRIGHT (e.g. 'X leads, "
+            "then Y and Z'; NOT 'this report will assess'); the reader must see "
+            "your answer here, never only in a late chapter."
+        )
+    base += " No preamble before the thesis."
+    return base
 
 
 _SKIM_LAYER_RULE = (
@@ -1353,7 +1376,7 @@ def writer_system(
         # prompt string below — earlier draft had it inline and the LLM
         # might have treated it as part of the spec or echoed it back.
         f"\n\n{heading_hash_block}"
-        f"\n\n{opening_directive()}\n\n{middle_block}"
+        f"\n\n{opening_directive(archetype)}\n\n{middle_block}"
         f"\n\nLENGTH TARGET — SOFT: aim for ≈{ceil} words total ({int(ceil * 0.7)}"
         f"-{int(ceil * 1.4)} acceptable range; this is a calibration band, NOT "
         f"a hard cap). Run shorter on simple prompts where the evidence is "
@@ -1373,15 +1396,69 @@ _DATE = re.compile(
 )
 
 
+# P3b-v5 (2026-05-29): committed-verdict vocabulary for opening element (5).
+# A loose presence proxy — like the other `check_opening` checks it catches
+# GROSS absence of any front-loaded ranking / prediction / recommendation, NOT
+# verdict quality (a regex cannot judge that). Tuned to favour RECALL so a real
+# verdict is rarely missed (a false negative would trigger a wasteful refiner
+# regen); the safe failure direction is a false positive (status quo: a buried
+# verdict slips through, same as before this check existed). Deliberately does
+# NOT count bare "will" / "将": "this report will assess …" / "本文将评估" is the
+# DEFERRAL anti-pattern the verdict rule forbids, so committed predictions are
+# matched via projected / forecast / "will <outcome-verb>" / 预计 / 有望 /
+# "将<outcome-char>" instead.
+_VERDICT_RE = re.compile(
+    # --- EN ranking / superiority (verbs, superlatives, ranking nouns, idioms) ---
+    r"\b(?:leads?|led by|rank(?:s|ed|ing|ings)?|outperform\w*|ahead of|"
+    r"tops?|topped|topping|beats?|wins?|winner|dominates?|leading|strongest|"
+    r"weakest|superior|edge[sd]? out|(?:takes?|took|taking) the crown|"
+    r"first place|number one|no\.?\s?1|top (?:choice|pick|spot|performer|seed))\b"
+    # --- EN committed prediction (will + outcome verb only; bare "will" excluded) ---
+    r"|\bwill\s+(?:reach|exceed|surpass|hit|overtake|outpace|displace|replace|"
+    r"grow|rise|climb|fall|decline|drop|double|triple|dominate|lead|become|remain)\b"
+    r"|\b(?:projected|forecasts?|forecasted|forecasting|expected to|set to|"
+    r"poised to|on track to|likely to)\b"
+    # --- EN recommendation (incl. standalone "verdict" for em-dash headlines) ---
+    r"|\b(?:recommend\w*|we advise|we'?d (?:pick|choose)|"
+    r"best (?:option|choice|pick|bet|fit)|opt for|(?:our|the) (?:pick|recommendation)|"
+    r"verdict)\b"
+    # --- ZH ranking / superiority ---
+    r"|领先|领跑|领衔|居首|首位|名列前茅|排名第一|位列第一|最佳|最强|最优|"
+    r"优于|胜过|胜出|超越|夺冠|拔得头筹|占据榜首|当属"
+    # --- ZH committed prediction (将 + outcome char; standalone forecasts) ---
+    r"|预计|预测|有望|势必|将(?:达|超|增|升|降|破|突破|成为|保持|领先|主导|取代|反超)"
+    # --- ZH recommendation ---
+    r"|推荐|建议|首选|首推|应(?:当|该)?(?:选|采用|优先)|最佳选择|值得(?:选择|推荐|入手)",
+    re.IGNORECASE,
+)
+
+
 def _approx_tokens(s: str) -> int:
     return max(1, int(len(s) / 4))  # ~4 chars/token heuristic
 
 
-def check_opening(text: str) -> dict:
+def check_opening(text: str, archetype: str = "") -> dict:
     """Graded recovery ladder support (plan point 8). Returns
-    {ok, within_200, within_300, missing, recommended_action}."""
+    {ok, within_200, within_300, missing, recommended_action}.
+
+    Greptile PR #76 (2026-05-29): `archetype` makes the check aware of the
+    deliverable-archetype verdict requirement (opening element 5). For
+    `_VERDICT_ARCHETYPES` (compare / predict / recommend / list-all) the opening
+    must front-load a committed ranking / prediction / recommendation — without
+    this, a draft that buries or omits the verdict would still score `missing=[]`
+    and `action="accept"`, silently passing the recovery ladder even though
+    `opening_directive(archetype)` instructed the writer to surface it. For every
+    other archetype (and the no-arg default) the verdict element is always
+    treated as present, so behaviour is byte-for-byte unchanged.
+
+    The verdict is a first-class opening element, handled by the recovery ladder
+    exactly like the four base elements (thesis / scope / contrarian / date):
+    primary compliance is writer-side (the writer receives the element-(5)
+    instruction via `opening_directive`); a miss surfaces in `missing` and feeds
+    the same opening_template recovery path the base elements use."""
     head300 = text[:1600]  # ~300 tokens
     head200 = text[:1100]  # ~200 tokens
+    wants_verdict = archetype in _VERDICT_ARCHETYPES
 
     def present(seg):
         seg_l = seg.lower()
@@ -1392,6 +1469,9 @@ def check_opening(text: str) -> dict:
             for k in ("despite", "contrary", "common claim", "widely", "however", "尽管", "与普遍", "并非", "误区")
         )
         date = bool(_DATE.search(seg))
+        # Element (5): non-deliverable archetypes have no single headline
+        # verdict, so the element is vacuously present and never enters `miss`.
+        verdict = (not wants_verdict) or bool(_VERDICT_RE.search(seg))
         miss = [
             n
             for n, ok in (
@@ -1399,6 +1479,7 @@ def check_opening(text: str) -> dict:
                 ("quantified_scope", quant),
                 ("contrarian", contrarian),
                 ("date_anchor", date),
+                ("committed_verdict", verdict),
             )
             if not ok
         ]
