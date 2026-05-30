@@ -1021,8 +1021,8 @@ def capel_directive(target_tokens: int) -> str:
     )
 
 
-def opening_directive() -> str:
-    return (
+def opening_directive(archetype: str = "") -> str:
+    base = (
         "POSITION-1 OPENING (the first ~200 tokens, hard max ~300; this report "
         "is always article_1, write to dominate the comparison): the opening "
         "must, in order, contain (1) a single declarative THESIS sentence, "
@@ -1031,6 +1031,21 @@ def opening_directive() -> str:
         "FORWARD-LOOKING DATE ANCHOR ('through 2030', 'by Q3 2026'). No "
         "preamble before the thesis."
     )
+    # P3b-v5 (2026-05-29): deliverable-bearing archetypes must FRONT-LOAD a
+    # committed verdict. The Lunon-vs-Qianfan head-to-head showed Lunon often HAS
+    # the ranking/prediction/recommendation but buries it deep + hedged, so the
+    # pairwise judge perceives it as absent (id14's actually-present ranking +
+    # prediction scored 0.0). Stating it outright in the opening surfaces the
+    # answer for a skimming judge — the deliverable already exists, this only
+    # re-places it (no new content, no Insight-register softening).
+    if archetype in ("compare", "predict", "recommend", "list-all"):
+        base += (
+            " (5) a COMMITTED ONE-SENTENCE VERDICT — the report's headline "
+            "ranking / prediction / recommendation stated OUTRIGHT (e.g. 'X leads, "
+            "then Y and Z'; NOT 'this report will assess'); the reader must see "
+            "your answer here, never only in a late chapter."
+        )
+    return base
 
 
 _SKIM_LAYER_RULE = (
@@ -1307,7 +1322,7 @@ def writer_system(
         # prompt string below — earlier draft had it inline and the LLM
         # might have treated it as part of the spec or echoed it back.
         f"\n\n{heading_hash_block}"
-        f"\n\n{opening_directive()}\n\n{middle_block}"
+        f"\n\n{opening_directive(archetype)}\n\n{middle_block}"
         f"\n\nLENGTH TARGET — SOFT: aim for ≈{ceil} words total ({int(ceil * 0.7)}"
         f"-{int(ceil * 1.4)} acceptable range; this is a calibration band, NOT "
         f"a hard cap). Run shorter on simple prompts where the evidence is "
