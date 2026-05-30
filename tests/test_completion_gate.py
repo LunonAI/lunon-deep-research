@@ -213,6 +213,11 @@ def test_cut_draft_is_rerolled_fresh(monkeypatch):
     `trunc_retries` records how many re-rolls fired."""
     from deep_research.state import PipelineState, Scaffold, ScaffoldSection
 
+    # Pin the module-level constant so the test is self-contained regardless of
+    # DR_TRUNC_RETRY_CAP in the caller's environment (0 = kill-switch would make
+    # the while-loop never fire and fail the assertions below).
+    monkeypatch.setattr(o, "_TRUNC_RETRY_CAP", 2)
+
     full = ("word " * 2000).strip() + "."  # complete, well above the 0.5×1200 floor
     drafts = iter(["This first draft was cut off mid", full])  # stub, then full
 
