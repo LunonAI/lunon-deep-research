@@ -113,7 +113,13 @@ def _sanitize_chain(value) -> list:
 #   3. DR_RESULTS_SERIALISATION_CAP — enforced fail-loud at the cap definition
 #      below (cap ≥ searches×results×~1,600); at =20 that floor is ~320k, past
 #      the 240k default, so set ≥~400k for headroom.
-_MAX_SEARCHES_PER_SPECIALIST = int_env("DR_MAX_SEARCHES_PER_SPECIALIST", 12)
+# Single source of truth for the inert default — orchestrator's co-knob #2
+# timeout guard imports this constant so the "is the cap raised above inert?"
+# threshold can never drift from the default applied here.
+_MAX_SEARCHES_PER_SPECIALIST_DEFAULT = 12
+_MAX_SEARCHES_PER_SPECIALIST = int_env(
+    "DR_MAX_SEARCHES_PER_SPECIALIST", _MAX_SEARCHES_PER_SPECIALIST_DEFAULT
+)
 _RESULTS_PER_SEARCH = 10
 
 # P2-Option-A-#4 Greptile PR #22 follow-up (2026-05-25): named cap on the
