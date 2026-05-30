@@ -458,6 +458,44 @@ def _state_from_ctx(ctx, query, language):
 # retries is surfaced in completion telemetry — a signal of an upstream coverage
 # gap (which the enumerate-and-expand / deliverable-mapping levers address).
 _COMPLETION_MIN_RATIO = 0.5  # below the 0.7x stated target — only SEVERE shortfalls fire
+# PR-A (2026-05-29): a draft that ends mid-sentence AND is severely thin is an
+# infra CUT (stream-drop / truncated response), not a quality shortfall — the
+# dev6 hollow sections were 36-57-token mid-sentence stubs with full evidence,
+# correlated with `RemoteProtocolError` stream-drops under 6×6 contention, that
+# the client accepted because the text was non-empty. Re-roll such a draft FRESH
+# (no feedback) before the grounding/score loop, bounded by this cap, so a cut
+# generation never reaches acceptance. The quality (expand/grounding) loop then
+# handles genuine under-production (thin BUT sentence-complete) as before.
+_TRUNC_RETRY_CAP_DEFAULT = 2
+_TRUNC_RETRY_CAP_MIN = 0  # 0 = explicit kill-switch (re-rolls disabled)
+_TRUNC_RETRY_CAP_MAX = 5  # bound cost: each re-roll is a full section regeneration
+
+
+def _trunc_retry_cap_from_env() -> int:
+    """Resolve the cut-generation re-roll cap from DR_TRUNC_RETRY_CAP.
+
+    Mirrors `_specialist_timeout_from_env()` (pipeline/orchestrator.py): fail
+    loud with a clear message on a non-integer value rather than letting a bare
+    ``int()`` raise a cryptic ValueError at module-import time (which would crash
+    the whole orchestrate module), and guard the range so a negative value
+    (silently disables re-rolls from the first ``trunc_retries < cap`` check) or
+    an absurdly large one (e.g. 50 — up to 50 full-section regenerations per
+    section under persistent stream-drops, exactly the high-contention case this
+    feature addresses) can't slip through. 0 is allowed as an explicit
+    kill-switch; the [0, 5] band still admits modest bumps above the default."""
+    raw = os.environ.get("DR_TRUNC_RETRY_CAP")
+    if raw is None:
+        return _TRUNC_RETRY_CAP_DEFAULT
+    try:
+        val = int(raw)
+    except ValueError:
+        raise ValueError(f"DR_TRUNC_RETRY_CAP must be a non-negative integer; got {raw!r}") from None
+    if not (_TRUNC_RETRY_CAP_MIN <= val <= _TRUNC_RETRY_CAP_MAX):
+        raise ValueError(f"DR_TRUNC_RETRY_CAP out of range [{_TRUNC_RETRY_CAP_MIN}, {_TRUNC_RETRY_CAP_MAX}]: {val}")
+    return val
+
+
+_TRUNC_RETRY_CAP = _trunc_retry_cap_from_env()
 
 
 def _approx_tokens(text: str) -> int:
@@ -508,6 +546,16 @@ def _ends_mid_sentence(text: str) -> bool:
     if re.match(r"^\d+[.)]\s", tail):
         return False
     return last[-1] not in _SENT_TERMINALS
+
+
+def _is_cut_generation(text: str, expected_tok: int) -> bool:
+    """True if a draft looks like a CUT generation (stream-drop / truncated
+    response) rather than a quality shortfall: it ends mid-sentence AND is
+    severely below its declared target. Such a draft can't be fixed by the
+    grounding/expand loop (there's nothing to ground/expand) — re-roll it fresh.
+    A thin-but-sentence-complete draft is genuine under-production and is left
+    for the expand path."""
+    return _ends_mid_sentence(text) and _section_too_thin(text, expected_tok)
 
 
 def _expand_feedback(expected_tok: int) -> str:
@@ -591,6 +639,32 @@ def _run_section_loop(s: PipelineState, query, language):
             task_id=s.task_id,
         )
         _accum(stats)
+        # PR-A: re-roll an obviously-CUT draft FRESH before the quality loop. A
+        # mid-sentence + severely-thin draft is a transient infra failure (the
+        # client returns truncated text without checking stop_reason); a clean
+        # re-roll — especially at lower concurrency — recovers the full section,
+        # whereas the grounding/expand loop can't fix a truncated generation and
+        # would burn its bounded budget on it. No-op for complete drafts.
+        # NOTE: if all _TRUNC_RETRY_CAP re-rolls also return cut drafts (persistent
+        # stream contention), the quality loop runs on the last cut draft — the
+        # cap bounds re-roll cost, not acceptance.
+        trunc_retries = 0
+        while trunc_retries < _TRUNC_RETRY_CAP and _is_cut_generation(draft_s, expected_tok):
+            trunc_retries += 1
+            draft_s, stats = _write_with_guide(
+                u,
+                plan,
+                bank,
+                query,
+                language,
+                archetype,
+                domain,
+                prior_titles,
+                s.design_guide,
+                s.scaffold,
+                task_id=s.task_id,
+            )
+            _accum(stats)
         last_scores = None
         # P3b-OPT2: per-iteration trajectory telemetry. INNER_CAP now defaults
         # to 2 (see the definition above) after this telemetry proved the 3rd
@@ -690,6 +764,7 @@ def _run_section_loop(s: PipelineState, query, language):
             "draft_tok": draft_tok,
             "thin_ratio": round(draft_tok / expected_tok, 3) if expected_tok else None,
             "mid_sentence": _ends_mid_sentence(draft_s),
+            "trunc_retries": trunc_retries,
         }
         return sid, u, draft_s, last_scores, agg_stats, traj, final_thin, sec_meta
 
