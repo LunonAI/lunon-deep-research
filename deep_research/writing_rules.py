@@ -12,6 +12,7 @@
 """
 
 import collections
+import functools
 import json
 import os
 import pathlib
@@ -20,19 +21,33 @@ import statistics
 
 _CAT = pathlib.Path(__file__).resolve().parent.parent / "p0_artifacts" / "reference_catalog.jsonl"
 
+# `reference_catalog.jsonl` is a generated artifact (gitignored): present in
+# production, absent in clean checkouts / CI. Load it lazily and tolerate its
+# absence so importing this module never touches the filesystem. The prior
+# module-level `_MED = _en_domain_medians()` did file I/O at import and raised
+# FileNotFoundError when the artifact was missing, which collapsed pytest
+# collection for every test transitively importing writing_rules (44 errors
+# on the first real CI run). Only length_ceiling() consumes these medians, and
+# no LLM runs in that path during tests, so when the catalog is absent we fall
+# back to the W9-era overall median documented in the _LENGTH_TARGET_MULT note.
+_FALLBACK_OVERALL_MEDIAN = 9000  # W9 baseline overall median word_len
 
+
+@functools.lru_cache(maxsize=1)
 def _en_domain_medians():
-    rows = [json.loads(ln) for ln in _CAT.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    try:
+        text = _CAT.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return {"_overall": _FALLBACK_OVERALL_MEDIAN}
+    rows = [json.loads(ln) for ln in text.splitlines() if ln.strip()]
     en = [r for r in rows if r.get("language") == "en"]
     by = collections.defaultdict(list)
     for r in en:
         by[r.get("domain", "?")].append(r.get("word_len", 0))
     med = {d: int(statistics.median(v)) for d, v in by.items() if v}
-    med["_overall"] = int(statistics.median([r.get("word_len", 0) for r in en]))
+    overall = [r.get("word_len", 0) for r in en]
+    med["_overall"] = int(statistics.median(overall)) if overall else _FALLBACK_OVERALL_MEDIAN
     return med
-
-
-_MED = _en_domain_medians()
 # coarse runtime domain -> closest reference_catalog domain (decision #5)
 _DOMAIN_KEY = {
     "finance": "Finance & Business",
@@ -951,7 +966,8 @@ def length_ceiling(domain: str) -> int:
     docstring.
     """
     key = _DOMAIN_KEY.get(domain, "_overall")
-    raw = _MED.get(key, _MED["_overall"])
+    med = _en_domain_medians()
+    raw = med.get(key, med["_overall"])
     return int(raw * _LENGTH_TARGET_MULT)
 
 
