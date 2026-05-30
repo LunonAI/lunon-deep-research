@@ -1,5 +1,6 @@
-"""L6 + L7 (2026-05-29): pin the skim-layer (readability) and meta-causal
-synthesis (insight) contract additions surfaced by the reference head-to-head.
+"""L6 + L7 + L8 (2026-05-29): pin the skim-layer (readability), meta-causal
+synthesis (insight), and pedagogical-accessibility (reader generalist) contract
+additions surfaced by the reference head-to-head.
 """
 
 from deep_research import writing_rules as wr
