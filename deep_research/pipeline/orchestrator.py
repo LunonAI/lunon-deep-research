@@ -2,12 +2,15 @@
 
 Plan-once → research 3-5 cycles → one forced gap-review → ≤2 gap-fill → stop
 (AI-Q orchestrator.j2 shape). Enforces:
-- Hard tool-call budget = 64 (each Exa search = 1 tool call; halts, never
+- Hard tool-call budget BUDGET (each Exa search = 1 tool call; halts, never
   exceeds). Sized to fit 5 specialists × specialists._MAX_SEARCHES_PER_SPECIALIST
-  (12) + 2 gap-fill calls + 2 calls of headroom = 64. Made safe by the
-  per-specialist wall-clock timeout (_SPECIALIST_TIMEOUT_S) that bounds
-  any single specialist's research() call — the 2026-05-25 CAPEL smoke
-  incident proved the BUDGET bump alone was unsafe without it.
+  + 2 gap-fill calls + 2 calls of headroom. Both BUDGET (default 64) and the
+  per-specialist cap (default 12) are env-overridable (DR_TOOL_CALL_BUDGET /
+  DR_MAX_SEARCHES_PER_SPECIALIST); a module-level invariant fails loud if BUDGET
+  drops below 5×cap+2. Made safe by the per-specialist wall-clock timeout
+  (_SPECIALIST_TIMEOUT_S) that bounds any single specialist's research() call —
+  the 2026-05-25 CAPEL smoke incident proved the BUDGET bump alone was unsafe
+  without it.
 - Forced reflection: a `think` gap-review marking each acceptance criterion
   SATISFIED/PARTIAL/UNSAT, picking ≤2 critical gaps.
 - IterResearch compressed-report memory, bounded compaction every N=8 tool calls.
@@ -21,6 +24,7 @@ import os
 import sys
 
 from .. import llm
+from .._env import int_env
 from . import specialists
 from .memory_bank import MemoryBank
 from .specialists import research
@@ -127,7 +131,51 @@ def _research_with_timeout(role, qlist, *, language, domain, exa_mode, model_ove
 # indefinitely on horizon_scanner; with the bound, the worst case is one
 # specialist's findings dropped (digest gets a TIMEOUT marker) and the
 # task completes on the other 4 specialists' evidence.
-BUDGET = 64
+# P3b-v5 (2026-05-29): env-overridable in lockstep with
+# specialists.DR_MAX_SEARCHES_PER_SPECIALIST so the grounding arm can raise the
+# tool-call ceiling for the longer ZH chapters. Default 64 = inert; dev6 arm
+# sets =104 (fits 5×20 + 2 gap-fill). Fail-loud below the invariant rather than
+# let the dispatch slice (min(cap, BUDGET-tool_calls)) silently re-clamp the
+# per-specialist searches back down — the exact silent-drop the spec warns of.
+BUDGET = int_env("DR_TOOL_CALL_BUDGET", 64)
+_MIN_BUDGET = 5 * specialists._MAX_SEARCHES_PER_SPECIALIST + 2
+if BUDGET < _MIN_BUDGET:
+    raise RuntimeError(
+        f"orchestrator.BUDGET={BUDGET} < 5×_MAX_SEARCHES_PER_SPECIALIST"
+        f"({specialists._MAX_SEARCHES_PER_SPECIALIST})+2={_MIN_BUDGET}: raise "
+        f"DR_TOOL_CALL_BUDGET to ≥{_MIN_BUDGET} or the per-specialist search "
+        f"cap is silently clamped (no new grounded atoms gathered)."
+    )
+
+# P3b-v5 (2026-05-29): co-knob #2 invariant, fail-loud — completes the trio
+# alongside BUDGET (#1, above) and specialists._RESULTS_SERIALISATION_CAP (#3).
+# The per-specialist search cap and the specialist wall-clock are co-dependent:
+# at the raised cap (=20) a single research() call runs ~100s Exa + ~180s
+# extract + buffer ≈ 340s, past the 240s default — _research_with_timeout then
+# drops that specialist SILENTLY (TIMEOUT marker), the exact CAPEL-smoke
+# degradation specialists.py co-knob #2 warns of. Without this guard a developer
+# who follows the two OTHER explicit guards (raises BUDGET + the serialisation
+# cap) but forgets DR_SPECIALIST_TIMEOUT_S passes every import-time check yet
+# re-creates the incident at runtime. Enforce the documented ≥360s floor
+# whenever the search cap is raised above its inert default so the
+# misconfiguration surfaces at import, not as silently-dropped specialists.
+_SPECIALIST_SEARCH_CAP_INERT_DEFAULT = specialists._MAX_SEARCHES_PER_SPECIALIST_DEFAULT  # single source of truth
+_SPECIALIST_TIMEOUT_FLOOR_S = 360
+if (
+    specialists._MAX_SEARCHES_PER_SPECIALIST > _SPECIALIST_SEARCH_CAP_INERT_DEFAULT
+    and _SPECIALIST_TIMEOUT_S < _SPECIALIST_TIMEOUT_FLOOR_S
+):
+    raise RuntimeError(
+        f"orchestrator: DR_SPECIALIST_TIMEOUT_S={_SPECIALIST_TIMEOUT_S}s < "
+        f"{_SPECIALIST_TIMEOUT_FLOOR_S}s while "
+        f"specialists._MAX_SEARCHES_PER_SPECIALIST="
+        f"{specialists._MAX_SEARCHES_PER_SPECIALIST} > "
+        f"{_SPECIALIST_SEARCH_CAP_INERT_DEFAULT}: at the raised search cap a "
+        f"specialist's wall-clock (~100s Exa + ~180s extract + buffer ≈ 340s) "
+        f"exceeds the 240s default and _research_with_timeout drops it silently "
+        f"(the CAPEL smoke incident). Raise DR_SPECIALIST_TIMEOUT_S to "
+        f"≥{_SPECIALIST_TIMEOUT_FLOOR_S}."
+    )
 COMPACT_EVERY = 8
 
 # Per-archetype researcher routing (W9 diagnostic + dev6 paired test 2026-05-21):
