@@ -48,8 +48,13 @@ SECTION_BUDGET_CEILING = 30_000
 # ~700-1000 CJK/leaf at _WORDS_PER_TOKEN). The per-section budget floors at
 # leaf_count × this, so length scales with the architect's planned leaf count
 # (which today is invisible to the allocator) rather than the H2 share split
-# thin. Env-overridable so a dev4 sanity can dial it without a redeploy.
-_PER_LEAF_TOKENS = int(os.environ.get("DR_PER_LEAF_TOKENS") or 900)
+# thin. Env-overridable so a dev4 sanity can dial it without a redeploy; a
+# malformed override falls back to the default rather than crashing at import.
+_DR_PER_LEAF_ENV = os.environ.get("DR_PER_LEAF_TOKENS")
+try:
+    _PER_LEAF_TOKENS = int(_DR_PER_LEAF_ENV) if _DR_PER_LEAF_ENV else 900
+except ValueError:
+    _PER_LEAF_TOKENS = 900
 _MIN_LEAVES_PER_SECTION = 3  # back-compat floor for an under-seeded section
 
 
@@ -134,4 +139,8 @@ def run(inp: InitFormatInput) -> InitFormatOutput:
             )
         )
 
-    return InitFormatOutput(scaffold=Scaffold(sections=sections, total_target_tokens=total_tokens))
+    # total_target_tokens must reflect the EXPECTED total output length, not the
+    # domain governor ceiling: once leaf floors bind, the aggregate of per-section
+    # expected_length_tokens can exceed total_tokens, so report the real sum.
+    total_target = sum(s.expected_length_tokens for s in sections)
+    return InitFormatOutput(scaffold=Scaffold(sections=sections, total_target_tokens=total_target))
