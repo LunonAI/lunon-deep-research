@@ -193,3 +193,64 @@ def test_ends_mid_sentence_detector():
     assert o._ends_mid_sentence("3. last numbered point") is False
     assert o._ends_mid_sentence("3) last numbered point") is False
     assert o._ends_mid_sentence("+ a plus bullet") is False
+
+
+def test_is_cut_generation_distinguishes_cut_from_under_production():
+    """PR-A: a CUT draft (mid-sentence AND severely thin) is re-rolled; a
+    thin-but-sentence-complete draft is genuine under-production (left for the
+    expand path); a full draft is neither."""
+    expected = 1200
+    assert o._is_cut_generation("This section abruptly stops with no", expected) is True
+    # thin but sentence-complete → NOT a cut (expand path handles it)
+    assert o._is_cut_generation("A complete but short sentence.", expected) is False
+    # full + complete → not a cut
+    assert o._is_cut_generation(("word " * 2000).strip() + ".", expected) is False
+
+
+def test_cut_draft_is_rerolled_fresh(monkeypatch):
+    """PR-A: the inner loop re-rolls an obviously-CUT first draft (stream-drop
+    stub) FRESH before the grounding/score loop, so a truncated stub never ships;
+    `trunc_retries` records how many re-rolls fired."""
+    from deep_research.state import PipelineState, Scaffold, ScaffoldSection
+
+    full = ("word " * 2000).strip() + "."  # complete, well above the 0.5×1200 floor
+    drafts = iter(["This first draft was cut off mid", full])  # stub, then full
+
+    monkeypatch.setattr(o.writer, "outline_units", lambda plan: [{"id": "S1", "title": "T"}])
+    monkeypatch.setattr(o.grounding, "check", lambda *a, **k: {"ok": True})
+    monkeypatch.setattr(o.inner_loop, "score_section", lambda *a, **k: {"ok": True, "min_score": 9.0, "fail": []})
+
+    calls = {"n": 0}
+
+    def fake_write(*a, **k):
+        calls["n"] += 1
+        return next(drafts), {}
+
+    monkeypatch.setattr(o, "_write_with_guide", fake_write)
+
+    class _Bank:
+        def for_section(self, sid, max_blocks=40):
+            return [1, 2, 3]
+
+    s = PipelineState(
+        query="q", language="en", archetype={"archetype": "x"}, domain="default",
+        spec={}, plan={},
+        scaffold=Scaffold(sections=[ScaffoldSection(section_id="S1", title="T", expected_length_tokens=1200)]),
+        memory_bank=_Bank(), task_id=None,
+    )
+
+    sections, _, _ = o._run_section_loop(s, "q", "en")
+
+    assert calls["n"] >= 2, "the cut first draft should have triggered a fresh re-roll"
+    assert sections[0] == full, "the full re-rolled draft must replace the cut stub"
+    rec = s.completion_stats["sections"][0]
+    assert rec["trunc_retries"] >= 1
+    assert s.completion_stats["n_hollow_final"] == 0  # the full draft is not hollow
+
+
+def test_specialist_timeout_default_raised():
+    """PR-A / #19: the specialist wall-clock default is 1200s (was 240) so a
+    single research call under contention is essentially never falsely dropped."""
+    from deep_research.pipeline import orchestrator as orch
+
+    assert orch._SPECIALIST_TIMEOUT_DEFAULT_S == 1200
