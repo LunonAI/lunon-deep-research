@@ -40,3 +40,33 @@ def approx_tokens(text: str) -> int:
     cjk = count_cjk(text)
     other = len(text) - cjk
     return int(cjk / _CJK_CHARS_PER_TOKEN + other / _OTHER_CHARS_PER_TOKEN)
+
+
+# --- Word counting (audit F2) -------------------------------------------------
+# A CJK-aware *word* count, distinct from the token estimate above. It mirrors
+# scripts/reference_style_profile.py — the script that defines the corpus
+# word-count targets — and so intentionally uses the Unified-Ideographs range
+# ONLY (not the broader Unified+Ext-A range approx_tokens uses for the
+# de-spacing-aligned token estimate). The two have different sources of truth;
+# keep them separate. This unifies the previously byte-identical copies in
+# validation._wc and style_clamp._words.
+_CJK_WORD_RE = re.compile(r"[一-鿿]")  # Unified Ideographs only — mirrors the profiler
+_LATIN_WORD_RE = re.compile(r"[A-Za-z]+")
+_CJK_HEAVY_FRACTION = 0.15
+
+
+def is_cjk_heavy(text: str) -> bool:
+    """True when CJK ideographs exceed 15% of the characters — the profiler's
+    threshold for treating text as space-less CJK (so .split() would undercount)."""
+    return len(_CJK_WORD_RE.findall(text)) > _CJK_HEAVY_FRACTION * max(len(text), 1)
+
+
+def approx_words(text: str) -> int:
+    """CJK-aware word count mirroring scripts/reference_style_profile.py: CJK has
+    no spaces so .split() undercounts — approximate CJK words as chars/1.6 plus
+    Latin word runs; otherwise fall back to whitespace splitting. Always ≥1."""
+    if is_cjk_heavy(text):
+        cjk = len(_CJK_WORD_RE.findall(text))
+        latin = len(_LATIN_WORD_RE.findall(text))
+        return max(int(cjk / _CJK_CHARS_PER_TOKEN) + latin, 1)
+    return max(len(text.split()), 1)
