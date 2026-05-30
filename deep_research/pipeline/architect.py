@@ -837,6 +837,13 @@ def _retry_is_better(retry_audit: dict, orig_audit: dict) -> bool:
 # 5 = inert; dev6 arm sets =10. Bounded above by _ENTITY_MATRIX_ENTITIES_MAX.
 _ENTITY_MATRIX_ENTITIES_MIN = int_env("DR_ENTITY_MATRIX_MIN", 5)
 _ENTITY_MATRIX_ENTITIES_MAX = 20  # back-compat; tests reference this directly
+if _ENTITY_MATRIX_ENTITIES_MIN > _ENTITY_MATRIX_ENTITIES_MAX:
+    raise RuntimeError(
+        f"DR_ENTITY_MATRIX_MIN={_ENTITY_MATRIX_ENTITIES_MIN} > "
+        f"_ENTITY_MATRIX_ENTITIES_MAX={_ENTITY_MATRIX_ENTITIES_MAX}: the entity-"
+        f"matrix band is inverted — set DR_ENTITY_MATRIX_MIN ≤ "
+        f"{_ENTITY_MATRIX_ENTITIES_MAX}."
+    )
 _ENTITY_MATRIX_ENTITIES_MAX_BY_ARCHETYPE: dict[str, int] = {
     "list-all": 30,
     "compare": 20,
