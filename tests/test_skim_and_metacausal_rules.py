@@ -1,5 +1,6 @@
-"""L6 + L7 (2026-05-29): pin the skim-layer (readability) and meta-causal
-synthesis (insight) contract additions surfaced by the Qianfan head-to-head.
+"""L6 + L7 + L8 (2026-05-29): pin the skim-layer (readability), meta-causal
+synthesis (insight), and pedagogical-accessibility (reader generalist) contract
+additions surfaced by the Qianfan head-to-head.
 """
 
 from deep_research import writing_rules as wr
@@ -17,6 +18,19 @@ def test_l6_skim_layer_in_writer_system():
     assert "recap-then-preview" in sysd
     # preserves Lunon's concise asset — no nominalization padding
     assert "nominalization" in sysd.lower() or "stay CONCISE" in sysd
+
+
+def test_l8_reader_accessibility_in_writer_system():
+    """L8 (2026-05-29): the pedagogical-accessibility rule (define jargon on first
+    use, ground abstractions) — the live GPT-5.5 judge's weakest dim is Readability
+    (0.435); Task-37 scored 4.0 vs ref 9.5 on reader-adaptability. Must EXPLICITLY
+    preserve depth (no-harm) so it can't be read as 'dumb down / cut analysis'."""
+    sysd = _writer_sys()
+    assert "READER ACCESSIBILITY" in sysd
+    assert "FIRST use" in sysd  # define jargon on first body use
+    assert "informed generalist" in sysd.lower()
+    # no-harm pin: the rule must NOT instruct cutting depth/analysis
+    assert "does NOT mean dumbing down" in sysd and "depth, rigor" in sysd
 
 
 def test_l7_metacausal_in_architect_system():
