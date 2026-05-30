@@ -8,7 +8,7 @@ per-topic source-richness, a suggested title and high-level (sections-only) TOC.
 
 import json
 
-from .. import llm
+from .. import config, llm
 from ..retrieval import exa
 
 _Q_SYSTEM = (
@@ -59,7 +59,9 @@ def run(prompt: str, language: str, exa_mode: str = "auto") -> dict:
         f"PROMPT ({language}):\n{prompt}\n\nSEARCH SNIPPETS "
         f"({len(snippets)} from {len(queries)} queries):\n" + json.dumps(snippets, ensure_ascii=False)[:60000],
         system=_SYNTH_SYSTEM,
-        max_tokens=8000,
+        max_tokens=48000,
+        think=True,
+        effort=config.effort_for("scout"),
         note="scout.synth",
     )
     # B-13 defensive: LLM intermittently emits a JSON array instead of object;

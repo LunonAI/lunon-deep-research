@@ -17,9 +17,11 @@ Both default on post-sanity-4 hardcode; set `DR_CAPEL_G=off` to disable
 import json
 import os
 import re
+import sys
 
-from .. import llm
+from .. import config, llm
 from .. import writing_rules as wr
+from ..text_metrics import approx_tokens
 from ._capel_strip import strip_capel_markers
 
 # Wave 2 §1.2 follow-up (2026-05-26 PR #30 self-review): writer.py reads
@@ -81,6 +83,55 @@ def _acs_for_section(plan, sid):
     return out[:14]
 
 
+# Greptile PR #86: restore the pre-Opus-4.8 hard cap on the opening's VISIBLE
+# length. Pre-PR-86 `write_opening` used `max_tokens=1400`, which physically
+# bounded the opening output. PR #86 raised max_tokens to 24000 and enabled
+# `think=True` so max-effort *thinking* has room — but thinking and prose now
+# share that single budget, so the old 1400-token cap on prose is gone. The
+# position-1 rule targets ~200 tokens (hard max ~300), so 1400 (~4.6× the hard
+# max) never trips on a well-formed opening; it only fires on catastrophic
+# overshoot, where a multi-thousand-token preamble would otherwise pass every
+# downstream stage untouched (no validator checks the opening's length).
+_OPENING_TOKEN_BACKSTOP = 1400
+
+# Sentence/paragraph boundaries used to truncate an overshooting opening at a
+# clean break: a sentence terminator (Latin or CJK) followed by space/newline/
+# end, or a blank-line paragraph break.
+_OPENING_BOUNDARY_RE = re.compile(r"[.!?。！？](?=\s|$)|\n\n+")
+
+
+def _cap_opening_length(text: str) -> str:
+    """Backstop the visible opening at `_OPENING_TOKEN_BACKSTOP` (CJK-aware).
+
+    No-op for any well-formed opening (the common case). On overshoot, slices
+    the ORIGINAL string at the latest sentence/paragraph boundary whose prefix
+    stays within the cap — slicing in place (not split-and-rejoin) preserves the
+    `# Title\n\n…` structure so the opening-template check still sees a valid
+    head — and logs the truncation to stderr (the visible-length signal the
+    raised max_tokens otherwise removed).
+    """
+    if approx_tokens(text) <= _OPENING_TOKEN_BACKSTOP:
+        return text
+    cut = 0
+    for m in _OPENING_BOUNDARY_RE.finditer(text):
+        end = m.end()
+        if approx_tokens(text[:end]) > _OPENING_TOKEN_BACKSTOP:
+            break
+        cut = end
+    # Pathological single run with no boundary under the cap: hard-cut by an
+    # approximate character budget (non-CJK rate; intentionally generous).
+    if cut == 0:
+        cut = _OPENING_TOKEN_BACKSTOP * 4
+    capped = text[:cut].rstrip()
+    print(
+        f"[writer.open] visible opening {approx_tokens(text)} tok exceeded the "
+        f"{_OPENING_TOKEN_BACKSTOP}-token backstop — truncated to {approx_tokens(capped)} tok",
+        file=sys.stderr,
+        flush=True,
+    )
+    return capped
+
+
 def write_opening(plan, prompt, language, archetype, domain, digest, *, task_id=None):
     """Position-1 opening / executive frame (item 17). Uses the compressed
     digest (a synthesis input, not a full per-section evidence dump).
@@ -130,7 +181,10 @@ def write_opening(plan, prompt, language, archetype, domain, digest, *, task_id=
         f"(~200 tokens, hard max ~300). Then STOP — sections follow "
         f"separately."
     )
-    return llm.call("writer", user, system=sys, max_tokens=1400, note="writer.open")
+    raw = llm.call(
+        "writer", user, system=sys, max_tokens=24000, think=True, effort=config.effort_for("writer"), note="writer.open"
+    )
+    return _cap_opening_length(raw)
 
 
 def write_section(
@@ -974,17 +1028,24 @@ def write_section(
     feedback_block = (
         f"\nREVISION FEEDBACK — fix these and integrate the cited evidence inline:\n{feedback}\n" if feedback else ""
     )
-    # P3b-v5 (2026-05-29): 14000 → 21000 in lockstep with init_format
-    # SECTION_BUDGET_CEILING 20000→30000 (30000×0.7=21000 keeps the validator's
-    # 0.7× passline reachable in one writer call). This is the LLM-call upper
-    # bound; with `DR_CAPEL_G=on` (default) the per-section CAPEL countdown —
-    # now driven by the LEAF-AWARE `target_tokens` (init_format scales the
-    # per-section budget by the planned leaf count) — is the OPERATIVE per-
-    # section cap, not max_tokens. The 21k headroom matters for (a) CAPEL
-    # disabled; (b) the deepest ZH chapters whose leaf-aware target approaches
-    # the 30000 ceiling; (c) refiner-pass growth. The ZH length uplift lands via
-    # the leaf-aware budget lifting the CAPEL target, not via this headroom.
-    raw = llm.call("writer", user, system=sys, max_tokens=21000, note=f"writer.sec.{sid}", user_suffix=feedback_block)
+    # 2026-05-30 (Opus 4.8 + max effort): 21000 → 96000. CAPEL (SECTION_BUDGET_CEILING
+    # = 30000) remains the OPERATIVE per-section prose cap; max_tokens is raised to
+    # 96000 so adaptive thinking tokens and the visible output share the single
+    # max_tokens ceiling without truncating the chapter. The extra headroom is
+    # consumed by thinking, not by prose growth — the 30k CAPEL ceiling still limits
+    # actual prose length. The 0.7× validator pass-line (21000) is easily reachable
+    # within 96000. The ZH length uplift still lands via the leaf-aware CAPEL target,
+    # not via this headroom.
+    raw = llm.call(
+        "writer",
+        user,
+        system=sys,
+        max_tokens=96000,
+        think=True,
+        effort=config.effort_for("writer"),
+        note=f"writer.sec.{sid}",
+        user_suffix=feedback_block,
+    )
     if capel_active:
         text, stats = strip_capel_markers(raw)
     else:
