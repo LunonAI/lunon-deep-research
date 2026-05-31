@@ -344,7 +344,7 @@ def from_plan(ctx: dict, query: str, language: str, task_id: int | None = None) 
     # round 5 T1-PR3: deterministic runaway-block clamp (safety net for a flat
     # chapter the budget didn't prevent). Runs early so footnote_normalize /
     # numbering_fix see the clamped article.
-    clamped_r, cr_stats = _phase("runaway_clamp", _clamp_runaway_blocks, s.article, language)
+    clamped_r, cr_stats = _phase("runaway_clamp", _clamp_runaway_blocks, s.article)
     s.article = clamped_r
     s.runaway_clamp_stats = cr_stats
 
@@ -831,12 +831,22 @@ def _runaway_block_tokens() -> int:
 
 
 def _truncate_to_token_budget(text: str, max_tokens: int) -> str | None:
-    """Largest prefix of `text` at a sentence boundary within `max_tokens`.
+    """Largest prefix of `text` at a sentence boundary within ~`max_tokens`.
     Uses a proportional char estimate (O(n), avoids per-sentence recount) then
-    backs up to the last sentence terminal. Returns None if no boundary fits."""
+    backs up to the last sentence terminal. Returns None if no boundary fits.
+
+    Approximate ceiling, NOT a strict bound: `char_budget` uses the block's
+    AVERAGE chars-per-token, so a prefix denser in CJK than the block average
+    (CJK ≈1.6 chars/tok vs non-CJK ≈4) can carry somewhat more than `max_tokens`
+    (≈15% over for a 50/50 block at 2× threshold). The only caller is the
+    runaway-clamp safety net, which fires on pathological walls where a few-%
+    overshoot on already-truncated content is immaterial; callers must not rely
+    on the returned prefix being strictly within `max_tokens`."""
     total = text_metrics.approx_tokens(text)
     if total <= max_tokens:
         return text
+    # Average chars/token across the whole block — see the docstring caveat on
+    # CJK-dense prefixes slightly overshooting the budget.
     char_budget = max(1, int(len(text) * max_tokens / total))
     head = text[:char_budget]
     for i in range(len(head) - 1, -1, -1):
@@ -845,10 +855,14 @@ def _truncate_to_token_budget(text: str, max_tokens: int) -> str | None:
     return None
 
 
-def _clamp_runaway_blocks(article: str, language: str = "en") -> tuple[str, dict]:
+def _clamp_runaway_blocks(article: str) -> tuple[str, dict]:
     """Deterministic safety net: truncate any single inter-heading block whose
     body exceeds the runaway threshold. Env-gated (DR_RUNAWAY_CLAMP=off to
-    disable), fail-loud. The heading lines and all other blocks are untouched."""
+    disable), fail-loud. The heading lines and all other blocks are untouched.
+
+    Language-agnostic: the threshold is token-based and `_SENT_TERMINALS` covers
+    both EN and CJK terminals, so no `language` arg is needed (it was dead input
+    that implied language-specific logic that does not exist)."""
     stats = {"blocks_clamped": 0, "tokens_removed": 0}
     if os.environ.get("DR_RUNAWAY_CLAMP", "on") == "off" or not article or not article.strip():
         return article, stats
