@@ -171,7 +171,16 @@ def raw_call(
             time.sleep(backoff)
             continue
         except anthropic.APIStatusError as e:
-            if e.status_code in (429, 500, 502, 503, 504, 529):
+            # 2026-05-31 (round 4): include 200. dev8 lost a whole task (~4h) when
+            # Anthropic returned an HTTP **200** whose BODY was an error envelope
+            # ({"type":"error","error":{"type":"api_error","message":"Internal
+            # server error"}}). The SDK surfaces that as APIStatusError with
+            # status_code=200; it was NOT in the retry set, so it raised here and
+            # bubbled to the adapter's TASK-level retry — re-running all planning +
+            # research from scratch. An HTTP-200-with-error-body is always a
+            # transient provider glitch: retry the single CALL (cheap), never the
+            # whole task. max_retries bounds it; on exhaustion it still raises.
+            if e.status_code in (200, 429, 500, 502, 503, 504, 529):
                 last = f"HTTP {e.status_code}"
                 elapsed = time.time() - attempt_t0
                 backoff = min(2**attempt * 3, 45)

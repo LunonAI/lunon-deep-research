@@ -19,7 +19,7 @@ import os
 import re
 import sys
 
-from .. import config, llm
+from .. import llm
 from .. import writing_rules as wr
 from ..text_metrics import approx_tokens
 from ._capel_strip import strip_capel_markers
@@ -83,15 +83,14 @@ def _acs_for_section(plan, sid):
     return out[:14]
 
 
-# Greptile PR #86: restore the pre-Opus-4.8 hard cap on the opening's VISIBLE
-# length. Pre-PR-86 `write_opening` used `max_tokens=1400`, which physically
-# bounded the opening output. PR #86 raised max_tokens to 24000 and enabled
-# `think=True` so max-effort *thinking* has room — but thinking and prose now
-# share that single budget, so the old 1400-token cap on prose is gone. The
+# A hard cap on the opening's VISIBLE length, kept as defense-in-depth.
+# round 4 (2026-05-31) reverted write_opening to max_tokens=1400 (no think) —
+# the proven pre-#86 prose-only call — so max_tokens again physically bounds the
+# opening. This backstop is now redundant with that ceiling but harmless: the
 # position-1 rule targets ~200 tokens (hard max ~300), so 1400 (~4.6× the hard
-# max) never trips on a well-formed opening; it only fires on catastrophic
-# overshoot, where a multi-thousand-token preamble would otherwise pass every
-# downstream stage untouched (no validator checks the opening's length).
+# max) never trips on a well-formed opening; the backstop only fires on a
+# catastrophic overshoot that would otherwise pass every downstream stage
+# untouched (no validator checks the opening's length).
 _OPENING_TOKEN_BACKSTOP = 1400
 
 # Sentence/paragraph boundaries used to truncate an overshooting opening at a
@@ -181,9 +180,7 @@ def write_opening(plan, prompt, language, archetype, domain, digest, *, task_id=
         f"(~200 tokens, hard max ~300). Then STOP — sections follow "
         f"separately."
     )
-    raw = llm.call(
-        "writer", user, system=sys, max_tokens=24000, think=True, effort=config.effort_for("writer"), note="writer.open"
-    )
+    raw = llm.call("writer", user, system=sys, max_tokens=1400, note="writer.open")
     return _cap_opening_length(raw)
 
 
@@ -1028,24 +1025,16 @@ def write_section(
     feedback_block = (
         f"\nREVISION FEEDBACK — fix these and integrate the cited evidence inline:\n{feedback}\n" if feedback else ""
     )
-    # 2026-05-30 (Opus 4.8 + max effort): 21000 → 96000. CAPEL (SECTION_BUDGET_CEILING
-    # = 30000) remains the OPERATIVE per-section prose cap; max_tokens is raised to
-    # 96000 so adaptive thinking tokens and the visible output share the single
-    # max_tokens ceiling without truncating the chapter. The extra headroom is
-    # consumed by thinking, not by prose growth — the 30k CAPEL ceiling still limits
-    # actual prose length. The 0.7× validator pass-line (21000) is easily reachable
-    # within 96000. The ZH length uplift still lands via the leaf-aware CAPEL target,
-    # not via this headroom.
-    raw = llm.call(
-        "writer",
-        user,
-        system=sys,
-        max_tokens=96000,
-        think=True,
-        effort=config.effort_for("writer"),
-        note=f"writer.sec.{sid}",
-        user_suffix=feedback_block,
-    )
+    # 2026-05-31 (round 4): revert 96000 -> 21000, drop think/effort. dev8 proved
+    # effort=high/max made the writer over-generate — sections ran to 56-96k tokens
+    # (vs ~8.5k baseline) and hit the ceiling, for NO leaderboard-score gain. This is
+    # the proven pre-#86 prose-only call. The 21000 ceiling == the 0.7x validator
+    # pass-line for the SECTION_BUDGET_CEILING=30000 CAPEL cap, so a full-length
+    # section still fits. Total-article length parity with Qianfan (~80k EN words /
+    # ~110k ZH chars) comes from BREADTH — more chapters (architect TOC) + the
+    # per-language CAPEL target — NOT from inflating this single call (which would
+    # re-introduce the streaming-timeout/truncation risk).
+    raw = llm.call("writer", user, system=sys, max_tokens=21000, note=f"writer.sec.{sid}", user_suffix=feedback_block)
     if capel_active:
         text, stats = strip_capel_markers(raw)
     else:
