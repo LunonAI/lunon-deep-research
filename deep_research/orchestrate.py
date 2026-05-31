@@ -427,13 +427,13 @@ def from_plan(ctx: dict, query: str, language: str, task_id: int | None = None) 
     # empty-section collapse, heading-tree renumber. NO LLM call. Closes the
     # bottom-10 cross-cutting judge complaints (inconsistent numbering, stage
     # directions, methodology meta-commentary leak).
-    # P3b-opt2 (2026-05-28): Qianfan-verified flatten. list-all renders fully
-    # flat `##` (q91 has H3=H4=0); other archetypes cap at H3 (Qianfan's
-    # universal h4=0). Deterministic safety-net for when the writer ignores
-    # the flat-structure directive.
-    _arch_name = (s.archetype or {}).get("archetype", "") if isinstance(s.archetype, dict) else ""
-    _flat_depth = 2 if _arch_name == "list-all" else 3
-    nfo = _phase("numbering_fix", numbering_fix.run, s.article, flatten_max_depth=_flat_depth)
+    # Flatten cap = H3 for ALL archetypes (Qianfan's universal h4=0). round 5
+    # T2-PR4: list-all changed 2→3. The old `2` was for the FLAT list-all shape
+    # (entities as top sections, no nesting); now list-all GROUPS entities into
+    # ~9 chapters and NESTS them as subsections/seeds, which render at H2/H3
+    # after Wave-B promotion (Qianfan id=23 has 102 H3). A cap of 2 would
+    # collapse that nested enumeration back to flat H2, defeating the fix.
+    nfo = _phase("numbering_fix", numbering_fix.run, s.article, flatten_max_depth=3)
     s.article = nfo.article
     s.numbering_fix_stats = {
         "strips": nfo.stage_directions_removed,

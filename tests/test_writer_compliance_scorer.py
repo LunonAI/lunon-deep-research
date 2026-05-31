@@ -556,24 +556,26 @@ def test_insight_distribution_per_archetype_target_applied():
 
 
 def test_outline_shape_flags_out_of_bounds_h2_for_list_all():
-    """Wave 2 §1.2: list-all expects 30-80 H2. A 10-H2 article (typical
-    pre-Wave-2 hierarchical output) must be flagged out-of-bounds."""
-    article = "# T\n\n" + "\n\n".join(f"## {i + 1} Foo" for i in range(10)) + "\n"
-    scores = _score_outline_shape(article, "list-all")
-    assert scores["rendered_h2"] == 10
-    assert scores["h2_in_bounds"] is False  # 10 < 30
+    """round 5 T2-PR4: list-all now expects 8-11 top sections (grouped). An
+    OVER-PROMOTED 30-section article (the id=91 bug) is flagged out-of-bounds;
+    a 9-section article is in bounds."""
+    over = "# T\n\n" + "\n\n".join(f"## {i + 1} Foo" for i in range(30)) + "\n"
+    s_over = _score_outline_shape(over, "list-all")
+    assert s_over["rendered_h2"] == 30
+    assert s_over["h2_in_bounds"] is False  # 30 > 11 (over-promotion)
+
+    ok = "# T\n\n" + "\n\n".join(f"## {i + 1} Foo" for i in range(9)) + "\n"
+    assert _score_outline_shape(ok, "list-all")["h2_in_bounds"] is True
 
 
-def test_outline_shape_flags_h4_in_flat_archetype():
-    """Flat archetypes (list-all / compare) have `seed_max=0` in their
-    preset → no H4 leaves expected. Articles with H4 trip the
-    `h4_violates_flat_constraint` flag."""
-    article = (
-        "# T\n\n" + "\n\n".join(f"## {i + 1} Foo" for i in range(30)) + "\n\n#### 1.1.1 Leaf (forbidden for list-all)\n"
-    )
+def test_outline_shape_list_all_allows_h4_after_group_and_nest():
+    """round 5 T2-PR4: list-all is no longer flat (seed_max=5) — it NESTS
+    entities, so H4 leaves are allowed and do NOT trip the flat-constraint
+    flag (which only fires when an archetype's preset has seed_max=0)."""
+    article = "# T\n\n" + "\n\n".join(f"## {i + 1} Foo" for i in range(9)) + "\n\n#### 1.1.1 Leaf\n"
     scores = _score_outline_shape(article, "list-all")
     assert scores["rendered_h4plus"] == 1
-    assert scores["h4_violates_flat_constraint"] is True
+    assert scores["h4_violates_flat_constraint"] is False
 
 
 def test_heading_numbering_clean_on_well_formed_article():

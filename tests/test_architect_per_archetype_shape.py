@@ -8,9 +8,11 @@ corpus profiling (10 reference docs, 2026-05-26) showed:
   - predict/trend (id=38): 58 H2, 115 H3, 0 H4+
   - ZERO of the 10 Qianfan docs use H4+ headings
 
-Wave 2 §1.2 dispatches outline shape per archetype:
-  - list-all: 30-80 top, 0-2 subs, 0 seeds (flat)
-  - compare: 15-30 top, 2-5 subs, 0 seeds (moderate, no H4)
+Outline shape per archetype (round 5 T2-PR4: list-all/compare corrected from
+flat over-promotion to grouped-and-nested, matching Qianfan's steady ~9
+chapters across ALL archetypes):
+  - list-all: 8-11 top, 3-9 subs, 0-5 seeds (entities NESTED, not 1 chapter each)
+  - compare: 8-11 top, 3-8 subs, 0-4 seeds
   - explain-mechanism: 8-14 top, 4-8 subs, 2-4 seeds (deep, H4 OK)
   - predict/trend/recommend: 8-12 top, 3-6 subs, 2-4 seeds (default)
 
@@ -46,14 +48,15 @@ def test_bounds_for_archetype_dispatches_correctly():
     """Each archetype with a preset must return its dispatched bounds.
     Unknown archetypes fall back to the DEFAULT shape."""
     list_all = architect._bounds_for_archetype("list-all")
-    assert list_all["top_min"] == 30
-    assert list_all["top_max"] == 80
-    assert list_all["sub_max"] == 2
-    assert list_all["seed_max"] == 0  # no H4 for list-all
+    assert list_all["top_min"] == 8  # round 5 T2-PR4: grouped into ~9 chapters
+    assert list_all["top_max"] == 11
+    assert list_all["sub_max"] == 9  # entities nested as subsections
+    assert list_all["seed_max"] == 5  # leaves OPTIONAL (seed_min=0) — id=23 nests at H3
 
     compare = architect._bounds_for_archetype("compare")
-    assert compare["top_min"] == 15
-    assert compare["seed_max"] == 0  # no H4 for compare
+    assert compare["top_min"] == 8
+    assert compare["top_max"] == 11
+    assert compare["seed_max"] == 4
 
     explain = architect._bounds_for_archetype("explain-mechanism")
     assert explain["top_min"] == 8
@@ -70,28 +73,45 @@ def test_bounds_for_archetype_dispatches_correctly():
 
 
 def test_normalize_uses_list_all_bounds_for_list_all_archetype():
-    """A list-all plan with the OLD default shape (8 top × 3 subs × 2 seeds)
-    must now FAIL the audit because list-all wants 30+ flat top sections
-    with no H4. Verifies the per-archetype dispatch is wired through."""
-    plan = {
+    """round 5 T2-PR4: an OVER-PROMOTED list-all plan (one chapter per entity →
+    48 top sections, the id=91 bug) must FAIL the audit on the chapter band so
+    the retry forces group-and-nest. A nested ~9-chapter plan is VALID."""
+    over = {
         "report_toc": [
             {
                 "id": f"S{i + 1}",
                 "title": "x",
-                "subsections": [{"id": f"S{i + 1}.1", "title": "x", "depth_seeds": ["a", "b"]}],
+                "subsections": [{"id": f"S{i + 1}.{j + 1}", "title": "x", "depth_seeds": ["a", "b"]} for j in range(3)],
                 "depth_target": "broad",
             }
-            for i in range(9)  # 9 top sections, valid for DEFAULT but not list-all
+            for i in range(48)  # 48 top sections — the over-promotion bug
         ],
         "queries": [{"id": f"Q{i + 1}", "text": "q", "type": "factual"} for i in range(architect._QUERIES_MIN)],
         "entity_matrix": {"entities": ["e1", "e2", "e3", "e4", "e5"], "dimensions": ["d1", "d2", "d3", "d4"]},
     }
-    architect._normalize(plan, archetype="list-all")
-    audit = plan["_outline_audit"]
-    # Top-section shortfall: 9 < 30
-    assert any("top_sections=9<30" in s for s in audit["shortfalls"]), audit["shortfalls"]
-    # Seed shortfall: each subsection has 2 seeds, but list-all expects 0
-    assert any("seeds=2>0" in s for s in audit["shortfalls"]), audit["shortfalls"]
+    architect._normalize(over, archetype="list-all")
+    assert any("top_sections=48>11" in s for s in over["_outline_audit"]["shortfalls"]), over["_outline_audit"][
+        "shortfalls"
+    ]
+
+    # A grouped ~9-chapter plan (entities nested as subsections) is VALID.
+    nested = {
+        "report_toc": [
+            {
+                "id": f"S{i + 1}",
+                "title": "x",
+                "subsections": [{"id": f"S{i + 1}.{j + 1}", "title": "x", "depth_seeds": ["a", "b"]} for j in range(4)],
+                "depth_target": "broad",
+            }
+            for i in range(9)  # 9 chapters, 4 subs each, 2 seeds — all in band
+        ],
+        "queries": [{"id": f"Q{i + 1}", "text": "q", "type": "factual"} for i in range(architect._QUERIES_MIN)],
+        "entity_matrix": {"entities": ["e1", "e2", "e3", "e4", "e5"], "dimensions": ["d1", "d2", "d3", "d4"]},
+    }
+    architect._normalize(nested, archetype="list-all")
+    assert not any("top_sections" in s for s in nested["_outline_audit"]["shortfalls"]), nested["_outline_audit"][
+        "shortfalls"
+    ]
 
 
 def test_normalize_uses_explain_mechanism_deeper_bounds():
@@ -118,31 +138,82 @@ def test_normalize_uses_explain_mechanism_deeper_bounds():
     assert any("subs=3<4" in s for s in audit["shortfalls"]), audit["shortfalls"]
 
 
-def test_normalize_flat_archetype_accepts_zero_depth_seeds():
-    """list-all subsections with `depth_seeds=[]` must NOT trigger the
-    `subsections_missing_seeds` counter (which the default-shape path
-    fires when seeds is empty). Flat archetypes treat empty seeds as
-    correct, not as a shortfall."""
+def test_normalize_list_all_seed_min_zero_allows_empty_seeds():
+    """round 5 T2-PR4: list-all now NESTS (sub 3-9, seed 0-5). seed_min=0 means a
+    subsection with EMPTY depth_seeds is still valid (no seed shortfall) — the
+    architect may nest entities at H2 (id=91 style) or add H3 seeds (id=23
+    style). The over-promoted flat shape is gone."""
     plan = {
         "report_toc": [
             {
                 "id": f"S{i + 1}",
                 "title": "x",
-                "subsections": [{"id": f"S{i + 1}.1", "title": "x", "depth_seeds": []}],
+                "subsections": [{"id": f"S{i + 1}.{j + 1}", "title": "x", "depth_seeds": []} for j in range(3)],
                 "depth_target": "broad",
             }
-            for i in range(architect._ARCHETYPE_OUTLINE_SHAPE["list-all"]["top_min"])
+            for i in range(9)  # 9 chapters, 3 subs each — in band
         ],
         "queries": [{"id": f"Q{i + 1}", "text": "q", "type": "factual"} for i in range(architect._QUERIES_MIN)],
         "entity_matrix": {"entities": ["e1", "e2", "e3", "e4", "e5"], "dimensions": ["d1", "d2", "d3", "d4"]},
     }
     architect._normalize(plan, archetype="list-all")
+    sf = plan["_outline_audit"]["shortfalls"]
+    # seed_min=0 → empty seeds are NOT a shortfall; structure is in band.
+    assert all("seeds" not in s for s in sf), sf
+    assert not any(("top_sections" in s or ".subs=" in s) for s in sf), sf
+
+
+def test_entity_nesting_coverage_helper():
+    """round 5 T2-PR4 no-harm guard: every entity nested as a subsection title
+    or depth_seed counts as covered; a dropped entity is reported missing."""
+    toc = [
+        {
+            "title": "Bronze Saints",
+            "subsections": [
+                {"title": "Pegasus Seiya", "depth_seeds": []},
+                {"title": "Dragon Shiryu", "depth_seeds": ["signature technique"]},
+            ],
+        },
+        {
+            "title": "Gold Saints",
+            "subsections": [{"title": "Zodiac roster", "depth_seeds": ["Aries Mu", "Taurus Aldebaran"]}],
+        },
+    ]
+    entities = ["Pegasus Seiya", "Dragon Shiryu", "Aries Mu", "Taurus Aldebaran"]
+    covered, missing = architect._entity_nesting_coverage(toc, entities)
+    assert covered == 4 and missing == []
+    covered2, missing2 = architect._entity_nesting_coverage(toc, [*entities, "Phoenix Ikki"])
+    assert "Phoenix Ikki" in missing2 and covered2 == 4
+
+
+def test_entity_nesting_coverage_word_boundary_no_false_positive():
+    """A short entity must not falsely match inside a larger word (word-boundary
+    match), else the no-harm guard would hide a dropped entity."""
+    toc = [{"title": "Ionic compounds across regions", "subsections": []}]
+    _, missing = architect._entity_nesting_coverage(toc, ["Io"])
+    assert missing == ["Io"]  # NOT matched inside "Ionic"/"regions"
+
+
+def test_normalize_surfaces_entity_nesting_coverage():
+    """_normalize records advisory entity-nesting coverage for list-all so the
+    dev-run gate can confirm grouping did not drop entities."""
+    plan = {
+        "report_toc": [
+            {
+                "id": "S1",
+                "title": "Group A",
+                "subsections": [{"id": "S1.1", "title": "alpha", "depth_seeds": ["beta"]}],
+                "depth_target": "broad",
+            }
+        ]
+        * 8,
+        "queries": [{"id": f"Q{i + 1}", "text": "q", "type": "factual"} for i in range(architect._QUERIES_MIN)],
+        "entity_matrix": {"entities": ["alpha", "beta", "gamma"], "dimensions": ["d1", "d2", "d3", "d4"]},
+    }
+    architect._normalize(plan, archetype="list-all")
     audit = plan["_outline_audit"]
-    # No shortfalls for seeds-empty under list-all's seed_max=0.
-    assert all("seeds" not in s for s in audit["shortfalls"]), audit["shortfalls"]
-    # And `subsections_missing_seeds` is only incremented for archetypes
-    # where seeds ARE required; list-all skips it.
-    assert audit["subsections_missing_seeds"] == 0
+    assert "entity_nesting_coverage" in audit and "entities_unnested" in audit
+    assert "gamma" in audit["entities_unnested"]  # not nested anywhere
 
 
 def test_normalize_audit_records_archetype_and_bounds():
@@ -166,15 +237,15 @@ def test_format_retry_feedback_interpolates_per_archetype_bounds():
     sections' (default bounds). PR #23's source-of-truth invariant
     must be archetype-aware."""
     audit = {
-        "n_top_sections": 5,
+        "n_top_sections": 48,
         "n_subsections_total": 0,
         "n_seeds_total": 0,
-        "shortfalls": ["top_sections=5<30"],
+        "shortfalls": ["top_sections=48>11"],
     }
     feedback = architect._format_retry_feedback(audit, archetype="list-all")
-    assert "30-80 top sections" in feedback, feedback
-    # And the flat-archetype caller gets the "no H4 leaves" rider.
-    assert "FLAT" in feedback or "ZERO depth_seeds" in feedback
+    assert "8-11 top sections" in feedback, feedback
+    # Over-count enumerative fix advice: GROUP-AND-NEST, never drop/merge.
+    assert "GROUP" in feedback and "NEVER drop" in feedback, feedback
 
 
 def test_format_retry_feedback_falls_back_to_default_when_archetype_none():
@@ -201,16 +272,15 @@ def test_writer_system_interpolates_per_archetype_subsection_bounds():
     from deep_research.pipeline.architect import _bounds_for_archetype
     from deep_research.writing_rules import writer_system
 
-    # list-all preset: 0-2 subsections, seed_max=0 (flat, no H4)
+    # round 5 T2-PR4: list-all preset is now 3-9 subsections, seed_max=5
+    # (grouped-and-nested → HIERARCHICAL, H4 leaves allowed).
     list_all_bounds = _bounds_for_archetype("list-all")
     sys_la = writer_system("list-all", "default", "en", ["A", "B"], task_id=None, outline_shape=list_all_bounds)
-    # System prompt must mention list-all's 0-2 sub range (not the
-    # hardcoded "3-6 subsections" pre-fix).
     assert f"{list_all_bounds['sub_min']}-{list_all_bounds['sub_max']} subsections" in sys_la
-    # And FLAT outline language must be present for seed_max==0 archetypes.
-    assert "FLAT" in sys_la or "no H4" in sys_la.lower()
-    # The system prompt must NOT carry the pre-fix hardcoded "3-6
-    # subsections" string for flat archetypes (where bounds are 0-2).
+    # seed_max>0 → the STRUCTURAL CAPS block is the hierarchical one (H4 leaves),
+    # NOT the flat "this is a FLAT outline" block.
+    assert "#### N.N.N" in sys_la or "H4 leaf" in sys_la
+    assert "this is a FLAT outline" not in sys_la
     assert "3-6 subsections per major section" not in sys_la
 
     # explain-mechanism preset: 4-8 subsections, seed_max=4 (deep, H4 OK)
@@ -266,12 +336,13 @@ def test_writer_section_threads_archetype_bounds_into_system_prompt(monkeypatch)
     )
     assert captured_sys, "write_section did not call llm.call with a system prompt"
     sys_prompt = captured_sys[0]
-    # The system prompt must carry the list-all per-archetype bounds
-    # (FLAT phrasing for seed_max=0 archetype).
-    assert "FLAT" in sys_prompt or "no H4" in sys_prompt.lower(), (
-        "write_section did not thread list-all's seed_max=0 outline_shape "
-        "to writer_system (system prompt missing FLAT/no-H4 wording)"
+    # round 5 T2-PR4: list-all is now hierarchical (seed_max=5) — the threaded
+    # outline_shape must produce the H4-leaf structural caps, not FLAT.
+    assert "#### N.N.N" in sys_prompt or "H4 leaf" in sys_prompt, (
+        "write_section did not thread list-all's nested outline_shape to "
+        "writer_system (system prompt missing hierarchical/H4-leaf wording)"
     )
+    assert "this is a FLAT outline" not in sys_prompt
 
 
 def test_build_injects_per_archetype_outline_block_into_user_prompt(monkeypatch):
@@ -312,8 +383,8 @@ def test_build_injects_per_archetype_outline_block_into_user_prompt(monkeypatch)
     user_prompt = captured_users[0]
     # Must include the OUTLINE SHAPE FOR THIS ARCHETYPE block.
     assert "OUTLINE SHAPE FOR THIS ARCHETYPE" in user_prompt
-    # And the bounds must be interpolated from the list-all preset
-    # (not the default).
-    assert "30-80 top-level sections" in user_prompt, user_prompt[:2000]
-    # The "FLAT" / "no H4" wording must be present for archetypes with seed_max=0.
-    assert "FLAT" in user_prompt or "ZERO depth_seeds" in user_prompt
+    # round 5 T2-PR4: bounds interpolated from the corrected list-all preset
+    # (8-11 chapters, nested), not the old 30-80 flat preset.
+    assert "8-11 top-level sections" in user_prompt, user_prompt[:2000]
+    # seed_max>0 → depth_seeds are expected (H4 leaves), not "ZERO".
+    assert "depth_seeds per subsection" in user_prompt and "ZERO depth_seeds" not in user_prompt

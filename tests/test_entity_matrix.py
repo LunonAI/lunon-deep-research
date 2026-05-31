@@ -93,26 +93,25 @@ def test_normalize_records_entity_overcount_shortfall():
 def test_normalize_records_no_shortfalls_when_matrix_meets_bounds():
     """5-20 entities, 4-8 dimensions → no entity_matrix shortfalls.
 
-    Wave 2 §1.2: `list-all` archetype now requires a FLAT outline
-    (30-80 top sections, 0-2 subsections, 0 depth_seeds) per the
-    Qianfan corpus calibration. The fixture below is built to that
-    flat shape so the only audit dimension under test is the
-    entity_matrix one."""
+    round 5 T2-PR4: `list-all` now uses a GROUPED-AND-NESTED outline (8-11
+    chapters, 3-9 subsections, 0-5 seeds) matching Qianfan's steady ~9 chapters.
+    The fixture is built to that shape so the only audit dimension under test is
+    the entity_matrix one."""
     plan = _plan_with_em(
         ["e1", "e2", "e3", "e4", "e5", "e6"],
         ["d1", "d2", "d3", "d4", "d5"],
     )
-    # Wave 2 §1.2: flat list-all outline = top_min top sections, no
-    # subsections, no depth_seeds. Matches Qianfan id=91 (78 H2 / 0 H3).
-    list_all_top_min = architect._ARCHETYPE_OUTLINE_SHAPE["list-all"]["top_min"]
+    # Nested list-all outline = top_min chapters, each with sub_min subsections
+    # (entities nested as subsections). Matches Qianfan id=91 (11 H1 / 78 H2).
+    la = architect._ARCHETYPE_OUTLINE_SHAPE["list-all"]
     plan["report_toc"] = [
         {
             "id": f"S{i + 1}",
             "title": "x",
-            "subsections": [],
+            "subsections": [{"id": f"S{i + 1}.{j + 1}", "title": "x", "depth_seeds": []} for j in range(la["sub_min"])],
             "depth_target": "broad",
         }
-        for i in range(list_all_top_min)
+        for i in range(la["top_min"])
     ]
     # PR #25 merge follow-up (2026-05-25): satisfy PR #22's _QUERIES_MIN=48
     # query-count audit, which otherwise fires `queries=0<48` on `_plan_with_em`'s

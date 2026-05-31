@@ -282,6 +282,15 @@ HARD RULES:
   enumerated items at uniform depth). Build report_toc so there is a body
   subsection per entity (or per entity-group with each entity as a depth_seed
   cluster), enough that every entity is individually developed.
+- L3b GROUP-AND-NEST (enumerative tasks with >12 entities): GROUP the entities
+  into 8-11 thematic chapters (by family / class / category / tier / phase) and
+  NEST each entity as a subsection or depth_seed under its group — NEVER one
+  top-level chapter per entity (that produces 25-80 chapters vs the #1 corpus's
+  STEADY ~9). Grouping is LOSSLESS: every entity still gets its own developed
+  subsection/leaf (L3); grouping is never a way to drop, merge, or sample the
+  list. The chapter is the THEME; the entity is the leaf. (Saint-Seiya example:
+  one chapter "Bronze Saints" with each saint a subsection — not one chapter
+  per saint.)
 - framing_chapter REQUIRED for all archetypes EXCEPT single-axis trend
   tasks. The framing chapter §1 publishes (a) scope/boundary, (b) an
   evaluation rubric (4-6 items with weights, applicable for compare/
@@ -437,34 +446,42 @@ def _query_type_mins_for_archetype(archetype: str | None) -> dict[str, float]:
 #   - id=20 (explain-mechanism, HTTP): 55 H2 / 138 H3 — deep
 #   - id=89 (explain-mechanism, biology): 53 H2 / 221 H3 — deep
 #   - id=38 (predict/trend, jewelry trends): 58 H2 / 115 H3 — medium
-# ZERO of the 10 Qianfan docs use H4+ headings. The pre-Wave-2 outline
-# spec produced 8-12 H2 × 3-6 H3 × 2-4 H4 leaves = 48-288 H4 leaves;
-# this misaligns with Qianfan's no-H4 convention. Wave 2 keeps H4 for
-# explain-mechanism / predict (where deep hierarchy still helps the
-# judge see depth) but drops H4 for list-all / compare (where Qianfan's
-# flat shape is the high-scoring template).
+# ZERO of the 10 Qianfan docs use H4+ headings.
+#
+# round 5 T2-PR4 (2026-05-31): CORRECTION. The Wave-2 list-all/compare presets
+# (30-80 / 15-30 FLAT top sections) were built on a misread of the corpus — the
+# "78 H2 (id=91)" was read as "78 flat TOP sections," so the architect emitted
+# one chapter per entity and dev4 over-promoted to 25 (id=23) / 48 (id=91)
+# chapters. A fresh read of the actual #1 articles shows Qianfan holds a STEADY
+# ~8-9 NUMBERED CHAPTERS across ALL archetypes (id=91: 11 H1 / 78 H2 / 0 H3;
+# id=23: 10 H1 / 74 H2 / 102 H3) — the 78 H2 are SUBSECTIONS nested under ~9 H1
+# chapters, never 78 top-level chapters. So list-all/compare now match the rest:
+# 8-11 thematic chapters with the enumeration NESTED as subsections (sub) and
+# leaves (seed). Wave-B promotion (numbering_fix) renders chapters at H1, subs
+# at H2, seeds at H3 — landing the Qianfan profile with zero H4. This also
+# aligns the preset with the already-correct system-prompt rules (8-12 chapters,
+# L3 "expand EVERY entity as its own subsection"), which the old preset
+# contradicted. seed_min=0 keeps leaves OPTIONAL (id=91 nests at H2, id=23 at
+# H3 — the architect picks per task).
 _ARCHETYPE_OUTLINE_SHAPE: dict[str, dict[str, int]] = {
-    # list-all: flat enumeration. 30-80 top sections (one per entity in
-    # the matrix is the common pattern), minimal subsections (0-2 for
-    # cross-cutting framing), no H4 leaves.
+    # list-all: exhaustive enumeration GROUPED into ~9 thematic chapters with
+    # every entity nested as a subsection / depth_seed (lossless — see L3).
     "list-all": {
-        "top_min": 30,
-        "top_max": 80,
-        "sub_min": 0,
-        "sub_max": 2,
+        "top_min": 8,
+        "top_max": 11,
+        "sub_min": 3,
+        "sub_max": 9,
         "seed_min": 0,
-        "seed_max": 0,
+        "seed_max": 5,
     },
-    # compare: comparison-table archetype. Moderate top-section count
-    # (15-30) for the entities + framing sections, 2-5 subsections per
-    # top (cross-cutting dimensions), no H4.
+    # compare: same chapter band; entities + cross-cutting dimensions nested.
     "compare": {
-        "top_min": 15,
-        "top_max": 30,
-        "sub_min": 2,
-        "sub_max": 5,
+        "top_min": 8,
+        "top_max": 11,
+        "sub_min": 3,
+        "sub_max": 8,
         "seed_min": 0,
-        "seed_max": 0,
+        "seed_max": 4,
     },
     # explain-mechanism: deepest archetype. Qianfan refs show 50-70 H2
     # with 130-220 H3 leaves. Our pre-Wave-2 8-12 × 4-8 H3 produces
@@ -573,6 +590,16 @@ def _format_retry_feedback(audit: dict, archetype: str | None = None) -> str:
     # outline but leave the query-type distribution untouched.
     q_mins = _query_type_mins_for_archetype(archetype)
     q_floor_clause = "; ".join(f"{qt}≥{int(round(pct * 100))}%" for qt, pct in q_mins.items())
+    # round 5 T2-PR4: for enumerative archetypes an over-count means "one chapter
+    # per entity" — the fix is GROUP-AND-NEST, never merge/drop entities (that
+    # would regress Comprehensiveness). Plain "merge near-duplicates" is wrong here.
+    too_many_clause = (
+        "if you have too many top sections because you made one per enumerated "
+        "entity, GROUP them into 8-11 thematic chapters and NEST each entity as a "
+        "subsection/depth_seed — NEVER drop, merge, or sample the entity list (L3b)"
+        if archetype in ("list-all", "compare")
+        else "if you have too many, merge near-duplicates"
+    )
     lines.extend(
         [
             "",
@@ -585,7 +612,7 @@ def _format_retry_feedback(audit: dict, archetype: str | None = None) -> str:
             "directly drives output depth and Comprehensiveness/Insight "
             f"scores. If you cannot find enough material for {b['top_min']} "
             "top sections on this prompt, break broader sections into "
-            "narrower ones; if you have too many, merge near-duplicates. "
+            f"narrower ones; {too_many_clause}. "
             "Same logic for subsections and seeds.",
         ]
     )
@@ -796,6 +823,33 @@ def build(
         pass
 
     return plan
+
+
+def _entity_nesting_coverage(toc: list, entities: list) -> tuple[int, list[str]]:
+    """How many entity_matrix entities appear (verbatim, word-boundary) as a
+    section/subsection title or depth_seed across the TOC.
+
+    The no-harm verification for the round-5 T2-PR4 group-and-nest band: with
+    list-all/compare capped at ~9 chapters, the architect must NEST every entity
+    (as a subsection/seed) rather than DROP some to fit — dropping would regress
+    the Comprehensiveness we win. Returns (covered_count, missing_entities).
+    ADVISORY (surfaced for the dev-run gate); the `top_sections>top_max` band
+    shortfall is the hard retry trigger for over-promotion."""
+    parts: list[str] = []
+    for sec in toc or []:
+        parts.append(str(sec.get("title", "")))
+        for sub in sec.get("subsections", []) or []:
+            parts.append(str(sub.get("title", "")))
+            parts.extend(str(x) for x in (sub.get("depth_seeds") or []))
+    blob = " ".join(parts).lower()
+    missing: list[str] = []
+    for e in entities or []:
+        es = str(e).strip().lower()
+        if not es:
+            continue
+        if not re.search(r"\b" + re.escape(es) + r"\b", blob):
+            missing.append(str(e))
+    return (len(entities or []) - len(missing)), missing
 
 
 def _band_distance(n: int, lo: int, hi: int) -> int:
@@ -1340,6 +1394,17 @@ def _normalize(plan: dict, *, archetype: str | None = None) -> None:
                 audit["shortfalls"].append(f"entity_matrix.dimensions={len(dims)}<{_ENTITY_MATRIX_DIMENSIONS_MIN}")
             if len(dims) > _ENTITY_MATRIX_DIMENSIONS_MAX:
                 audit["shortfalls"].append(f"entity_matrix.dimensions={len(dims)}>{_ENTITY_MATRIX_DIMENSIONS_MAX}")
+
+        # round 5 T2-PR4: entity-nesting coverage (ADVISORY no-harm check for the
+        # group-and-nest band). With list-all/compare now capped at ~9 chapters,
+        # verify the architect NESTED every entity (subsection title or seed)
+        # rather than DROPPING some to fit — protects the Comprehensiveness we
+        # win. The top_sections>top_max band shortfall is the hard retry trigger
+        # for over-promotion; this stays advisory (verified by the dev-run gate)
+        # to avoid fuzzy-match retry churn.
+        covered, unnested = _entity_nesting_coverage(toc, ents)
+        audit["entity_nesting_coverage"] = covered
+        audit["entities_unnested"] = unnested
 
     # P3-W2 (2026-05-27): framing_chapter audit. For required archetypes,
     # check that the §1 contract artifact exists with the 4 required
