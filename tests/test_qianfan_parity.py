@@ -57,8 +57,15 @@ def test_length_target_multiplier_in_qianfan_aligned_range():
             f"~110k-char length; below 3 regresses to the pre-smoke gap, above 9 "
             f"risks filler the Insight judge penalises."
         )
-    # The legacy scalar fallback stays sane too (used for unknown languages).
+    # The legacy scalar IS the genuine fallback for uncalibrated languages
+    # (Greptile PR #87): pin both that it stays sane AND that _length_mult_for
+    # actually resolves an unknown language to it (not to the EN value), so the
+    # constant can't silently become orphaned again.
     assert 3.0 <= writing_rules._LENGTH_TARGET_MULT <= 9.0
+    assert writing_rules._length_mult_for("xx") == writing_rules._LENGTH_TARGET_MULT
+    # en/zh still resolve to their calibrated table values (not the fallback).
+    assert writing_rules._length_mult_for("en") == writing_rules._LENGTH_TARGET_MULT_BY_LANG["en"]
+    assert writing_rules._length_mult_for("zh") == writing_rules._LENGTH_TARGET_MULT_BY_LANG["zh"]
 
 
 def test_cleaning_resistant_rule_makes_footnotes_mandatory():

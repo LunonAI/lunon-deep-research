@@ -965,7 +965,9 @@ _LENGTH_TARGET_MULT = 4.0
 # lift the soft target toward Qianfan per language. Env-overridable
 # (DR_LENGTH_MULT_EN / DR_LENGTH_MULT_ZH) so a dev run can re-calibrate or BACK
 # OFF the dial without a redeploy if the longer length is judged to hurt
-# (lost-in-the-middle / verbosity). Default unknown languages to the EN value.
+# (lost-in-the-middle / verbosity). Languages NOT in this table fall back to the
+# legacy `_LENGTH_TARGET_MULT` base inside `_length_mult_for` (DRB is en/zh only,
+# so the fallback never fires on a real run).
 _LENGTH_TARGET_MULT_BY_LANG = {
     # EN: ~9.5k catalog median times this lands a ~62k word soft target; breadth
     # (architect chapters) + leaf floors carry it toward Qianfan's ~80k words.
@@ -978,7 +980,12 @@ _LENGTH_TARGET_MULT_BY_LANG = {
 
 def _length_mult_for(language: str) -> float:
     """Per-language length multiplier, env-overridable. Precedence:
-    DR_LENGTH_MULT_<LANG> -> _LENGTH_TARGET_MULT_BY_LANG[lang] -> EN default."""
+    DR_LENGTH_MULT_<LANG> -> _LENGTH_TARGET_MULT_BY_LANG[lang] ->
+    _LENGTH_TARGET_MULT (the legacy 4.0 base, used for any language we have NOT
+    calibrated; the conservative default since an unknown language may be CJK- or
+    Latin-like and over-shooting risks the verbosity penalty). DRB is en/zh only,
+    both in the table, so the fallback never fires on a real run — but it keeps
+    `_LENGTH_TARGET_MULT` a live, meaningful constant (Greptile PR #87)."""
     lang = (language or "en").lower()[:2]
     env = os.environ.get(f"DR_LENGTH_MULT_{lang.upper()}")
     if env:
@@ -986,7 +993,7 @@ def _length_mult_for(language: str) -> float:
             return float(env)
         except ValueError:
             pass
-    return _LENGTH_TARGET_MULT_BY_LANG.get(lang, _LENGTH_TARGET_MULT_BY_LANG["en"])
+    return _LENGTH_TARGET_MULT_BY_LANG.get(lang, _LENGTH_TARGET_MULT)
 
 
 def length_ceiling(domain: str, language: str = "en") -> int:
@@ -997,11 +1004,12 @@ def length_ceiling(domain: str, language: str = "en") -> int:
 
     `language` defaults to "en" for back-compat with any positional-domain
     caller; pass the task language so ZH gets its higher multiplier. The
-    resolved multiplier comes from `_length_mult_for(language)`, which layers
-    the per-language `_LENGTH_TARGET_MULT_BY_LANG` table over the legacy
-    `_LENGTH_TARGET_MULT` base; callers that want the historical W9 baseline
-    should divide by `_length_mult_for(language)` (referencing it by name so a
-    future calibration bump can't silently invalidate this advice)."""
+    resolved multiplier comes from `_length_mult_for(language)`, which prefers
+    the per-language `_LENGTH_TARGET_MULT_BY_LANG` table and falls back to the
+    legacy `_LENGTH_TARGET_MULT` base only for uncalibrated languages; callers
+    that want the historical W9 baseline should divide by
+    `_length_mult_for(language)` (referencing it by name so a future calibration
+    bump can't silently invalidate this advice)."""
     key = _DOMAIN_KEY.get(domain, "_overall")
     med = _en_domain_medians()
     raw = med.get(key, med["_overall"])

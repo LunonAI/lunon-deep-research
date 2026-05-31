@@ -385,7 +385,7 @@ def _para_sentence_ends(text: str) -> list[int]:
     return sorted(pts)
 
 
-def _resegment_paragraph(para: str, ceiling: int) -> tuple[str, int]:
+def _resegment_paragraph(para: str, ceiling: int, language: str) -> tuple[str, int]:
     """Split one overlong prose paragraph at its EXISTING sentence boundaries
     into chunks each ≈`ceiling` units. Never rewrites a sentence (a single
     sentence longer than the ceiling becomes its own chunk), so there is zero
@@ -402,7 +402,9 @@ def _resegment_paragraph(para: str, ceiling: int) -> tuple[str, int]:
     tail = para[cur_start:].strip()
     if tail:
         if chunks and _approx_units(tail) < _PARA_MIN_TAIL:
-            chunks[-1] = f"{chunks[-1]} {tail}"
+            # CJK prose has no inter-sentence space; merge with "" for zh (Greptile PR #87).
+            sep = "" if (language or "").lower().startswith("zh") else " "
+            chunks[-1] = f"{chunks[-1]}{sep}{tail}"
         else:
             chunks.append(tail)
     if len(chunks) <= 1:
@@ -410,7 +412,7 @@ def _resegment_paragraph(para: str, ceiling: int) -> tuple[str, int]:
     return "\n\n".join(chunks), len(chunks) - 1
 
 
-def _segment_free(free: str, ceiling: int) -> tuple[str, int, int]:
+def _segment_free(free: str, ceiling: int, language: str) -> tuple[str, int, int]:
     """Paragraph-segment a protected-free run of body text. Splits on blank
     lines (keeping the separators), re-segments each over-ceiling prose
     paragraph. Returns (text, n_breaks_inserted, n_paragraphs_split)."""
@@ -425,7 +427,7 @@ def _segment_free(free: str, ceiling: int) -> tuple[str, int, int]:
             continue
         if _approx_units(para) <= ceiling:
             continue
-        new_para, nb = _resegment_paragraph(para, ceiling)
+        new_para, nb = _resegment_paragraph(para, ceiling, language)
         if nb:
             parts[i] = new_para
             n_breaks += nb
@@ -452,14 +454,14 @@ def clamp_paragraphs(article: str, *, language: str = "en", max_units: int | Non
     pos = 0
     for a, b in spans:
         if a > pos:
-            new_free, nb, ns = _segment_free(article[pos:a], ceiling)
+            new_free, nb, ns = _segment_free(article[pos:a], ceiling, language)
             out.append(new_free)
             n_breaks += nb
             n_split += ns
         out.append(article[a:b])
         pos = max(pos, b)
     if pos < len(article):
-        new_free, nb, ns = _segment_free(article[pos:], ceiling)
+        new_free, nb, ns = _segment_free(article[pos:], ceiling, language)
         out.append(new_free)
         n_breaks += nb
         n_split += ns
