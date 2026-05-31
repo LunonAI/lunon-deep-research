@@ -39,10 +39,20 @@ _WORDS_PER_TOKEN = 0.75
 # ratio (0.582 vs 0.640) because Qianfan's ZH reports are 1.9-3.5× longer —
 # the pairwise judge scores the shared reference relatively weaker next to a
 # longer article. The lever is to lift Lunon's ZH length to Qianfan's profile
-# with GROUNDED depth (one developed leaf per planned depth_seed), so ceiling
-# 20000→30000 and writer max_tokens 14000→21000 in lockstep (30000×0.7=21000).
-# EN list-all (id91) is already LONGER than Qianfan and is gated out below.
-SECTION_BUDGET_CEILING = 30_000
+# with GROUNDED depth (one developed leaf per planned depth_seed).
+#
+# round 5 T1-PR3: ceiling 30000→18000. The OLD 30000 (≈22.5k words) BUDGETED a
+# single chapter to run away — id=89's §2.3 hit 18.5k words (50% of the body),
+# the "disorganized wall" the judge scored formatting 2.0. 18000 tokens
+# (≈13.5k words) caps a chapter at Qianfan's LARGEST observed chapter while
+# leaving the writer.sec max_tokens=21000 hard per-call cap unchanged (a
+# ceiling chapter's 0.7× pass-line is now 12600, comfortably inside the call).
+# Length-neutral for a Qianfan-shaped ~9-chapter article (each chapter targets
+# ~8-11k tokens, well under the ceiling); it only binds on a degenerate
+# under-chaptered / mega-section TOC. The post-assembly _clamp_runaway_blocks
+# safety net (orchestrate.py) is the deterministic backstop for an accumulation
+# the budget didn't prevent. EN list-all is gated out of the leaf floor below.
+SECTION_BUDGET_CEILING = 18_000
 
 # P3b-v5: target tokens per planned H3/H4 LEAF (~675 words ≈ a Qianfan
 # ~700-1000 CJK/leaf at _WORDS_PER_TOKEN). The per-section budget floors at
