@@ -53,12 +53,53 @@ def test_run_no_flatten_is_default_unchanged():
 
 
 def test_run_flatten_param_flattens_and_counts():
-    """run(article, flatten_max_depth=2) flattens + reports the count."""
-    out = numbering_fix_run(_NESTED, flatten_max_depth=2)
+    """run(article, flatten_max_depth=2) flattens + reports the count.
+
+    Pinned with promote_chapters=False so this isolates the flatten step (the
+    Wave B promotion is exercised by the dedicated _promote_chapters tests +
+    test_run_promotes_chapters_to_h1 below)."""
+    out = numbering_fix_run(_NESTED, flatten_max_depth=2, promote_chapters=False)
     import re
 
     assert re.findall(r"^#{3,} ", out.article, re.M) == []
     assert out.headings_flattened >= 1
+
+
+def test_run_promotes_chapters_to_h1_by_default():
+    """Wave B (round 4): run() default-promotes numbered chapters to H1 so the
+    render matches Qianfan (≈11 `# N` chapters). The numeric tree is preserved;
+    only the markdown hash level shifts. flatten_max_depth=3 (deep) keeps the
+    leaf at `### N.M.K` in the promoted coordinate system (Qianfan's h4=0)."""
+    import re
+
+    # Substantial bodies so collapse_empty_sections (which runs first and drops
+    # short stub sections) doesn't remove a heading — isolating the promotion.
+    body = (
+        "substantial body content with more than ten words so the empty-section collapse heuristic keeps this heading"
+    )
+    text = f"# Title\n\n## 1 A\n\n{body}\n\n### 1.1 B\n\n{body}\n\n#### 1.1.1 C\n\n{body}\n"
+    out = numbering_fix_run(text, flatten_max_depth=3)
+    headings = _extract_headings(out.article)
+    # Title stays the single leading H1.
+    assert headings[0][0] == "#"
+    # Chapters now render at H1 (Wave B), subs at H2, leaves at H3.
+    hashes = [h[0] for h in headings]
+    assert "#" in hashes[1:], f"chapters should be promoted to H1: {headings}"
+    assert re.findall(r"^#### ", out.article, re.M) == [], "no H4 should survive (Qianfan h4=0)"
+    assert out.headings_promoted >= 1
+    # No heading content lost (substantial bodies => collapse doesn't fire).
+    assert len(_extract_headings(text)) == len(headings), f"heading lost: {headings}"
+
+
+def test_run_promote_chapters_false_keeps_legacy_h2():
+    """promote_chapters=False renders the legacy structure (chapters at H2),
+    so a caller can opt out without behavior drift."""
+    out = numbering_fix_run(_NESTED, flatten_max_depth=3, promote_chapters=False)
+    headings = _extract_headings(out.article)
+    assert out.headings_promoted == 0
+    # Title H1, chapter back at H2.
+    assert headings[0][0] == "#"
+    assert headings[1][0] == "##", f"legacy mode keeps chapters at H2: {headings}"
 
 
 def _extract_headings(text):
@@ -309,12 +350,36 @@ def test_run_normalization_wired_into_pipeline():
         "# 1.2 Bronze\n\n"
         "bronze body long enough to survive empty-section collapse, talking about pegasus.\n"
     )
-    nfo = numbering_fix_run(text)
+    # promote_chapters=False isolates the hash-normalization wiring this test
+    # targets; the Wave B promotion (which intentionally makes chapters H1) is
+    # covered by test_run_promotes_chapters_to_h1_by_default.
+    nfo = numbering_fix_run(text, promote_chapters=False)
     headings = _extract_headings(nfo.article)
-    # First heading is the title; nothing else should be H1.
+    # First heading is the title; with promotion OFF nothing else should be H1.
     assert headings[0][0] == "#"
     assert all(h[0] != "#" for h in headings[1:]), f"non-title H1 leaked through: {headings}"
     assert nfo.headings_hash_normalized >= 1
+
+
+def test_run_normalization_then_promotion_chapters_at_h1():
+    """The Wave B counterpart of the wiring test: with promotion ON (the
+    default), the same bug-style article emerges with chapters at H1 — the
+    structural change we ship to match Qianfan."""
+    text = (
+        "# Saint Seiya Report\n\n"
+        "# 1. Introduction\n\n"
+        "intro body long enough to survive empty-section collapse, talking about cosmos.\n\n"
+        "## 1.1.1 Scope\n\n"
+        "scope body long enough to survive empty-section collapse with content.\n\n"
+        "# 1.2 Bronze\n\n"
+        "bronze body long enough to survive empty-section collapse, talking about pegasus.\n"
+    )
+    nfo = numbering_fix_run(text)
+    headings = _extract_headings(nfo.article)
+    assert headings[0][0] == "#"  # title
+    # At least one numbered chapter renders at H1.
+    assert any(h[0] == "#" for h in headings[1:]), f"Wave B should put chapters at H1: {headings}"
+    assert nfo.headings_promoted >= 1
 
 
 # --- P2-Option-A-#6 round-3 (Greptile PR #24): References protection -------

@@ -523,6 +523,39 @@ class NumberingFixOutput:
     cap_violations: dict
     skipped_reason: str | None
     headings_flattened: int = 0
+    headings_promoted: int = 0
+
+
+def _promote_chapters(text: str) -> tuple[str, int]:
+    """Wave B (round 4, 2026-05-31): promote every heading one markdown level
+    so numbered chapters render at H1, matching the #1-leaderboard Qianfan
+    corpus (≈11 `# N` chapters per article; Lunon previously emitted 1 H1 =
+    title with chapters one level too shallow at `## N`).
+
+    RENDER-ONLY: the logical numeric tree (`N`, `N.M`, `N.M.K`) is untouched —
+    only the markdown hash COUNT shifts. Any heading with ≥2 hashes loses one
+    (`## N`→`# N`, `### N.M`→`## N.M`, `#### N.M.K`→`### N.M.K`). A single-`#`
+    heading (the article title — and by this point in `run()` the ONLY H1,
+    since `_normalize_hash_from_number` already demoted any stray 2nd+ H1 to H2)
+    is left untouched, which both preserves the title and makes the operation
+    underflow-safe (no heading can drop below H1).
+
+    Runs AFTER `renumber_headings` (so assigned numbers + rewritten cross-refs
+    survive — only the hash level changes) and BEFORE `_flatten_depth` (so the
+    archetype depth cap is enforced in the PROMOTED coordinate system: list-all
+    caps at `## N.M`, deep caps at `### N.M.K`, both forbidding deeper — exactly
+    Qianfan's universal h4=0). Returns (text, n_promoted)."""
+    n = 0
+
+    def repl(m: re.Match) -> str:
+        nonlocal n
+        hashes, title = m.group(1), m.group(2)
+        if len(hashes) >= 2:
+            n += 1
+            return f"{'#' * (len(hashes) - 1)} {title}"
+        return m.group(0)
+
+    return _HEADING_RE.sub(repl, text), n
 
 
 def _flatten_depth(text: str, max_depth: int) -> tuple[str, int]:
@@ -550,7 +583,7 @@ def _flatten_depth(text: str, max_depth: int) -> tuple[str, int]:
     return _HEADING_RE.sub(repl, text), n
 
 
-def run(article: str, flatten_max_depth: int | None = None) -> NumberingFixOutput:
+def run(article: str, flatten_max_depth: int | None = None, promote_chapters: bool = True) -> NumberingFixOutput:
     """Run the deterministic post-refiner cleanup in fixed order.
 
     Order (CRITICAL — see plan v3 §2a + P2-Option-A-#2):
@@ -564,13 +597,30 @@ def run(article: str, flatten_max_depth: int | None = None) -> NumberingFixOutpu
       3. Empty-section collapse drops now-empty headings
       4. Renumber rebuilds the heading-number tree AND rewrites cross-refs
          using an old→new heading map (P2-F, was: skip on cross-refs)
+      5. Wave B chapter promotion (round 4): shift every heading up one hash
+         level so chapters render at H1 like Qianfan. RENDER-ONLY; runs after
+         renumber (numbers/cross-refs preserved) and before flatten (so the
+         archetype cap applies in the promoted coordinate system). Set
+         `promote_chapters=False` for the legacy H2-chapter render.
+      6. Flatten caps heading depth per archetype (list-all → fully flat).
     """
     a, n_strip = strip_stage_directions(article)
     a, n_hashnorm = _normalize_hash_from_number(a)
     a, n_collapse = collapse_empty_sections(a)
     a, renum = renumber_headings(a)
+    # Wave B: promote chapters to H1 BEFORE flatten so the flatten cap is
+    # interpreted in the promoted coordinate system (e.g. list-all flattens to
+    # `## N.M` not `# N`). The numeric tree + rewritten cross-refs are untouched.
+    n_promote = 0
+    if promote_chapters:
+        a, n_promote = _promote_chapters(a)
     # P3b-opt2: deterministic Qianfan-flatten runs LAST so numbers + rewritten
-    # cross-refs survive — only the markdown hash level changes.
+    # cross-refs survive — only the markdown hash level changes. The caller's cap
+    # (list-all=2, deep=3) needs NO adjustment for Wave B: promotion moves the
+    # deepest leaf from H4 (`#### N.M.K`) to H3 (`### N.M.K`), which is at/under
+    # both caps, so deep stays `# / ## / ###` (chapters at H1, no H4) and list-all
+    # collapses the promoted `### N.M.K` to `##` (title `#`, chapters `# N`, rest
+    # `##`). Both yield Qianfan's universal h4=0 in the promoted coordinate system.
     n_flat = 0
     if flatten_max_depth is not None:
         a, n_flat = _flatten_depth(a, flatten_max_depth)
@@ -588,4 +638,5 @@ def run(article: str, flatten_max_depth: int | None = None) -> NumberingFixOutpu
         cap_violations=caps,
         skipped_reason=renum["skipped_reason"],
         headings_flattened=n_flat,
+        headings_promoted=n_promote,
     )
