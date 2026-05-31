@@ -70,6 +70,29 @@ def test_trim_drops_open_fence_inside_final_paragraph():
     assert "```" not in out
 
 
+def test_trim_does_not_cut_inside_closed_code_block():
+    # Greptile #89 follow-up: a CLOSED ``` block (even fence count) whose content
+    # holds a sentence-ender (the `.` in `2.0`) must NOT be chosen as the cut
+    # point — cutting there would keep the opening fence but drop its close,
+    # shipping an unbalanced fence. Fall back to the prior complete sentence.
+    body = (
+        'The setup is fully described.\n\nExample ```json\n{"version": 2.0}\n``` then the analysis trails off without'
+    )
+    out = o._trim_to_last_sentence(body)
+    assert out == "The setup is fully described."
+    assert out.count("```") % 2 == 0  # balanced fences (zero here)
+
+
+def test_trim_keeps_sentence_after_closed_code_block():
+    # The flip side: a complete sentence AFTER a closed block is a valid cut
+    # point, and the balanced block is retained whole.
+    body = 'Intro.\n\nHere is the schema ```json\n{"v": 1.0}\n``` which resolves the question. Then it cuts mid'
+    out = o._trim_to_last_sentence(body)
+    assert out.endswith("which resolves the question.")
+    assert out.count("```") % 2 == 0  # code block kept intact, fences balanced
+    assert '{"v": 1.0}' in out
+
+
 def test_guarantee_trims_body_preserves_references():
     article = (
         "# 1 Intro\nThis chapter is complete.\n\n"
