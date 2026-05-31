@@ -84,7 +84,12 @@ def test_zh_token_target_reaches_qianfan_cjk_band():
     """The ZH soft word target / _WORDS_PER_TOKEN (=token target) × ~1.6 cjk per
     token must reach the Qianfan ~110k cjk band, NOT the short reference's
     ~13.5k. A regression guard: a mult drop (e.g. 8.0->4.0) would fail this."""
+    # Import the real constant rather than hardcoding 0.75 — a change to
+    # _WORDS_PER_TOKEN in init_format must flow through this guard, not silently
+    # de-couple it from the pipeline value it protects.
+    from deep_research.pipeline.init_format import _WORDS_PER_TOKEN
+
     zh_words = wr.length_ceiling("default", "zh")
-    total_tokens = zh_words / 0.75  # _WORDS_PER_TOKEN
+    total_tokens = zh_words / _WORDS_PER_TOKEN
     est_cjk = total_tokens * 1.6  # writer fills CJK at ~1.6 chars/token
     assert est_cjk >= 100_000, f"ZH token target only reaches ~{est_cjk:.0f} cjk (< Qianfan ~110k band)"
