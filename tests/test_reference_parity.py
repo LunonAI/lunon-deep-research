@@ -31,26 +31,34 @@ from deep_research.pipeline import writer
 
 
 def test_length_target_multiplier_in_reference_aligned_range():
-    """`_LENGTH_TARGET_MULT` controls the per-domain word target by
-    multiplying the historical W9-era catalog medians. Pin in the
-    post-2026-05-26-smoke calibrated band.
+    """The OPERATIVE per-language length multipliers control the per-domain word
+    target by multiplying the historical W9-era catalog medians. Pin both in a
+    calibrated band.
 
-    Lower bound 3.0: anything below the smoke's empirical 2.2 (which
-    produced 18.8k for id=56 vs the reference's 80k) is a regression toward
-    the pre-fix length gap.
+    round 4 (2026-05-31): `length_ceiling()` now delegates to
+    `_length_mult_for(language)` reading `_LENGTH_TARGET_MULT_BY_LANG`
+    (EN 6.5×, ZH 8.0×) — the legacy scalar `_LENGTH_TARGET_MULT` (4.0) is only
+    the fallback base. So this guard must check the EFFECTIVE multipliers, not
+    the orphaned scalar (which a stale check would let drift unnoticed).
 
-    Upper bound 6.0: higher multipliers risk the writer filling space
-    with repetitive content when the architect outline depth (8-12 H2 ×
-    3-6 H3 × 2-4 H4) doesn't keep pace. Length and outline depth need
-    to grow together; runaway multiplier without architect compliance
-    produces filler that the RACE Insight judge penalises."""
-    assert 3.0 <= writing_rules._LENGTH_TARGET_MULT <= 6.0, (
-        f"_LENGTH_TARGET_MULT={writing_rules._LENGTH_TARGET_MULT} outside "
-        f"the post-2026-05-26-smoke calibrated band [3.0, 6.0]. The "
-        f"2.2× value pre-smoke produced 18.8k-word articles for id=56 "
-        f"vs the reference's 80k (4.26× short); the bump to 4.0× was the "
-        f"deliberate fix."
-    )
+    Lower bound 3.0: anything near the smoke's empirical 2.2 (which produced
+    18.8k for id=56 vs the reference's 80k) is a regression toward the pre-fix gap.
+
+    Upper bound 9.0: targets the reference's measured length (EN ~80k words, ZH ~110k
+    chars) from the ~9.5k catalog median — EN needs ~6.5×, ZH ~8.0×. Above ~9×
+    the writer risks filling space with repetitive content when architect
+    outline depth doesn't keep pace; length and outline depth must grow together
+    or the RACE Insight judge penalises the filler."""
+    for lang in ("en", "zh"):
+        mult = writing_rules._LENGTH_TARGET_MULT_BY_LANG[lang]
+        assert 3.0 <= mult <= 9.0, (
+            f"_LENGTH_TARGET_MULT_BY_LANG[{lang!r}]={mult} outside the calibrated "
+            f"band [3.0, 9.0]. EN 6.5× / ZH 8.0× target the reference's ~80k-word / "
+            f"~110k-char length; below 3 regresses to the pre-smoke gap, above 9 "
+            f"risks filler the Insight judge penalises."
+        )
+    # The legacy scalar fallback stays sane too (used for unknown languages).
+    assert 3.0 <= writing_rules._LENGTH_TARGET_MULT <= 9.0
 
 
 def test_cleaning_resistant_rule_makes_footnotes_mandatory():
