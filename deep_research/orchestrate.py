@@ -441,6 +441,7 @@ def from_plan(ctx: dict, query: str, language: str, task_id: int | None = None) 
         "renumbered": nfo.headings_renumbered,
         "flattened": nfo.headings_flattened,
         "promoted": nfo.headings_promoted,
+        "promotion_skipped": nfo.promotion_skipped,
         "demoted": nfo.headings_demoted,
         "hash_normalized": nfo.headings_hash_normalized,
         "xref_rewritten": nfo.cross_refs_rewritten,
