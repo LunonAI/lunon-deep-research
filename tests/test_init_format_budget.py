@@ -116,13 +116,13 @@ def test_leaf_aware_scaling_proportional_below_ceiling():
     assert em["S1"] > em["S2"], f"leaf-aware ordering broke below the ceiling: {em}"
 
 
-def test_en_list_all_allocation_is_leaf_blind_regression_lock():
-    """id91 / EN list-all MUST NOT grow: the leaf-aware weights + leaf_floor are
-    gated OFF, so leaf count is ignored and two same-depth sections get the SAME
-    share regardless of leaf count. The single pass/fail tripwire for the gate."""
-    toc = [_toc_section("S1", 10, 4), _toc_section("S2", 1, 0)]  # 40 leaves vs 1
-    en = _expected_map({"_outline_audit": {"archetype": "list-all"}, "report_toc": toc}, language="en")
-    assert en["S1"] == en["S2"], f"EN list-all leaked leaf scaling (id91 regression): {en}"
-    # the SAME toc on a ZH task DOES scale → proves the gate is the only difference
-    zh = _expected_map({"_outline_audit": {"archetype": "list-all"}, "report_toc": toc}, language="zh")
-    assert zh["S1"] > zh["S2"]
+def test_en_list_all_allocation_is_leaf_aware_after_gate_removal():
+    """round 5 T2-PR6: the `_is_en_list_all` no-grow gate is GONE. Under the
+    T2-PR4 group-and-nest shape EN list-all is ~9 nested chapters and must use
+    the SAME leaf-aware allocation as everything else (the gate was starving it,
+    id=89 at 0.47× Qianfan length). A leaf-heavy chapter now gets more than a
+    shallow one on EN too."""
+    toc = [_toc_section("S1", 4, 2), _toc_section("S2", 1, 0)]  # 8 leaves vs 1
+    fillers = [_toc_section(f"F{i}", 2, 2) for i in range(10)]  # dilute share so floors bind below ceiling
+    en = _expected_map({"_outline_audit": {"archetype": "list-all"}, "report_toc": [*toc, *fillers]}, language="en")
+    assert en["S1"] > en["S2"], f"EN list-all should now scale with leaves: {en}"

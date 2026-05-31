@@ -71,3 +71,25 @@ def test_per_language_mult_constants(lang, expected):
     """Pin the calibrated per-language multipliers. A change here shifts every
     article's length budget for that language — must be deliberate."""
     assert wr._LENGTH_TARGET_MULT_BY_LANG[lang] == expected
+
+
+def test_zh_targets_at_least_en_length():
+    """round 5 T2-PR6: ZH targets a longer article than EN (Qianfan ZH ~110k cjk
+    vs EN ~80k words) — the per-language multiplier must keep ZH >= EN so a
+    future mult edit can't silently de-calibrate ZH below EN."""
+    assert wr.length_ceiling("default", "zh") >= wr.length_ceiling("default", "en")
+
+
+def test_zh_token_target_reaches_qianfan_cjk_band():
+    """The ZH soft word target / _WORDS_PER_TOKEN (=token target) × ~1.6 cjk per
+    token must reach the Qianfan ~110k cjk band, NOT the short reference's
+    ~13.5k. A regression guard: a mult drop (e.g. 8.0->4.0) would fail this."""
+    # Import the real constant rather than hardcoding 0.75 — a change to
+    # _WORDS_PER_TOKEN in init_format must flow through this guard, not silently
+    # de-couple it from the pipeline value it protects.
+    from deep_research.pipeline.init_format import _WORDS_PER_TOKEN
+
+    zh_words = wr.length_ceiling("default", "zh")
+    total_tokens = zh_words / _WORDS_PER_TOKEN
+    est_cjk = total_tokens * 1.6  # writer fills CJK at ~1.6 chars/token
+    assert est_cjk >= 100_000, f"ZH token target only reaches ~{est_cjk:.0f} cjk (< Qianfan ~110k band)"
