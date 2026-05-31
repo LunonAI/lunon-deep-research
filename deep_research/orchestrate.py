@@ -14,6 +14,7 @@ each phase emits cost-by-node ledger markers via `_phase(name, fn)` so we get
 a free per-node cost breakdown at every milestone (item 36).
 """
 
+import bisect
 import json
 import os
 import pathlib
@@ -665,26 +666,41 @@ def _trim_to_last_sentence(body: str) -> str | None:
     `_SENT_TERMINALS` set) means an inline `"…(Smith 2023) continues the"` tail
     is dropped wholesale rather than cut at the bare paren into a fragment.
 
-    Fence-aware: an unclosed ``` code fence (odd count) means a code block was
-    truncated mid-stream — sentence scanning can never close it, and shipping
+    Fence-aware in two ways: (1) an unclosed ``` fence (odd count) means a code
+    block was truncated mid-stream — sentence scanning can never close it, and
     the lone opening fence breaks Markdown — so the partial block (from its
-    opening fence onward) is dropped first. Returns the trimmed body, or None if
-    nothing safe remains (no complete sentence anywhere)."""
+    opening fence onward) is dropped first. (2) Even with balanced fences, a
+    sentence-ender can sit INSIDE a properly-closed block (e.g. the `.` in
+    `{"version": 2.0}`); cutting there would keep the opening fence but drop its
+    close. The cut is therefore accepted only when the candidate slice has an
+    EVEN ``` count, else the scan continues to an earlier (out-of-block) ender.
+
+    Returns the trimmed body, or None if nothing safe remains (no complete
+    sentence anywhere)."""
     stripped = body.rstrip()
     if stripped.count("```") % 2 == 1:
         stripped = stripped[: stripped.rfind("```")].rstrip()
     para_start = stripped.rfind("\n\n")
     head = stripped[: para_start + 2] if para_start >= 0 else ""
     para = stripped[para_start + 2 :] if para_start >= 0 else stripped
+    # Fence parity of the candidate slice = head_fences + (complete ``` fences
+    # within para[:i+1]). `fence_ends[k]` is the last-char index of the k-th
+    # fence in para, so bisect_right(fence_ends, i) counts fences fully closed
+    # at or before i — O(log n) per ender instead of recounting the slice.
+    head_fences = head.count("```")
+    fence_ends = [m.end() - 1 for m in re.finditer("```", para)]
     cut = -1
     for i in range(len(para) - 1, -1, -1):
-        if para[i] in _SENT_ENDERS:
-            cut = i
-            # Keep any closing bracket/quote that belongs to this sentence
-            # (`."`, `.)`, `。」`) so a legitimate closer isn't stripped.
-            while cut + 1 < len(para) and para[cut + 1] in _SENT_CLOSERS:
-                cut += 1
-            break
+        if para[i] not in _SENT_ENDERS:
+            continue
+        if (head_fences + bisect.bisect_right(fence_ends, i)) % 2 == 1:
+            continue  # ender sits inside a code block -> slice would be unbalanced
+        cut = i
+        # Keep any closing bracket/quote that belongs to this sentence
+        # (`."`, `.)`, `。」`) so a legitimate closer isn't stripped.
+        while cut + 1 < len(para) and para[cut + 1] in _SENT_CLOSERS:
+            cut += 1
+        break
     if cut >= 0:
         return (head + para[: cut + 1]).rstrip()
     if head.strip():
