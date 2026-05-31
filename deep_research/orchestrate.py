@@ -99,6 +99,10 @@ def _persist_drift(s, language: str, query: str) -> None:
             # the per-section _capel_strip and this safety net caught it.
             "scaffold_strip": dict(getattr(s, "scaffold_strip_stats", {}) or {}),
             "completion": dict(getattr(s, "completion_stats", {}) or {}),
+            # round 5 T1-PR2: final-section re-roll + deterministic-trim gate.
+            # Non-empty/True = a final section ended mid-sentence and the gate
+            # re-rolled and/or trimmed to guarantee a clean ending.
+            "completion_repair": dict(getattr(s, "completion_repair_stats", {}) or {}),
             # 2026-05-29: advisory final-article metrics (heading profile,
             # frontload_ratio, spaced-CJK + scaffolding RESIDUAL, paragraph
             # density) — distance-from-Qianfan structural signals + round-2 fix
@@ -285,6 +289,11 @@ def from_plan(ctx: dict, query: str, language: str, task_id: int | None = None) 
         "writer_sections_loop", _run_section_loop, s, query, language
     )
 
+    # round 5 T1-PR2 layer 1: re-roll a final section that ends mid-sentence
+    # BEFORE assembly, so the regenerated synthesis flows through refiner /
+    # post-passes like any section (layer 2 deterministic trim is the guarantee).
+    _repair_final_section(s, query, language)
+
     draft = writer.assemble(s.opening, s.sections)
     draft = refiner.strip_meta(draft)
 
@@ -448,6 +457,11 @@ def from_plan(ctx: dict, query: str, language: str, task_id: int | None = None) 
     s.article = despaced
     s.cjk_despace_stats = dc_stats
 
+    # round 5 T1-PR2 layer 2: deterministic completion guarantee. After EVERY
+    # post-pass, ensure the shipped body never ends mid-sentence (trim the
+    # incomplete tail if the re-roll didn't converge / a pass re-truncated).
+    s.article = _guarantee_complete_ending(s)
+
     # Advisory final-article metrics on the SHIPPED article (after every
     # post-pass). Pure read — no gating, no mutation — so it cannot confound the
     # dev6 A/B. Fail-soft: a metrics error must never break a completed run.
@@ -588,6 +602,165 @@ def _expand_feedback(expected_tok: int) -> str:
         f"plan declares; do NOT emit a skeleton/intro-only stub or defer content "
         f"to other sections. Expand with concrete, evidence-bearing detail."
     )
+
+
+# round 5 T1-PR2 (2026-05-31): article-completion gate. The per-section CUT
+# re-roll (_is_cut_generation) only fires on mid-sentence AND thin; a final
+# section that ends mid-sentence but is NOT thin (a long section truncated at
+# the writer.sec ceiling, or after a runaway starved the budget) ships the WHOLE
+# ARTICLE ending mid-sentence — the id=89 "unfinished sentences" the judge
+# scored grammar 4.0. Two layers: (1) re-roll just the final section
+# (content-preserving — flows through refiner/post-passes, protects the
+# Comprehensiveness/Insight we win); (2) a deterministic last-resort trim so the
+# SHIPPED body never ends mid-sentence (the readability guarantee, even if the
+# re-roll didn't converge or a later pass re-truncated).
+_COMPLETION_REPAIR_CAP_DEFAULT = 1
+_COMPLETION_REPAIR_CAP_MIN = 0  # 0 = disable re-roll (deterministic trim still guarantees a clean tail)
+_COMPLETION_REPAIR_CAP_MAX = 3
+
+
+def _completion_repair_cap_from_env() -> int:
+    """Resolve the final-section re-roll cap from DR_COMPLETION_REPAIR_CAP.
+
+    Mirrors `_trunc_retry_cap_from_env`: fail loud on a non-integer / out-of-range
+    value at import rather than a cryptic crash mid-run."""
+    raw = os.environ.get("DR_COMPLETION_REPAIR_CAP")
+    if raw is None:
+        return _COMPLETION_REPAIR_CAP_DEFAULT
+    try:
+        val = int(raw)
+    except ValueError:
+        raise ValueError(f"DR_COMPLETION_REPAIR_CAP must be a non-negative integer; got {raw!r}") from None
+    if not (_COMPLETION_REPAIR_CAP_MIN <= val <= _COMPLETION_REPAIR_CAP_MAX):
+        raise ValueError(
+            f"DR_COMPLETION_REPAIR_CAP out of range [{_COMPLETION_REPAIR_CAP_MIN}, {_COMPLETION_REPAIR_CAP_MAX}]: {val}"
+        )
+    return val
+
+
+_COMPLETION_REPAIR_CAP = _completion_repair_cap_from_env()
+
+# References block: footnote_normalize appends `## References`; numbering_fix may
+# renumber it to `## N References` and Wave-B promotion may lift it to `# References`.
+# Anchored to end-of-heading-line so a body heading like "## References to prior
+# work" is NOT mistaken for the bibliography (prefix-collision guard).
+_REFS_HEADING_RE = re.compile(r"(?m)^[ \t]*#{1,3}[ \t]+\d*\.?[ \t]*References?[ \t]*$")
+
+
+def _trim_to_last_sentence(body: str) -> str | None:
+    """Trim a mid-sentence body tail back to its last complete sentence.
+
+    Operates on the FINAL paragraph only: cut after its last sentence-terminal,
+    or — if that paragraph has no complete sentence at all — drop the whole
+    fragment paragraph. Returns the trimmed body, or None if nothing safe
+    remains (no complete sentence anywhere)."""
+    stripped = body.rstrip()
+    para_start = stripped.rfind("\n\n")
+    head = stripped[: para_start + 2] if para_start >= 0 else ""
+    para = stripped[para_start + 2 :] if para_start >= 0 else stripped
+    cut = -1
+    for i in range(len(para) - 1, -1, -1):
+        if para[i] in _SENT_TERMINALS:
+            cut = i
+            break
+    if cut >= 0:
+        return (head + para[: cut + 1]).rstrip()
+    if head.strip():
+        return head.rstrip()
+    return None
+
+
+def _repair_final_section(s: PipelineState, query, language) -> None:
+    """Layer 1 — content-preserving re-roll. If the FINAL section ends
+    mid-sentence (so the whole article body would), re-roll JUST that section
+    (bounded) so the regenerated synthesis flows through refiner/post-passes.
+    Best-effort: never raises (DRB needs an article per task). Mutates
+    s.sections + s.completion_repair_stats."""
+    sections = list(s.sections or [])
+    stats = {"final_mid_sentence": False, "reroll_attempts": 0, "reroll_fixed": False, "trimmed": False}
+    s.completion_repair_stats = stats
+    if not sections or not _ends_mid_sentence(sections[-1]):
+        return
+    stats["final_mid_sentence"] = True
+    if _COMPLETION_REPAIR_CAP <= 0:
+        return
+    units = writer.outline_units(s.plan)
+    if not units or len(units) != len(sections):
+        return  # can't safely map units→sections; the trim guarantee still fires later
+    archetype = s.archetype.get("archetype", "") if isinstance(s.archetype, dict) else ""
+    prior_titles = [u["title"] for u in units]
+    best = sections[-1]
+    for _ in range(_COMPLETION_REPAIR_CAP):
+        stats["reroll_attempts"] += 1
+        try:
+            draft, _ = _write_with_guide(
+                units[-1],
+                s.plan,
+                s.memory_bank,
+                query,
+                language,
+                archetype,
+                s.domain,
+                prior_titles,
+                s.design_guide,
+                s.scaffold,
+                task_id=s.task_id,
+            )
+        except Exception:  # noqa: BLE001 — best-effort; fall through to the trim guarantee
+            break
+        if draft:
+            best = draft
+            if not _ends_mid_sentence(draft):
+                stats["reroll_fixed"] = True
+                break
+    sections[-1] = best
+    s.sections = sections
+
+
+def _guarantee_complete_ending(s: PipelineState) -> str:
+    """Layer 2 — deterministic last-resort guarantee. After ALL post-passes, if
+    the shipped body (excluding the appended References block) still ends
+    mid-sentence, trim the incomplete tail. Fail-loud: a fired trim is recorded
+    in completion_repair_stats and warned to stderr so it is never silent."""
+    article = s.article
+    stats = dict(getattr(s, "completion_repair_stats", {}) or {})
+    if not article or not article.strip():
+        s.completion_repair_stats = stats
+        return article
+    refs_start = None
+    for m in _REFS_HEADING_RE.finditer(article):
+        refs_start = m.start()  # the LAST References heading is the bibliography
+    body = article if refs_start is None else article[:refs_start]
+    refs = "" if refs_start is None else article[refs_start:]
+    if not _ends_mid_sentence(body):
+        s.completion_repair_stats = stats
+        return article
+    trimmed = _trim_to_last_sentence(body)
+    if not trimmed or trimmed == body.rstrip():
+        stats["still_incomplete"] = True
+        print(
+            "[orchestrate] WARNING: article body ends mid-sentence and no safe "
+            "trim boundary was found — shipping as-is. A final section truncated "
+            "and the completion re-roll did not recover it.",
+            file=sys.stderr,
+            flush=True,
+        )
+        s.completion_repair_stats = stats
+        return article
+    stats["trimmed"] = True
+    print(
+        "[orchestrate] WARNING: article body ended mid-sentence after all "
+        "post-passes; deterministically trimmed to the last complete sentence "
+        "(completion guarantee). Inspect completion_repair_stats + the runaway / "
+        "re-roll layers if this fires often.",
+        file=sys.stderr,
+        flush=True,
+    )
+    s.completion_repair_stats = stats
+    result = trimmed.rstrip()
+    if refs:
+        result += "\n\n" + refs.lstrip()
+    return result
 
 
 def _expected_tok_for(scaffold, sid: str) -> int:

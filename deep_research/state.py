@@ -169,6 +169,12 @@ class PipelineState:
     # routed evidence count + chapter position: the L1b research-starvation-vs-
     # writer-budget smoking gun.
     completion_stats: dict = field(default_factory=dict)
+    # round 5 T1-PR2: article-completion gate telemetry {final_mid_sentence,
+    # reroll_attempts, reroll_fixed, trimmed, still_incomplete}. The id=89
+    # "unfinished sentences" (judge grammar 4.0) came from a final section that
+    # truncated mid-sentence past the per-section CUT re-roll. Non-zero/True
+    # fields = the gate fired (re-rolled and/or deterministically trimmed).
+    completion_repair_stats: dict = field(default_factory=dict)
     # 2026-05-29: advisory final-article metrics computed on the shipped article
     # (pipeline/article_metrics.py): heading_profile, frontload_ratio,
     # spaced_cjk_rate, scaffold_residual, paragraph density. Distance-from-Qianfan
