@@ -798,6 +798,12 @@ def build(
     return plan
 
 
+def _band_distance(n: int, lo: int, hi: int) -> int:
+    """How far `n` falls OUTSIDE the inclusive [lo, hi] band (0 if inside).
+    Direction-agnostic: below-floor and above-ceiling both count as distance."""
+    return max(0, lo - n, n - hi)
+
+
 def _retry_is_better(retry_audit: dict, orig_audit: dict) -> bool:
     """Decide whether the retry's plan should replace the original.
 
@@ -810,14 +816,29 @@ def _retry_is_better(retry_audit: dict, orig_audit: dict) -> bool:
 
     Rules, in order:
       1. An empty retry (n_top_sections == 0) is never better.
-      2. If retry has strictly FEWER top sections than the original, the
-         retry walked backward — reject it.
-      3. Otherwise, prefer the retry only if it has fewer-or-equal total
-         shortfalls AND at least as many top sections.
+      2. Reject a retry whose top-section count is FARTHER outside the valid
+         [top_min, top_max] band than the original's. round 4 (2026-05-31):
+         this replaces the old "fewer sections than the original → reject"
+         rule, which silently mis-rejected a retry that CORRECTLY reduced an
+         over-max plan toward the band (e.g. an effort=max-truncated 32-section
+         original → a clean 10-section retry: 10 < 32 wrongly read as "walked
+         backward", so the bloated 32-section plan was kept and then promoted to
+         32 H1 chapters vs the reference's ~11). Distance-from-band rejects under-count
+         drift (8→5) AND over-count drift, but welcomes any move toward the band.
+         Falls back to the old count rule when bounds are absent (older audits).
+      3. Otherwise, prefer the retry only if it has fewer-or-equal shortfalls.
     """
-    if retry_audit.get("n_top_sections", 0) == 0:
+    retry_n = retry_audit.get("n_top_sections", 0)
+    orig_n = orig_audit.get("n_top_sections", 0)
+    if retry_n == 0:
         return False
-    if retry_audit.get("n_top_sections", 0) < orig_audit.get("n_top_sections", 0):
+    b = orig_audit.get("bounds") or {}
+    lo, hi = b.get("top_min"), b.get("top_max")
+    if lo is not None and hi is not None:
+        if _band_distance(retry_n, lo, hi) > _band_distance(orig_n, lo, hi):
+            return False
+    elif retry_n < orig_n:
+        # No bounds in this (older) audit shape — keep the legacy count guard.
         return False
     retry_sf = len(retry_audit.get("shortfalls", []))
     orig_sf = len(orig_audit.get("shortfalls", []))
