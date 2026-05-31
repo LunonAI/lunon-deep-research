@@ -370,6 +370,16 @@ def from_plan(ctx: dict, query: str, language: str, task_id: int | None = None) 
     clamped_e, ce_stats = _phase("clamp_emdash", style_clamp.clamp_emdash, s.article, language=language)
     s.article = clamped_e
     s.clamp_emdash_stats = ce_stats
+    # round 4 W4: deterministic paragraph-density clamp. The dev8 judge's #1
+    # readability complaint was "wall of text / suffocating equal-intensity
+    # density"; the L6/L8 PROMPT rules were already active and didn't move it.
+    # Splits overlong prose paragraphs at existing sentence boundaries (zero
+    # grammar/content risk — protects code/tables/headings/refs, skips lists).
+    # Env-gated via DR_PARA_CLAMP=off as a kill-switch.
+    if os.environ.get("DR_PARA_CLAMP", "on") != "off":
+        clamped_p, cp_stats = _phase("clamp_paragraphs", style_clamp.clamp_paragraphs, s.article, language=language)
+        s.article = clamped_p
+        s.clamp_paragraphs_stats = cp_stats
 
     # P2-Option-A-#6 (2026-05-23): footnote_normalize runs BEFORE
     # numbering_fix so the renumber step sees the final article shape
