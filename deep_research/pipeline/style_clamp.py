@@ -389,24 +389,44 @@ def _resegment_paragraph(para: str, ceiling: int, language: str) -> tuple[str, i
     """Split one overlong prose paragraph at its EXISTING sentence boundaries
     into chunks each ≈`ceiling` units. Never rewrites a sentence (a single
     sentence longer than the ceiling becomes its own chunk), so there is zero
-    grammar/content/citation risk. Returns (new_text, n_breaks_inserted)."""
-    sent_ends = [p + 1 for p in _para_sentence_ends(para)]  # cut AFTER the terminator
-    if not sent_ends:
+    grammar/content/citation risk. Returns (new_text, n_breaks_inserted).
+
+    Greedy flush-BEFORE-overflow accumulation: grow the current chunk a sentence
+    at a time and flush it (without the incoming sentence) the moment adding that
+    sentence would exceed the ceiling. round 4 / Greptile PR #87: this replaces an
+    earlier "flush AFTER crossing" loop that left a paragraph UNSPLIT when its
+    final sentence was the one that tipped it over (e.g. 50+50+100 words, ceiling
+    120 → no boundary before the end crossed 120, so the whole 200-word block
+    shipped intact). Flush-before-overflow splits that case into 100 + 100. A
+    single sentence longer than the ceiling is still its own chunk (never split
+    mid-sentence — the only way a chunk legitimately exceeds the ceiling)."""
+    ends = [p + 1 for p in _para_sentence_ends(para)]  # positions AFTER each terminator
+    if not ends:
         return para, 0
+    # Sentence spans: [0:e1], [e1:e2], ..., plus any trailing remainder after the
+    # last terminator (a final sentence whose terminator is mid-line, e.g. "...).").
+    bounds = [0, *ends]
+    if bounds[-1] < len(para):
+        bounds.append(len(para))
+    sentences = [para[bounds[i] : bounds[i + 1]] for i in range(len(bounds) - 1)]
     chunks: list[str] = []
-    cur_start = 0
-    for end in sent_ends:
-        if _approx_units(para[cur_start:end]) >= ceiling:
-            chunks.append(para[cur_start:end].strip())
-            cur_start = end
-    tail = para[cur_start:].strip()
-    if tail:
-        if chunks and _approx_units(tail) < _PARA_MIN_TAIL:
-            # CJK prose has no inter-sentence space; merge with "" for zh (Greptile PR #87).
-            sep = "" if (language or "").lower().startswith("zh") else " "
-            chunks[-1] = f"{chunks[-1]}{sep}{tail}"
+    cur = ""
+    for s in sentences:
+        if cur and _approx_units(cur + s) > ceiling:
+            chunks.append(cur)
+            cur = s
         else:
-            chunks.append(tail)
+            cur += s
+    if cur:
+        chunks.append(cur)
+    # Merge a too-short trailing chunk back into the previous one (avoid a
+    # one-sentence orphan paragraph). CJK prose has no inter-sentence space, so
+    # join with "" for zh, " " otherwise (Greptile PR #87).
+    if len(chunks) >= 2 and _approx_units(chunks[-1].strip()) < _PARA_MIN_TAIL:
+        sep = "" if (language or "").lower().startswith("zh") else " "
+        chunks[-2] = f"{chunks[-2].rstrip()}{sep}{chunks[-1].strip()}"
+        chunks.pop()
+    chunks = [c.strip() for c in chunks if c.strip()]
     if len(chunks) <= 1:
         return para, 0
     return "\n\n".join(chunks), len(chunks) - 1

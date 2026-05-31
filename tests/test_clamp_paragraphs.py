@@ -133,3 +133,16 @@ def test_en_tail_merge_keeps_space():
     # The merged tail must not be glued to the preceding word.
     assert "here.Short" not in out
     assert _nospace(art) == _nospace(out)
+
+
+def test_final_long_sentence_tips_over_ceiling_still_splits():
+    """Greptile PR #87: greedy flush-before-overflow. A paragraph whose FINAL
+    sentence is the one that tips it past the ceiling (50+50+100 words, ceiling
+    120) must still split — the old flush-after-crossing loop left it unsplit."""
+    s50 = ("word " * 50).strip() + ". "
+    s100 = ("word " * 100).strip() + "."
+    art = f"# T\n\n## 1 C\n\n{s50}{s50}{s100}\n"
+    out, stats = style_clamp.clamp_paragraphs(art, language="en", max_units=120)
+    assert stats["paragraphs_split"] == 1, f"over-ceiling paragraph escaped the clamp: {stats}"
+    assert stats["breaks_inserted"] >= 1
+    assert _nospace(art) == _nospace(out)
