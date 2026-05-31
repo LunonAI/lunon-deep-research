@@ -47,7 +47,7 @@ def test_clamp_truncates_runaway_block_preserves_others(monkeypatch):
         "# 2 Runaway\n" + "Sentence in the wall is here. " * 60 + "\n\n"
         "# 3 Next\nThe next chapter is fine.\n"
     )
-    out, stats = o._clamp_runaway_blocks(article, "en")
+    out, stats = o._clamp_runaway_blocks(article)
     assert stats["blocks_clamped"] == 1
     assert stats["tokens_removed"] > 0
     assert "# 1 Intro" in out and "# 2 Runaway" in out and "# 3 Next" in out  # all headings kept
@@ -58,7 +58,7 @@ def test_clamp_truncates_runaway_block_preserves_others(monkeypatch):
 def test_clamp_noop_when_all_blocks_small(monkeypatch):
     _small_threshold(monkeypatch, 10_000)
     article = "# 1 A\nshort.\n\n# 2 B\nalso short.\n"
-    out, stats = o._clamp_runaway_blocks(article, "en")
+    out, stats = o._clamp_runaway_blocks(article)
     assert out == article
     assert stats["blocks_clamped"] == 0
 
@@ -67,7 +67,7 @@ def test_clamp_gate_off_disables(monkeypatch):
     _small_threshold(monkeypatch)
     monkeypatch.setenv("DR_RUNAWAY_CLAMP", "off")
     article = "# 2 Runaway\n" + "Sentence here is fine. " * 60 + "\n"
-    out, stats = o._clamp_runaway_blocks(article, "en")
+    out, stats = o._clamp_runaway_blocks(article)
     assert out == article
     assert stats["blocks_clamped"] == 0
 
@@ -75,16 +75,23 @@ def test_clamp_gate_off_disables(monkeypatch):
 def test_clamp_no_headings_unchanged(monkeypatch):
     _small_threshold(monkeypatch)
     article = "Just prose with no headings at all. " * 50
-    out, stats = o._clamp_runaway_blocks(article, "en")
+    out, stats = o._clamp_runaway_blocks(article)
     assert out == article
     assert stats["blocks_clamped"] == 0
 
 
-def test_clamp_preamble_before_first_heading_untouched(monkeypatch):
-    _small_threshold(monkeypatch, 10_000)
-    article = "# Title\nopening line.\n\n# 1 Body\ncontent here.\n"
-    out, _ = o._clamp_runaway_blocks(article, "en")
-    assert out == article
+def test_clamp_preamble_before_first_heading_preserved(monkeypatch):
+    # Greptile #90: the prior fixture started with `# Title` at position 0, so
+    # `article[:heads[0]]` was empty and the preamble path was never exercised.
+    # Use real text BEFORE the first heading and clamp a later runaway block, so
+    # the non-empty `out = [article[:heads[0]]]` seed is verified to survive.
+    _small_threshold(monkeypatch)
+    preamble = "Front-matter preamble before any heading, left untouched.\n\n"
+    article = preamble + "# 1 Runaway\n" + "Sentence in the wall is here. " * 60 + "\n\n# 2 Tail\nfine.\n"
+    out, stats = o._clamp_runaway_blocks(article)
+    assert out.startswith(preamble)  # non-empty preamble preserved verbatim at the head
+    assert stats["blocks_clamped"] == 1  # the runaway block was still clamped
+    assert "# 2 Tail" in out and "fine." in out  # the block after the runaway is intact
 
 
 def test_runaway_block_tokens_env_validation(monkeypatch):

@@ -60,14 +60,17 @@ def strip_residual_scaffolding(article: str) -> tuple[str, dict]:
     last = 0
     for s, e in spans:
         seg = article[last:s]
-        prev = seg[-1] if seg else ""  # char right before the token
-        nxt = article[e] if e < len(article) else ""  # char right after
-        if prev in " \t" and nxt in " \t":
-            # space on BOTH sides -> drop the trailing space (no doubled space)
+        prev = seg[-1] if seg else ""  # char right before the marker
+        # The regex lookahead guarantees the marker is followed by
+        # ``[ \t]*(?:\n|$)`` — i.e. it always sits at a line end, possibly with
+        # a run of trailing spaces/tabs before the break. Consume that whole
+        # run so a leaked marker never leaves a `" \n"` (trailing whitespace
+        # before the break); covers both `"<4788 \n"` and `"<4788   \n"`.
+        while e < len(article) and article[e] in " \t":
             e += 1
-        elif prev in " \t" and nxt in ("", "\n"):
-            # token alone at a line end ("boundary) <4788\n") -> drop the
-            # leading space so no trailing whitespace is left before the break
+        # If the marker also had a leading space, drop it so the preceding
+        # token glues straight to the line break — no doubled/trailing space.
+        if prev in " \t":
             seg = seg[:-1]
         out.append(seg)
         last = e

@@ -344,7 +344,7 @@ def from_plan(ctx: dict, query: str, language: str, task_id: int | None = None) 
     # round 5 T1-PR3: deterministic runaway-block clamp (safety net for a flat
     # chapter the budget didn't prevent). Runs early so footnote_normalize /
     # numbering_fix see the clamped article.
-    clamped_r, cr_stats = _phase("runaway_clamp", _clamp_runaway_blocks, s.article, language)
+    clamped_r, cr_stats = _phase("runaway_clamp", _clamp_runaway_blocks, s.article)
     s.article = clamped_r
     s.runaway_clamp_stats = cr_stats
 
@@ -567,9 +567,17 @@ def _section_too_thin(text: str, expected_tok: int) -> bool:
     return _approx_tokens(text) < _COMPLETION_MIN_RATIO * expected_tok
 
 
-# Sentence-terminal punctuation (EN + CJK) + closing brackets/quotes a complete
-# prose tail may legitimately end on.
-_SENT_TERMINALS = "。！？.!?…）)】」』》”’\"'"
+# True sentence-ENDING punctuation only (EN + CJK), no closing brackets/quotes.
+_SENT_ENDERS = "。！？.!?…"
+# Closing brackets/quotes that may legitimately TRAIL a sentence-ender (`."`,
+# `.)`, `。」`). A complete prose tail may end on one of these, but on its own a
+# bare closer is NOT a sentence boundary.
+_SENT_CLOSERS = "）)】」』》”’\"'"
+# Sentence-terminal punctuation a complete prose tail may legitimately end on —
+# enders OR a trailing closer. Used by `_ends_mid_sentence` to decide whether a
+# tail looks complete. `_trim_to_last_sentence` deliberately scans for an ENDER
+# (not this full set) so it never cuts at a bare inline closing paren/quote.
+_SENT_TERMINALS = _SENT_ENDERS + _SENT_CLOSERS
 
 
 def _ends_mid_sentence(text: str) -> bool:
@@ -660,18 +668,32 @@ _REFS_HEADING_RE = re.compile(r"(?m)^[ \t]*#{1,3}[ \t]+\d*\.?[ \t]*References?[ 
 def _trim_to_last_sentence(body: str) -> str | None:
     """Trim a mid-sentence body tail back to its last complete sentence.
 
-    Operates on the FINAL paragraph only: cut after its last sentence-terminal,
-    or — if that paragraph has no complete sentence at all — drop the whole
-    fragment paragraph. Returns the trimmed body, or None if nothing safe
-    remains (no complete sentence anywhere)."""
+    Operates on the FINAL paragraph only: cut after its last sentence-ENDER
+    (`_SENT_ENDERS`, keeping any closing bracket/quote that trails it so `."` /
+    `.)` survive intact), or — if that paragraph has no complete sentence at all
+    — drop the whole fragment paragraph. Scanning for an ender (not the full
+    `_SENT_TERMINALS` set) means an inline `"…(Smith 2023) continues the"` tail
+    is dropped wholesale rather than cut at the bare paren into a fragment.
+
+    Fence-aware: an unclosed ``` code fence (odd count) means a code block was
+    truncated mid-stream — sentence scanning can never close it, and shipping
+    the lone opening fence breaks Markdown — so the partial block (from its
+    opening fence onward) is dropped first. Returns the trimmed body, or None if
+    nothing safe remains (no complete sentence anywhere)."""
     stripped = body.rstrip()
+    if stripped.count("```") % 2 == 1:
+        stripped = stripped[: stripped.rfind("```")].rstrip()
     para_start = stripped.rfind("\n\n")
     head = stripped[: para_start + 2] if para_start >= 0 else ""
     para = stripped[para_start + 2 :] if para_start >= 0 else stripped
     cut = -1
     for i in range(len(para) - 1, -1, -1):
-        if para[i] in _SENT_TERMINALS:
+        if para[i] in _SENT_ENDERS:
             cut = i
+            # Keep any closing bracket/quote that belongs to this sentence
+            # (`."`, `.)`, `。」`) so a legitimate closer isn't stripped.
+            while cut + 1 < len(para) and para[cut + 1] in _SENT_CLOSERS:
+                cut += 1
             break
     if cut >= 0:
         return (head + para[: cut + 1]).rstrip()
@@ -809,12 +831,22 @@ def _runaway_block_tokens() -> int:
 
 
 def _truncate_to_token_budget(text: str, max_tokens: int) -> str | None:
-    """Largest prefix of `text` at a sentence boundary within `max_tokens`.
+    """Largest prefix of `text` at a sentence boundary within ~`max_tokens`.
     Uses a proportional char estimate (O(n), avoids per-sentence recount) then
-    backs up to the last sentence terminal. Returns None if no boundary fits."""
+    backs up to the last sentence terminal. Returns None if no boundary fits.
+
+    Approximate ceiling, NOT a strict bound: `char_budget` uses the block's
+    AVERAGE chars-per-token, so a prefix denser in CJK than the block average
+    (CJK ≈1.6 chars/tok vs non-CJK ≈4) can carry somewhat more than `max_tokens`
+    (≈15% over for a 50/50 block at 2× threshold). The only caller is the
+    runaway-clamp safety net, which fires on pathological walls where a few-%
+    overshoot on already-truncated content is immaterial; callers must not rely
+    on the returned prefix being strictly within `max_tokens`."""
     total = text_metrics.approx_tokens(text)
     if total <= max_tokens:
         return text
+    # Average chars/token across the whole block — see the docstring caveat on
+    # CJK-dense prefixes slightly overshooting the budget.
     char_budget = max(1, int(len(text) * max_tokens / total))
     head = text[:char_budget]
     for i in range(len(head) - 1, -1, -1):
@@ -823,10 +855,14 @@ def _truncate_to_token_budget(text: str, max_tokens: int) -> str | None:
     return None
 
 
-def _clamp_runaway_blocks(article: str, language: str = "en") -> tuple[str, dict]:
+def _clamp_runaway_blocks(article: str) -> tuple[str, dict]:
     """Deterministic safety net: truncate any single inter-heading block whose
     body exceeds the runaway threshold. Env-gated (DR_RUNAWAY_CLAMP=off to
-    disable), fail-loud. The heading lines and all other blocks are untouched."""
+    disable), fail-loud. The heading lines and all other blocks are untouched.
+
+    Language-agnostic: the threshold is token-based and `_SENT_TERMINALS` covers
+    both EN and CJK terminals, so no `language` arg is needed (it was dead input
+    that implied language-specific logic that does not exist)."""
     stats = {"blocks_clamped": 0, "tokens_removed": 0}
     if os.environ.get("DR_RUNAWAY_CLAMP", "on") == "off" or not article or not article.strip():
         return article, stats
