@@ -94,6 +94,10 @@ def _persist_drift(s, language: str, query: str) -> None:
             # modes the writer most often hits.
             "mermaid_validate": dict(getattr(s, "mermaid_validate_stats", {}) or {}),
             "cjk_despace": dict(getattr(s, "cjk_despace_stats", {}) or {}),
+            # round 5 T1-PR1: leaked open CAPEL countdown markers removed from
+            # the shipped article. Non-zero = the writer leaked a marker past
+            # the per-section _capel_strip and this safety net caught it.
+            "scaffold_strip": dict(getattr(s, "scaffold_strip_stats", {}) or {}),
             "completion": dict(getattr(s, "completion_stats", {}) or {}),
             # 2026-05-29: advisory final-article metrics (heading profile,
             # frontload_ratio, spaced-CJK + scaffolding RESIDUAL, paragraph
@@ -150,6 +154,7 @@ from .pipeline import (
     refiner,
     refiner_gate,
     role_play,
+    scaffold_strip,
     scout,
     style_clamp,
     validation,
@@ -424,6 +429,16 @@ def from_plan(ctx: dict, query: str, language: str, task_id: int | None = None) 
         "cap_violations": nfo.cap_violations,
         "skipped_reason": nfo.skipped_reason,
     }
+
+    # round 5 T1-PR1 (2026-05-31): residual-scaffolding strip. Runs AFTER
+    # numbering_fix (so it sees the final renumbered prose, incl. any marker
+    # left at a truncation seam) and BEFORE cjk_despace. Removes leaked open
+    # CAPEL countdown markers (`<dddd` at a line end with no closing `>`, which
+    # _capel_strip misses) the judge reads as raw scaffolding. Span-masked +
+    # idempotent; the writer-side capel_directive is the primary defense.
+    stripped_sc, sc_stats = _phase("scaffold_strip", scaffold_strip.strip_residual_scaffolding, s.article)
+    s.article = stripped_sc
+    s.scaffold_strip_stats = sc_stats
 
     # G7 (2026-05-28): ZH-aware de-spacing. Runs LAST (after numbering_fix /
     # footnote_normalize) on the final article so it only sees shipped prose;

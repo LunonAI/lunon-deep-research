@@ -198,6 +198,11 @@ class PipelineState:
     clamp_emdash_stats: dict = field(default_factory=dict)
     # round 4 W4: paragraph-density clamp telemetry.
     clamp_paragraphs_stats: dict = field(default_factory=dict)
+    # round 5 T1-PR1: residual-scaffolding strip telemetry. Counts leaked open
+    # CAPEL countdown markers (`<dddd` at a line end, no closing `>`) the judge
+    # reads as raw scaffolding / broken formatting. Non-zero = a strip fired on
+    # the shipped article; the writer-side capel_directive is primary defense.
+    scaffold_strip_stats: dict = field(default_factory=dict)
     # P3b-OPT2 (2026-05-27): per-section inner-loop iteration trajectory.
     # One entry per section: {"section": sid, "iters": [{"i", "grounding_ok",
     # "scored", "score_ok", "min_score"}, ...]}. INNER_CAP is unchanged (3);
