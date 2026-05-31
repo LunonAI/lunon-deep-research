@@ -83,8 +83,15 @@ _SPECIALIST_TIMEOUT_S = _specialist_timeout_from_env()
 
 
 def _research_with_timeout(role, qlist, *, language, domain, exa_mode, model_override, timeout_s=None):
-    """Wrap `research()` in a wall-clock cap. Raises `concurrent.futures.TimeoutError`
-    on expiry; raises the underlying exception otherwise.
+    """Wrap `research()` in a wall-clock cap and RETURN a findings dict.
+
+    round 4 (2026-05-31): on timeout this no longer RAISES — it catches the
+    `concurrent.futures.TimeoutError` internally and returns the PARTIAL findings
+    the specialist wrote into its `sink` before the cut, flagged `timed_out=True`.
+    Callers must inspect `res.get("timed_out")` (to bump timeout telemetry) and
+    ingest the partial findings rather than dropping the whole role. Normal
+    completion returns research()'s dict unchanged (no `timed_out` key). Any
+    NON-timeout exception from research() still propagates to the caller.
 
     `timeout_s=None` resolves to the module-level `_SPECIALIST_TIMEOUT_S`
     at CALL time (not import time) so monkeypatching the constant in tests

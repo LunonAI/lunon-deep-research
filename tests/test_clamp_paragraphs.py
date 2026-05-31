@@ -76,8 +76,9 @@ def test_lists_are_skipped():
 
 
 def test_zh_splits_on_cjk_terminator():
+    # ~21 units/sentence × 16 ≈ 340 units, over the ZH ceiling of 220.
     sent = "该模型在多个基准测试中取得了优异的成绩并展示出明显的性能提升效果显著。"
-    art = f"# 标题\n\n## 1 章节\n\n{sent * 10}\n"
+    art = f"# 标题\n\n## 1 章节\n\n{sent * 16}\n"
     out, stats = style_clamp.clamp_paragraphs(art, language="zh")
     assert stats["paragraphs_split"] == 1
     assert stats["breaks_inserted"] >= 1
