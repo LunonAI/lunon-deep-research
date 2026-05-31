@@ -101,6 +101,14 @@ def _research_with_timeout(role, qlist, *, language, domain, exa_mode, model_ove
     """
     if timeout_s is None:
         timeout_s = _SPECIALIST_TIMEOUT_S
+    # round 4 (2026-05-31): a shared sink lets us recover the specialist's
+    # PARTIAL findings on timeout instead of dropping its whole coverage. The
+    # background thread writes findings/n_searches through this dict as it goes
+    # (GIL-atomic); on TimeoutError we snapshot and return what was gathered,
+    # flagged `timed_out` so the caller still bumps the timeout telemetry. This
+    # turns a hard coverage loss (a dropped Insight/Comp specialist) into at
+    # worst a slightly-thinner-than-full one.
+    sink: dict = {"findings": [], "n_searches": 0}
     ex = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"specialist-{role}")
     try:
         fut = ex.submit(
@@ -111,8 +119,16 @@ def _research_with_timeout(role, qlist, *, language, domain, exa_mode, model_ove
             domain=domain,
             exa_mode=exa_mode,
             model_override=model_override,
+            sink=sink,
         )
         return fut.result(timeout=timeout_s)
+    except concurrent.futures.TimeoutError:
+        return {
+            "role": role,
+            "findings": list(sink["findings"]),
+            "n_searches": sink["n_searches"],
+            "timed_out": True,
+        }
     finally:
         # `wait=False` so we don't block on a hung worker thread. The thread
         # will continue running in the background until the process exits.
@@ -281,30 +297,27 @@ def run(plan, prompt, language, archetype, domain):
             res = _research_with_timeout(
                 role, qlist, language=language, domain=domain, exa_mode=exa_mode, model_override=model_override
             )
-        except concurrent.futures.TimeoutError:
-            # Hard cap exceeded — drop this specialist's findings entirely,
-            # log the breakage so the dev-run reader sees it, continue.
-            # Greptile PR #26 follow-up round 2 (2026-05-26): added the
-            # stderr print for parity with the gap-fill handler below.
-            # The digest entry alone isn't real-time — it's only visible
-            # after the run completes and may be _compact'd away by the
-            # COMPACT_EVERY=8 boundary. An operator tailing stderr during
-            # a dev-run needs to see the timeout in the moment, otherwise
-            # the operational-visibility goal that motivated the original
-            # diagnostic logging is half-defeated.
+        except Exception as e:  # noqa: BLE001  per-specialist resilience
+            digest_parts.append(f"[{role}] (specialist failed: {type(e).__name__}; proceeding)")
+            continue
+        if res.get("timed_out"):
+            # round 4 (2026-05-31): the hard cap no longer DROPS the specialist —
+            # `_research_with_timeout` returns the partial findings gathered before
+            # the cut, so we ingest them below. Still bump telemetry + print to
+            # stderr (real-time operator signal; the digest entry can be _compact'd
+            # away at the COMPACT_EVERY boundary) so a dev-run reader sees the
+            # degradation in the moment.
             n_specialist_timeouts += 1
+            n_kept = len(res.get("findings", []))
             print(
-                f"[orchestrator] main-loop role={role} TIMEOUT after {_SPECIALIST_TIMEOUT_S}s; skipping",
+                f"[orchestrator] main-loop role={role} TIMEOUT after {_SPECIALIST_TIMEOUT_S}s; "
+                f"kept {n_kept} partial findings",
                 file=sys.stderr,
                 flush=True,
             )
             digest_parts.append(
-                f"[{role}] (specialist TIMEOUT after {_SPECIALIST_TIMEOUT_S}s; proceeding without its findings)"
+                f"[{role}] (specialist TIMEOUT after {_SPECIALIST_TIMEOUT_S}s; kept {n_kept} partial findings)"
             )
-            continue
-        except Exception as e:  # noqa: BLE001  per-specialist resilience
-            digest_parts.append(f"[{role}] (specialist failed: {type(e).__name__}; proceeding)")
-            continue
         tool_calls += res.get("n_searches", 0)
         ingest(res, groups.get(role, []))
         if tool_calls and tool_calls % COMPACT_EVERY < res.get("n_searches", 1):
@@ -323,25 +336,22 @@ def run(plan, prompt, language, archetype, domain):
             res = _research_with_timeout(
                 role, gq, language=language, domain=domain, exa_mode=exa_mode, model_override=model_override
             )
-        except concurrent.futures.TimeoutError:
-            # Greptile PR #26 follow-up (2026-05-26): make gap-fill timeouts
-            # visible — match the main-loop handler's pattern. Pre-fix
-            # gap-fill timeouts only bumped n_specialist_timeouts with no
-            # corresponding digest entry or stderr line, leaving a downstream
-            # drift-log reader unable to distinguish main-loop vs gap-fill
-            # contributions to the counter.
+        except Exception:  # noqa: BLE001
+            continue
+        if res.get("timed_out"):
+            # round 4: gap-fill timeout keeps partial findings too (parity with
+            # the main loop). Telemetry + real-time stderr signal retained.
             n_specialist_timeouts += 1
+            n_kept = len(res.get("findings", []))
             print(
-                f"[orchestrator] gap-fill role={role} TIMEOUT after {_SPECIALIST_TIMEOUT_S}s; skipping",
+                f"[orchestrator] gap-fill role={role} TIMEOUT after {_SPECIALIST_TIMEOUT_S}s; "
+                f"kept {n_kept} partial findings",
                 file=sys.stderr,
                 flush=True,
             )
             digest_parts.append(
-                f"[{role}] (gap-fill TIMEOUT after {_SPECIALIST_TIMEOUT_S}s; proceeding without its findings)"
+                f"[{role}] (gap-fill TIMEOUT after {_SPECIALIST_TIMEOUT_S}s; kept {n_kept} partial findings)"
             )
-            continue
-        except Exception:  # noqa: BLE001
-            continue
         tool_calls += res.get("n_searches", 0)
         # gap-fill evidence is broadly relevant → tag all top-level sections
         top = [s.get("id") for s in plan.get("report_toc", [])]
