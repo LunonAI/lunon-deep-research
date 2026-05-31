@@ -33,6 +33,43 @@ def test_trim_returns_none_when_no_complete_sentence_anywhere():
     assert o._trim_to_last_sentence("one long run on with no terminal at all") is None
 
 
+def test_trim_does_not_cut_at_inline_closing_paren():
+    # Greptile #89 (P1): a bare closing paren is NOT a sentence boundary. A tail
+    # like "...(Smith et al 2023) continues to improve the" must be dropped
+    # wholesale, not cut into the fragment "...(Smith et al 2023)".
+    body = "The prior chapter is complete.\n\nThe algorithm (based on Smith et al 2023) continues to improve the"
+    out = o._trim_to_last_sentence(body)
+    assert out == "The prior chapter is complete."
+    assert "Smith et al 2023)" not in out
+
+
+def test_trim_keeps_closer_trailing_a_real_terminal():
+    # The flip side: a closing quote/paren that legitimately trails an ender is
+    # kept, so a sentence ending in `."` survives intact (not chopped to `.`).
+    body = 'First.\n\nShe said "this works." Then the next bit trails off with no'
+    out = o._trim_to_last_sentence(body)
+    assert out == 'First.\n\nShe said "this works."'
+
+
+def test_trim_drops_unclosed_code_fence():
+    # Greptile #89 (P2): an odd ``` count means a code block truncated mid-stream.
+    # Sentence scanning can't close it, so the partial block is dropped and the
+    # last complete sentence before it is returned — no dangling open fence.
+    body = "Intro paragraph is complete.\n\n```python\nx = compute()\nmore code that never closes"
+    out = o._trim_to_last_sentence(body)
+    assert out == "Intro paragraph is complete."
+    assert "```" not in out
+
+
+def test_trim_drops_open_fence_inside_final_paragraph():
+    # The open fence sits inside the final fragment paragraph: drop the whole
+    # fragment (fence included) and fall back to the prior complete sentence.
+    body = "Done and complete.\n\nMid paragraph then ```py\nopen = True\nnever closed"
+    out = o._trim_to_last_sentence(body)
+    assert out == "Done and complete."
+    assert "```" not in out
+
+
 def test_guarantee_trims_body_preserves_references():
     article = (
         "# 1 Intro\nThis chapter is complete.\n\n"

@@ -557,9 +557,17 @@ def _section_too_thin(text: str, expected_tok: int) -> bool:
     return _approx_tokens(text) < _COMPLETION_MIN_RATIO * expected_tok
 
 
-# Sentence-terminal punctuation (EN + CJK) + closing brackets/quotes a complete
-# prose tail may legitimately end on.
-_SENT_TERMINALS = "。！？.!?…）)】」』》”’\"'"
+# True sentence-ENDING punctuation only (EN + CJK), no closing brackets/quotes.
+_SENT_ENDERS = "。！？.!?…"
+# Closing brackets/quotes that may legitimately TRAIL a sentence-ender (`."`,
+# `.)`, `。」`). A complete prose tail may end on one of these, but on its own a
+# bare closer is NOT a sentence boundary.
+_SENT_CLOSERS = "）)】」』》”’\"'"
+# Sentence-terminal punctuation a complete prose tail may legitimately end on —
+# enders OR a trailing closer. Used by `_ends_mid_sentence` to decide whether a
+# tail looks complete. `_trim_to_last_sentence` deliberately scans for an ENDER
+# (not this full set) so it never cuts at a bare inline closing paren/quote.
+_SENT_TERMINALS = _SENT_ENDERS + _SENT_CLOSERS
 
 
 def _ends_mid_sentence(text: str) -> bool:
@@ -650,18 +658,32 @@ _REFS_HEADING_RE = re.compile(r"(?m)^[ \t]*#{1,3}[ \t]+\d*\.?[ \t]*References?[ 
 def _trim_to_last_sentence(body: str) -> str | None:
     """Trim a mid-sentence body tail back to its last complete sentence.
 
-    Operates on the FINAL paragraph only: cut after its last sentence-terminal,
-    or — if that paragraph has no complete sentence at all — drop the whole
-    fragment paragraph. Returns the trimmed body, or None if nothing safe
-    remains (no complete sentence anywhere)."""
+    Operates on the FINAL paragraph only: cut after its last sentence-ENDER
+    (`_SENT_ENDERS`, keeping any closing bracket/quote that trails it so `."` /
+    `.)` survive intact), or — if that paragraph has no complete sentence at all
+    — drop the whole fragment paragraph. Scanning for an ender (not the full
+    `_SENT_TERMINALS` set) means an inline `"…(Smith 2023) continues the"` tail
+    is dropped wholesale rather than cut at the bare paren into a fragment.
+
+    Fence-aware: an unclosed ``` code fence (odd count) means a code block was
+    truncated mid-stream — sentence scanning can never close it, and shipping
+    the lone opening fence breaks Markdown — so the partial block (from its
+    opening fence onward) is dropped first. Returns the trimmed body, or None if
+    nothing safe remains (no complete sentence anywhere)."""
     stripped = body.rstrip()
+    if stripped.count("```") % 2 == 1:
+        stripped = stripped[: stripped.rfind("```")].rstrip()
     para_start = stripped.rfind("\n\n")
     head = stripped[: para_start + 2] if para_start >= 0 else ""
     para = stripped[para_start + 2 :] if para_start >= 0 else stripped
     cut = -1
     for i in range(len(para) - 1, -1, -1):
-        if para[i] in _SENT_TERMINALS:
+        if para[i] in _SENT_ENDERS:
             cut = i
+            # Keep any closing bracket/quote that belongs to this sentence
+            # (`."`, `.)`, `。」`) so a legitimate closer isn't stripped.
+            while cut + 1 < len(para) and para[cut + 1] in _SENT_CLOSERS:
+                cut += 1
             break
     if cut >= 0:
         return (head + para[: cut + 1]).rstrip()
