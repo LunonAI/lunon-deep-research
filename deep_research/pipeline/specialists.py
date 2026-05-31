@@ -261,12 +261,33 @@ def _snippet_fallback(results, query_ids):
     return out
 
 
-def research(role: str, queries: list, *, language: str, domain: str, exa_mode: str, model_override: str = "") -> dict:
+def research(
+    role: str,
+    queries: list,
+    *,
+    language: str,
+    domain: str,
+    exa_mode: str,
+    model_override: str = "",
+    sink: dict | None = None,
+) -> dict:
     """queries: [{id,text,target_sections}] from the Architect plan for this
     specialist. Returns {role, findings:[...], n_searches}.
 
     model_override: optional model slug to use instead of role's configured
     model (used for per-archetype routing — e.g. Tongyi-DR for list-all).
+
+    sink (round 4, 2026-05-31): an optional caller-owned dict with keys
+    "findings" (list) and "n_searches" (int). When provided, this loop writes
+    its progress THROUGH the sink as it searches — after each search the sink's
+    findings are refreshed to the snippet-fallback of the hits gathered so far,
+    and on a successful extract the richer extracted findings overwrite them.
+    A caller that wall-clock-times-out the call (orchestrator
+    `_research_with_timeout`) can then recover the partial coverage gathered
+    before the cut (as snippets) instead of dropping the whole specialist's
+    role. The search loop dominates wall-clock, so a mid-search timeout still
+    yields the completed searches' evidence. Dict mutation is GIL-atomic and the
+    caller snapshots, so the worst case is missing the single in-flight search.
     """
     role = role if role in _ROLE else "generalist"
     rdesc = _ROLE[role]
@@ -290,6 +311,12 @@ def research(role: str, queries: list, *, language: str, domain: str, exa_mode: 
                 }
             )
         n += 1
+        # Partial-progress write: refresh the sink with the best-available
+        # (snippet-fallback) findings + search count so a timeout mid-loop
+        # recovers the searches done so far rather than dropping the role.
+        if sink is not None:
+            sink["n_searches"] = n
+            sink["findings"] = _snippet_fallback(results, qids) if results else []
 
     if not results:
         return {"role": role, "findings": [], "n_searches": n}
@@ -334,4 +361,9 @@ def research(role: str, queries: list, *, language: str, domain: str, exa_mode: 
             findings = _snippet_fallback(results, qids)
     except Exception:  # noqa: BLE001  reasoning model JSON failure → degrade
         findings = _snippet_fallback(results, qids)
+    # Upgrade the sink to the richer extracted findings now that they exist
+    # (the in-loop writes only had snippet fallbacks).
+    if sink is not None:
+        sink["findings"] = findings
+        sink["n_searches"] = n
     return {"role": role, "findings": findings, "n_searches": n}

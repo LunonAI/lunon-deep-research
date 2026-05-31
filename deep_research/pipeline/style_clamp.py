@@ -85,6 +85,20 @@ _EMDASH_PAIR_RE = re.compile(rf"(?<=\S)[ \t]{_EMDASH}[ \t](?P<mid>[^{_EMDASH}\n]
 _CITE_CEIL = {"en": 7.0, "zh": 13.0}  # EN median 6.29, ZH 12.18 (+ small headroom)
 _EMDASH_CEIL = {"en": 12.45, "zh": 21.54}  # corpus medians; EN is a no-op (body ~10.6)
 
+# round 4 W4 (2026-05-31): paragraph-density ceiling, in approx_words units
+# (CJK-aware: ~1 unit/char for ZH). The dev8 gemini judge flagged our prose as
+# "suffocating equal-intensity density / wall of text / expert monograph" — the
+# #1 readability complaint — and L6/L8/L9 PROMPT rules were already active in
+# that run and did NOT move it. The root fix is DETERMINISTIC: split an overlong
+# paragraph at its EXISTING sentence boundaries (never rewriting a sentence, so
+# zero grammar/content/citation risk) so a dense block becomes several scannable
+# paragraphs. Web research target ~100-120 EN words/paragraph; ZH packs denser so
+# the ceiling is higher in raw units. Env-overridable for dev-run A/B.
+_PARA_CEIL = {"en": 120, "zh": 220}
+# A trailing chunk below this (in units) is merged back rather than left as a
+# stub paragraph — avoids creating one-sentence orphans.
+_PARA_MIN_TAIL = 30
+
 
 def _protected_ranges(body: str) -> list[tuple[int, int]]:
     """Char ranges the clamp must not edit: fenced code/mermaid blocks,
@@ -337,3 +351,122 @@ def clamp_emdash(article: str, *, language: str = "en", max_per_1k: float | None
         "density_after": round(after / words * 1000, 2),
         "language": language,
     }
+
+
+# ── round 4 W4: paragraph-density clamp ────────────────────────────────────
+_LIST_LINE_RE = re.compile(r"^[ \t]*(?:[-*+]\s|\d+[.)]\s|>|\[\^)")
+
+
+def _approx_units(text: str) -> int:
+    """Length in the same CJK-aware units the density math uses elsewhere."""
+    return approx_words(text)
+
+
+def _looks_like_list_or_marker(para: str) -> bool:
+    """A paragraph whose lines are list items / blockquotes / footnote defs is
+    already segmented — never re-paragraph it."""
+    lines = [ln for ln in para.splitlines() if ln.strip()]
+    if not lines:
+        return True
+    return any(_LIST_LINE_RE.match(ln) for ln in lines)
+
+
+# CJK sentence terminators (。！？ + their fullwidth siblings). Unlike Latin
+# terminators these need no trailing space — CJK runs sentences together — so
+# `_sentence_end_positions` (Latin, space-gated) misses them entirely.
+_CJK_SENT_END_RE = re.compile(r"[。！？]")
+
+
+def _para_sentence_ends(text: str) -> list[int]:
+    """Sentence-terminator positions for BOTH scripts: the Latin,
+    abbreviation-aware `_sentence_end_positions` plus CJK 。！？. Sorted, deduped."""
+    pts = set(_sentence_end_positions(text))
+    pts.update(m.start() for m in _CJK_SENT_END_RE.finditer(text))
+    return sorted(pts)
+
+
+def _resegment_paragraph(para: str, ceiling: int) -> tuple[str, int]:
+    """Split one overlong prose paragraph at its EXISTING sentence boundaries
+    into chunks each ≈`ceiling` units. Never rewrites a sentence (a single
+    sentence longer than the ceiling becomes its own chunk), so there is zero
+    grammar/content/citation risk. Returns (new_text, n_breaks_inserted)."""
+    sent_ends = [p + 1 for p in _para_sentence_ends(para)]  # cut AFTER the terminator
+    if not sent_ends:
+        return para, 0
+    chunks: list[str] = []
+    cur_start = 0
+    for end in sent_ends:
+        if _approx_units(para[cur_start:end]) >= ceiling:
+            chunks.append(para[cur_start:end].strip())
+            cur_start = end
+    tail = para[cur_start:].strip()
+    if tail:
+        if chunks and _approx_units(tail) < _PARA_MIN_TAIL:
+            chunks[-1] = f"{chunks[-1]} {tail}"
+        else:
+            chunks.append(tail)
+    if len(chunks) <= 1:
+        return para, 0
+    return "\n\n".join(chunks), len(chunks) - 1
+
+
+def _segment_free(free: str, ceiling: int) -> tuple[str, int, int]:
+    """Paragraph-segment a protected-free run of body text. Splits on blank
+    lines (keeping the separators), re-segments each over-ceiling prose
+    paragraph. Returns (text, n_breaks_inserted, n_paragraphs_split)."""
+    parts = re.split(r"(\n{2,})", free)  # keeps separators at odd indices
+    n_breaks = 0
+    n_split = 0
+    for i in range(0, len(parts), 2):
+        para = parts[i]
+        if not para.strip():
+            continue
+        if _looks_like_list_or_marker(para):
+            continue
+        if _approx_units(para) <= ceiling:
+            continue
+        new_para, nb = _resegment_paragraph(para, ceiling)
+        if nb:
+            parts[i] = new_para
+            n_breaks += nb
+            n_split += 1
+    return "".join(parts), n_breaks, n_split
+
+
+def clamp_paragraphs(article: str, *, language: str = "en", max_units: int | None = None) -> tuple[str, dict]:
+    """Break overlong prose paragraphs into scannable ones at existing sentence
+    boundaries. Deterministic root-cause fix for the dev8 judge's #1 readability
+    complaint ("suffocating equal-intensity density / wall of text"); the L6/L8/L9
+    PROMPT rules were already active in dev8 and did not move it. Only inserts
+    paragraph breaks at detected sentence terminators — never rewrites, reorders,
+    or drops a sentence, so non-whitespace content is preserved exactly. Code
+    fences / tables / headings / footnote-def lines are protected; list runs are
+    skipped (already segmented); the References block is untouched."""
+    if not isinstance(article, str) or not article.strip():
+        return article, {"language": language, "ceiling_units": 0, "paragraphs_split": 0, "breaks_inserted": 0}
+    ceiling = max_units if max_units is not None else _PARA_CEIL.get(language, _PARA_CEIL["en"])
+    spans = sorted(_protected_ranges(article))
+    out: list[str] = []
+    n_breaks = 0
+    n_split = 0
+    pos = 0
+    for a, b in spans:
+        if a > pos:
+            new_free, nb, ns = _segment_free(article[pos:a], ceiling)
+            out.append(new_free)
+            n_breaks += nb
+            n_split += ns
+        out.append(article[a:b])
+        pos = max(pos, b)
+    if pos < len(article):
+        new_free, nb, ns = _segment_free(article[pos:], ceiling)
+        out.append(new_free)
+        n_breaks += nb
+        n_split += ns
+    stats = {
+        "language": language,
+        "ceiling_units": ceiling,
+        "paragraphs_split": n_split,
+        "breaks_inserted": n_breaks,
+    }
+    return "".join(out), stats
