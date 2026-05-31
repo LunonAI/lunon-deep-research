@@ -524,6 +524,33 @@ class NumberingFixOutput:
     skipped_reason: str | None
     headings_flattened: int = 0
     headings_promoted: int = 0
+    # round 5 T2-PR5: True when the chapter-count safety net skipped promotion
+    # (>_PROMOTE_CHAPTER_CAP H2 chapters) so a residual over-wide outline renders
+    # at H2 instead of exploding to 25-48 H1.
+    promotion_skipped: bool = False
+
+
+# round 5 T2-PR5: chapter-count safety net for Wave-B promotion. Qianfan holds
+# ~8-9 numbered chapters + title + refs ≈ 11 H1; 12 leaves +1 slack. If an
+# article arrives with MORE than this many H2 chapters (an architect
+# group-and-nest miss that the band shortfall + retry didn't fully fix), SKIP
+# promotion so the residual renders at H2 (1 H1 title + N H2) rather than
+# exploding to 25-48 H1 — the dev4 over-promotion render. This is a RENDER-depth
+# guard, NOT a count fix: the real chapter-count fix is the architect band
+# (T2-PR4); this only bounds the worst-case render of an A-miss.
+_PROMOTE_CHAPTER_CAP = 12
+
+
+def _count_top_chapters(text: str) -> int:
+    """Count `## ` (H2) headings that `_promote_chapters` would lift to H1.
+
+    Counts ALL H2s, not just numbered chapters: post-renumber the numbered
+    chapters are H2 (subs are H3), but the structural headings `## References` /
+    `## 参考文献` / `## Sources` are H2 too and each consumes one cap slot.
+    `_PROMOTE_CHAPTER_CAP` (=12) was calibrated with those structural H2s
+    included (~8-9 chapters + title + refs ≈ 11), so this count must NOT exclude
+    them — tune the cap with that in mind."""
+    return sum(1 for m in _HEADING_RE.finditer(text) if len(m.group(1)) == 2)
 
 
 def _promote_chapters(text: str) -> tuple[str, int]:
@@ -612,8 +639,15 @@ def run(article: str, flatten_max_depth: int | None = None, promote_chapters: bo
     # interpreted in the promoted coordinate system (e.g. list-all flattens to
     # `## N.M` not `# N`). The numeric tree + rewritten cross-refs are untouched.
     n_promote = 0
+    promotion_skipped = False
     if promote_chapters:
-        a, n_promote = _promote_chapters(a)
+        # T2-PR5 render-depth safety net: only promote when the result stays in
+        # the Qianfan chapter band; otherwise leave chapters at H2 so a residual
+        # over-wide outline never renders as 25-48 H1.
+        if _count_top_chapters(a) > _PROMOTE_CHAPTER_CAP:
+            promotion_skipped = True
+        else:
+            a, n_promote = _promote_chapters(a)
     # P3b-opt2: deterministic Qianfan-flatten runs LAST so numbers + rewritten
     # cross-refs survive — only the markdown hash level changes. The caller's cap
     # (list-all=2, deep=3) needs NO adjustment for Wave B: promotion moves the
@@ -639,4 +673,5 @@ def run(article: str, flatten_max_depth: int | None = None, promote_chapters: bo
         skipped_reason=renum["skipped_reason"],
         headings_flattened=n_flat,
         headings_promoted=n_promote,
+        promotion_skipped=promotion_skipped,
     )

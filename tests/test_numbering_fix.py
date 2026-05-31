@@ -91,6 +91,35 @@ def test_run_promotes_chapters_to_h1_by_default():
     assert len(_extract_headings(text)) == len(headings), f"heading lost: {headings}"
 
 
+_GATE_BODY = (
+    "substantial body content with more than ten words so the empty-section collapse heuristic keeps this heading"
+)
+
+
+def test_run_skips_promotion_when_over_chapter_cap():
+    """round 5 T2-PR5: an over-promoted outline (>12 H2 chapters, the dev4 id=91
+    bug) must NOT be promoted to H1 — the residual renders at H2 instead of
+    exploding to many H1. The real count fix is the architect band (T2-PR4);
+    this is the render-depth safety net."""
+    chapters = "\n\n".join(f"## {i} Chapter\n\n{_GATE_BODY}" for i in range(1, 16))  # 15 > cap 12
+    out = numbering_fix_run(f"# Title\n\n{chapters}\n", flatten_max_depth=3)
+    assert out.promotion_skipped is True
+    assert out.headings_promoted == 0
+    headings = _extract_headings(out.article)
+    assert headings[0][0] == "#"  # title stays the only H1
+    assert all(h[0] == "##" for h in headings[1:]), f"chapters must stay at H2 (no H1 explosion): {headings}"
+
+
+def test_run_promotes_when_within_chapter_cap():
+    """A Qianfan-shaped ~9-chapter outline (≤12) promotes normally to H1."""
+    chapters = "\n\n".join(f"## {i} Chapter\n\n{_GATE_BODY}" for i in range(1, 10))  # 9 <= cap 12
+    out = numbering_fix_run(f"# Title\n\n{chapters}\n", flatten_max_depth=3)
+    assert out.promotion_skipped is False
+    assert out.headings_promoted >= 9
+    headings = _extract_headings(out.article)
+    assert all(h[0] == "#" for h in headings), f"chapters should promote to H1: {headings}"
+
+
 def test_run_promote_chapters_false_keeps_legacy_h2():
     """promote_chapters=False renders the legacy structure (chapters at H2),
     so a caller can opt out without behavior drift."""
