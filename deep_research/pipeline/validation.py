@@ -259,7 +259,7 @@ def run(inp: ValidationInput) -> ValidationOutput:
 
     # 3. Total length within domain governor — TIGHTENED. The W9 judge cited
     # "excessive length" / "overlong" in 7 of 10 worst Readability losses.
-    ceil_words = wr.length_ceiling(inp.domain)
+    ceil_words = wr.length_ceiling(inp.domain, inp.language)
     words = len(inp.article.split())
     counts["words"] = words
     counts["domain_ceiling_words"] = ceil_words

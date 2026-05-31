@@ -78,5 +78,13 @@ def all_roles() -> dict:
 # through (output_config.effort). The gpt-5.5 / openrouter roles never receive it.
 def effort_for(role: str) -> str:
     """Resolve the reasoning-effort level for an Opus generation `role`.
-    Precedence: DR_EFFORT_<ROLE> -> DR_OPUS_EFFORT -> 'max'."""
-    return os.environ.get(f"DR_EFFORT_{role.upper()}") or os.environ.get("DR_OPUS_EFFORT") or "max"
+    Precedence: DR_EFFORT_<ROLE> -> DR_OPUS_EFFORT -> 'low'.
+
+    Default is 'low' (2026-05-31): dev8 proved effort=max/high OVER-GENERATES —
+    the architect's JSON plan truncated at the 64k ceiling on every call, and the
+    writer ran sections to 56-96k tokens (vs ~8.5k baseline) for NO leaderboard-score
+    gain (we already beat the reference on all dims). 'max' as the default was a live
+    over-generation/truncation bug. 'low' restores the proven pre-#86 behavior that
+    scored 0.582. Raise per-role via DR_EFFORT_<ROLE> or globally via DR_OPUS_EFFORT
+    only with a measured A/B that shows a score gain."""
+    return os.environ.get(f"DR_EFFORT_{role.upper()}") or os.environ.get("DR_OPUS_EFFORT") or "low"

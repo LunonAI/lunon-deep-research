@@ -19,7 +19,6 @@ These tests prove:
   - non-timeout failures still use the existing snippet_fallback / log path
 """
 
-import concurrent.futures
 import re
 import time
 
@@ -45,30 +44,33 @@ def _fast_research(*_args, role="generalist", **_kwargs):
     }
 
 
-def test_research_with_timeout_kills_hung_specialist(monkeypatch):
-    """The _research_with_timeout helper must raise concurrent.futures.TimeoutError
-    when the underlying research() call exceeds the wall-clock cap. Pre-fix
-    there was no helper — a hung research() call had no bound."""
+def test_research_with_timeout_bounds_hung_specialist(monkeypatch):
+    """The _research_with_timeout helper must SURFACE near the wall-clock cap when
+    the underlying research() call exceeds it (not wait the full hang).
+
+    round 4 (2026-05-31): the helper no longer RAISES on timeout — it now returns
+    a partial-findings dict flagged `timed_out=True` (so the caller ingests the
+    coverage gathered before the cut instead of dropping the whole specialist).
+    This test pins both: it returns (not raises) AND it returns near the cap."""
     # Monkeypatch research to hang for longer than the timeout.
     monkeypatch.setattr(orchestrator, "research", _hang_research)
 
     t0 = time.time()
-    try:
-        orchestrator._research_with_timeout(
-            "evidence_gatherer",
-            [{"id": "Q1", "text": "x", "target_sections": []}],
-            language="en",
-            domain="default",
-            exa_mode="auto",
-            model_override="",
-            timeout_s=1.5,  # short timeout for fast test
-        )
-        raised = None
-    except concurrent.futures.TimeoutError as e:
-        raised = e
+    res = orchestrator._research_with_timeout(
+        "evidence_gatherer",
+        [{"id": "Q1", "text": "x", "target_sections": []}],
+        language="en",
+        domain="default",
+        exa_mode="auto",
+        model_override="",
+        timeout_s=1.5,  # short timeout for fast test
+    )
     elapsed = time.time() - t0
 
-    assert raised is not None, "timeout must raise concurrent.futures.TimeoutError"
+    assert res.get("timed_out") is True, "timeout must return a partial-findings dict flagged timed_out=True"
+    assert res["role"] == "evidence_gatherer"
+    # _hang_research never wrote the sink, so partial findings are empty here.
+    assert res["findings"] == []
     # Must surface within ~timeout_s, not wait the full sleep(60). Allow
     # generous headroom (5s) for thread scheduling overhead.
     assert elapsed < 5.0, f"_research_with_timeout took {elapsed:.1f}s; should have surfaced near the 1.5s cap"
