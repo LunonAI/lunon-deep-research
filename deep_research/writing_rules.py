@@ -953,24 +953,59 @@ _ARCH_REFINE_EMPHASIS = {
 # content to fill space when the architect's outline depth doesn't keep
 # pace; the architect's _SYSTEM HARD RULES (8-12 H2 × 3-6 H3 × 2-4 H4)
 # need to be honored simultaneously for length growth to convert to
-# substantive depth rather than filler.
+# substantive depth rather than filler — so round 4 pairs the higher
+# multiplier with a higher architect TOC chapter count (length via BREADTH).
 _LENGTH_TARGET_MULT = 4.0
 
+# round 4 (2026-05-31): per-LANGUAGE length target. The dev8 measurement vs the
+# #1 model — reference EN ~9.5k words / ZH ~13.5k chars; us EN 48k / ZH 70k;
+# Qianfan (#1) EN ~80k words / ZH ~110k chars — showed the short reference is
+# what we already beat and Qianfan (the LONGEST) is #1, so we target Qianfan's
+# length. The EN catalog medians (~9.5k) drive both languages; these multipliers
+# lift the soft target toward Qianfan per language. Env-overridable
+# (DR_LENGTH_MULT_EN / DR_LENGTH_MULT_ZH) so a dev run can re-calibrate or BACK
+# OFF the dial without a redeploy if the longer length is judged to hurt
+# (lost-in-the-middle / verbosity). Default unknown languages to the EN value.
+_LENGTH_TARGET_MULT_BY_LANG = {
+    # EN: ~9.5k catalog median times this lands a ~62k word soft target; breadth
+    # (architect chapters) + leaf floors carry it toward Qianfan's ~80k words.
+    "en": 6.5,
+    # ZH packs ~1 char/token, so a higher multiplier is needed to approach
+    # Qianfan's ~110k chars.
+    "zh": 8.0,
+}
 
-def length_ceiling(domain: str) -> int:
-    """Per-domain SOFT word target. Bumped `_LENGTH_TARGET_MULT`× above
-    the historical W9-era catalog medians to push toward Qianfan-corpus
-    structural depth. The writer prompt now frames this as a soft target
-    rather than a hard ceiling — see writer_system below. Callers that
-    want the historical W9 baseline should compute
-    `length_ceiling(domain) / _LENGTH_TARGET_MULT` — referencing the
-    constant by name so future calibration bumps stay in sync with this
-    docstring.
-    """
+
+def _length_mult_for(language: str) -> float:
+    """Per-language length multiplier, env-overridable. Precedence:
+    DR_LENGTH_MULT_<LANG> -> _LENGTH_TARGET_MULT_BY_LANG[lang] -> EN default."""
+    lang = (language or "en").lower()[:2]
+    env = os.environ.get(f"DR_LENGTH_MULT_{lang.upper()}")
+    if env:
+        try:
+            return float(env)
+        except ValueError:
+            pass
+    return _LENGTH_TARGET_MULT_BY_LANG.get(lang, _LENGTH_TARGET_MULT_BY_LANG["en"])
+
+
+def length_ceiling(domain: str, language: str = "en") -> int:
+    """Per-domain × per-language SOFT word target. Multiplies the historical
+    W9-era catalog medians by the per-language multiplier (`_length_mult_for`)
+    to push toward the #1-model (Qianfan) corpus length. The writer prompt
+    frames this as a soft target, not a hard ceiling — see writer_system below.
+
+    `language` defaults to "en" for back-compat with any positional-domain
+    caller; pass the task language so ZH gets its higher multiplier. The
+    resolved multiplier comes from `_length_mult_for(language)`, which layers
+    the per-language `_LENGTH_TARGET_MULT_BY_LANG` table over the legacy
+    `_LENGTH_TARGET_MULT` base; callers that want the historical W9 baseline
+    should divide by `_length_mult_for(language)` (referencing it by name so a
+    future calibration bump can't silently invalidate this advice)."""
     key = _DOMAIN_KEY.get(domain, "_overall")
     med = _en_domain_medians()
     raw = med.get(key, med["_overall"])
-    return int(raw * _LENGTH_TARGET_MULT)
+    return int(raw * _length_mult_for(language))
 
 
 def capel_directive(target_tokens: int) -> str:
@@ -1236,7 +1271,7 @@ def writer_system(
     the rule's textual self-guard ("applies when `tier_ranking` is in
     the plan…") prevents silent breakage if a future caller forgets.
     """
-    ceil = length_ceiling(domain)
+    ceil = length_ceiling(domain, language)
 
     # P2-Wave-2-G auto-fire. Fail-soft when the W9 cache is missing
     # (cache.fragile_tasks returns False) so engine still runs cleanly on

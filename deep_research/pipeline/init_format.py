@@ -96,8 +96,10 @@ def run(inp: InitFormatInput) -> InitFormatOutput:
     if not toc:
         return InitFormatOutput(scaffold=Scaffold(sections=[], total_target_tokens=0))
 
-    # Domain length governor → median word_len from reference_catalog.jsonl.
-    median_words = wr.length_ceiling(inp.domain)
+    # Domain length governor → median word_len from reference_catalog.jsonl,
+    # scaled by the per-language multiplier (round 4: ZH targets Qianfan's longer
+    # profile than EN). language threads through so ZH gets its higher target.
+    median_words = wr.length_ceiling(inp.domain, inp.language)
     total_tokens = int(median_words / _WORDS_PER_TOKEN)
 
     # P3b-v5 leaf-aware allocation. id91 / EN list-all is already longer than
