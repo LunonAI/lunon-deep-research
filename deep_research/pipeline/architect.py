@@ -827,17 +827,24 @@ def build(
 
 def _entity_nesting_coverage(toc: list, entities: list) -> tuple[int, list[str]]:
     """How many entity_matrix entities appear (verbatim, word-boundary) as a
-    section/subsection title or depth_seed across the TOC.
+    SUBSECTION title or depth_seed across the TOC.
 
     The no-harm verification for the round-5 T2-PR4 group-and-nest band: with
     list-all/compare capped at ~9 chapters, the architect must NEST every entity
     (as a subsection/seed) rather than DROP some to fit — dropping would regress
     the Comprehensiveness we win. Returns (covered_count, missing_entities).
     ADVISORY (surfaced for the dev-run gate); the `top_sections>top_max` band
-    shortfall is the hard retry trigger for over-promotion."""
+    shortfall is the hard retry trigger for over-promotion.
+
+    Top-level chapter titles are DELIBERATELY excluded from the coverage blob:
+    an entity that appears only as a `## Chapter` title is still FLAT (the old
+    un-nested pattern that can slip under the top-max cap when the architect
+    emits 8-11 entity-named chapters). Counting it as covered would be a false
+    negative — the gate would read `entities_unnested=[]` and conclude the plan
+    is nested when the entities are actually at chapter level. Only subsection
+    titles and depth_seeds are genuine evidence of nesting depth."""
     parts: list[str] = []
     for sec in toc or []:
-        parts.append(str(sec.get("title", "")))
         for sub in sec.get("subsections", []) or []:
             parts.append(str(sub.get("title", "")))
             parts.extend(str(x) for x in (sub.get("depth_seeds") or []))
@@ -1402,9 +1409,16 @@ def _normalize(plan: dict, *, archetype: str | None = None) -> None:
         # win. The top_sections>top_max band shortfall is the hard retry trigger
         # for over-promotion; this stays advisory (verified by the dev-run gate)
         # to avoid fuzzy-match retry churn.
-        covered, unnested = _entity_nesting_coverage(toc, ents)
-        audit["entity_nesting_coverage"] = covered
-        audit["entities_unnested"] = unnested
+        #
+        # Gate on `is_required` (== list-all/compare): the GROUP-AND-NEST rule is
+        # specific to those archetypes. For an auto-promoted/optional matrix
+        # (explain-mechanism, predict/trend, …) entities are SUPPOSED to surface
+        # as top-level section titles, so a non-empty `entities_unnested` there
+        # would misread correct structure as a grouping failure.
+        if is_required:
+            covered, unnested = _entity_nesting_coverage(toc, ents)
+            audit["entity_nesting_coverage"] = covered
+            audit["entities_unnested"] = unnested
 
     # P3-W2 (2026-05-27): framing_chapter audit. For required archetypes,
     # check that the §1 contract artifact exists with the 4 required
