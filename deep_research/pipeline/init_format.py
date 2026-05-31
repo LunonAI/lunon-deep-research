@@ -112,34 +112,30 @@ def run(inp: InitFormatInput) -> InitFormatOutput:
     median_words = wr.length_ceiling(inp.domain, inp.language)
     total_tokens = int(median_words / _WORDS_PER_TOKEN)
 
-    # P3b-v5 leaf-aware allocation. id91 / EN list-all is already longer than
-    # Qianfan and must NOT grow — gate it to the original depth-only behaviour.
-    archetype = (inp.plan.get("_outline_audit") or {}).get("archetype", "")
-    _is_en_list_all = (inp.language or "").lower().startswith("en") and archetype == "list-all"
-    leaves = [_leaf_count(s) for s in toc]
-
-    # Allocation weights. For EN list-all: original depth-only weights (id91
-    # regression lock). Else: scale the depth weight by the section's planned
+    # P3b-v5 leaf-aware allocation: scale each section's share by its planned
     # leaf count so a 12-leaf chapter gets proportionally more than a 3-leaf one
-    # (today both get the same share — the root cause of starved deep chapters).
-    if _is_en_list_all:
-        weights = [1.5 if s.get("depth_target") == "deep" else 1.0 for s in toc]
-    else:
-        weights = [lv * (1.5 if s.get("depth_target") == "deep" else 1.0) for s, lv in zip(toc, leaves, strict=True)]
+    # (the depth-only split starved deep chapters). round 5 T2-PR6: the
+    # `_is_en_list_all` no-grow gate is REMOVED. It was added when EN list-all
+    # rendered as ~78 FLAT H2 (already longer than Qianfan); under the T2-PR4
+    # group-and-nest shape EN list-all is now ~9 nested chapters and the gate was
+    # STARVING it (id=89 landed 0.47× Qianfan length). The SECTION_BUDGET_CEILING
+    # (T2-PR3, 18000) + chapter band (T2-PR4/PR5) bound total length, so the
+    # leaf-aware path is safe for ALL archetypes — length lands consistently.
+    leaves = [_leaf_count(s) for s in toc]
+    weights = [lv * (1.5 if s.get("depth_target") == "deep" else 1.0) for s, lv in zip(toc, leaves, strict=True)]
     weight_sum = sum(weights) or len(toc)
 
     sections = []
     for i, s in enumerate(toc):
         sid = s.get("id", f"S{i + 1}")
         share = total_tokens * weights[i] / weight_sum
-        # P3b-v5: floor each section at leaf_count × _PER_LEAF_TOKENS so every
-        # planned leaf carries its own grounded-depth target even when the domain
-        # governor's total_tokens is the binding constraint — this converts the
-        # length budget into per-leaf depth instead of a thin H2 split. EN
-        # list-all skips the floor (no-grow gate). Greptile PR #17 ceiling clamp
-        # still bounds a degenerate TOC; 800 stays the empty-section floor.
+        # Floor each section at leaf_count × _PER_LEAF_TOKENS so every planned
+        # leaf carries its own grounded-depth target even when the domain
+        # governor's total_tokens is the binding constraint — converting the
+        # length budget into per-leaf depth instead of a thin H2 split. The
+        # ceiling clamp bounds a degenerate TOC; 800 stays the empty-section floor.
         leaf_floor = leaves[i] * _PER_LEAF_TOKENS
-        target = int(share) if _is_en_list_all else max(int(share), leaf_floor)
+        target = max(int(share), leaf_floor)
         expected = max(800, min(target, SECTION_BUDGET_CEILING))
         sections.append(
             ScaffoldSection(
