@@ -942,7 +942,12 @@ _CHAPTER_SYNTHESIS_RULE_ZH = (
     "about the whole set, and (b) name the analytical role the NEXT chapter "
     "plays. REASONING, not recap: do NOT re-cite atoms or re-describe entities. "
     "RE-ALLOCATE an existing leaf's word budget into this paragraph; do NOT add "
-    "length. The ARTICLE still closes with ONE overall synthesis chapter."
+    "length.\n"
+    "FLAT reports (one entity per `##`, no sub-leaves — e.g. list-all): skip the "
+    "per-chapter synthesis paragraph and instead close the ARTICLE with ONE "
+    "overall synthesis chapter doing the same aggregation across all entities "
+    "(ZH-style closing prose, NO scaffolding heading).\n"
+    "The ARTICLE still closes with ONE overall synthesis chapter."
 )
 
 _ARCH_REFINE_EMPHASIS = {

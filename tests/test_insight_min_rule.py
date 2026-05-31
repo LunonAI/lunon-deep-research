@@ -116,6 +116,21 @@ def test_chapter_synthesis_rule_in_writer_system():
         assert "What remains unresolved" in sys  # technique 4 (per-chapter limits)
 
 
+def test_chapter_synthesis_rule_zh_has_flat_report_path():
+    """round 5 T3-PR7 (Greptile #94): the ZH synthesis rule must carry the same
+    flat-report exemption as EN. Without it, a flat ZH report (one entity per
+    `##`, no sub-leaves) fails the ≥2-leaf per-chapter gate AND has no
+    instruction to fall through to one article-level synthesis chapter — so it
+    would emit no synthesis at all. Pin the fall-through, plus the ZH-prose
+    style (no scaffolding heading) that distinguishes the ZH variant from EN."""
+    sys = writer_system("list-all", "default", "zh", ["甲", "乙"], task_id=None)
+    assert "END-OF-CHAPTER SYNTHESIS" in sys
+    assert "FLAT reports" in sys  # the flat-report fall-through Greptile flagged
+    assert "overall synthesis chapter" in sys
+    # ZH variant suppresses the per-chapter synthesis HEADING (Qianfan ZH = 0).
+    assert "小结" in sys
+
+
 def test_writer_system_includes_new_insight_rule_for_every_archetype():
     """Wired through writer_system() — the rule appears regardless of which
     archetype the caller passes. (Old rule was always included too, just
