@@ -189,7 +189,9 @@ def test_entity_nesting_coverage_helper():
 def test_entity_nesting_coverage_word_boundary_no_false_positive():
     """A short entity must not falsely match inside a larger word (word-boundary
     match), else the no-harm guard would hide a dropped entity."""
-    toc = [{"title": "Ionic compounds across regions", "subsections": []}]
+    # Nested under a SUBSECTION (section titles are no longer in the coverage
+    # blob), so the word-boundary check is genuinely exercised against the text.
+    toc = [{"title": "Chemistry", "subsections": [{"title": "Ionic compounds across regions", "depth_seeds": []}]}]
     _, missing = architect._entity_nesting_coverage(toc, ["Io"])
     assert missing == ["Io"]  # NOT matched inside "Ionic"/"regions"
 
@@ -198,15 +200,18 @@ def test_normalize_surfaces_entity_nesting_coverage():
     """_normalize records advisory entity-nesting coverage for list-all so the
     dev-run gate can confirm grouping did not drop entities."""
     plan = {
+        # Fresh dict per chapter via a comprehension — NOT `[{...}] * 8`, which
+        # aliases one dict (and its nested subsections list) across all 8 slots,
+        # so a future write-back in _normalize would mutate every entry at once.
         "report_toc": [
             {
-                "id": "S1",
+                "id": f"S{i + 1}",
                 "title": "Group A",
-                "subsections": [{"id": "S1.1", "title": "alpha", "depth_seeds": ["beta"]}],
+                "subsections": [{"id": f"S{i + 1}.1", "title": "alpha", "depth_seeds": ["beta"]}],
                 "depth_target": "broad",
             }
-        ]
-        * 8,
+            for i in range(8)
+        ],
         "queries": [{"id": f"Q{i + 1}", "text": "q", "type": "factual"} for i in range(architect._QUERIES_MIN)],
         "entity_matrix": {"entities": ["alpha", "beta", "gamma"], "dimensions": ["d1", "d2", "d3", "d4"]},
     }

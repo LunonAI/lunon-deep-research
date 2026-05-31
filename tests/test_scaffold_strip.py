@@ -32,8 +32,32 @@ def test_id89_line_end_markers_removed_no_trailing_space():
     out, stats = strip_residual_scaffolding(text)
     assert "<5093" not in out and "<4788" not in out
     assert "later,\n\nThe Mechanics" in out
-    assert "sink,\n\nProcedural" in out  # leading space dropped, no " \n"
+    assert "sink,\n\nProcedural" in out  # marker stripped, comma glued directly to paragraph break
     assert stats["capel_open"] == 2
+
+
+def test_marker_spaced_both_sides_before_newline_no_trailing_space():
+    # Defensive case the regex lookahead `[ \t]*(?:\n|$)` permits but the
+    # observed id=89 leaks never hit: a marker padded by a space on BOTH sides
+    # with the trailing space sitting right before a paragraph break. Both
+    # spaces must go so no " \n" trailing whitespace is left behind.
+    text = "word <5093 \n\nNext para."
+    out, stats = strip_residual_scaffolding(text)
+    assert "<5093" not in out
+    assert "word\n\nNext para." in out
+    assert " \n" not in out  # no trailing whitespace before the break
+    assert stats["capel_open"] == 1
+
+
+def test_marker_multiple_trailing_spaces_before_newline_all_stripped():
+    # The lookahead `[ \t]*` permits a RUN of trailing spaces before the break.
+    # All of them (plus the leading space) must go so nothing trails the word.
+    text = "tail<4788   \n\nNext para."
+    out, stats = strip_residual_scaffolding(text)
+    assert "<4788" not in out
+    assert "tail\n\nNext para." in out
+    assert " \n" not in out
+    assert stats["capel_open"] == 1
 
 
 def test_inline_comparison_is_not_eaten():

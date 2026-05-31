@@ -542,8 +542,14 @@ _PROMOTE_CHAPTER_CAP = 12
 
 
 def _count_top_chapters(text: str) -> int:
-    """Count `## ` (H2) headings — the chapters _promote_chapters would lift to
-    H1. Post-renumber, every H2 is a numbered chapter (subs are H3)."""
+    """Count `## ` (H2) headings that `_promote_chapters` would lift to H1.
+
+    Counts ALL H2s, not just numbered chapters: post-renumber the numbered
+    chapters are H2 (subs are H3), but the structural headings `## References` /
+    `## 参考文献` / `## Sources` are H2 too and each consumes one cap slot.
+    `_PROMOTE_CHAPTER_CAP` (=12) was calibrated with those structural H2s
+    included (~8-9 chapters + title + refs ≈ 11), so this count must NOT exclude
+    them — tune the cap with that in mind."""
     return sum(1 for m in _HEADING_RE.finditer(text) if len(m.group(1)) == 2)
 
 
