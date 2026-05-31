@@ -108,3 +108,28 @@ def test_max_units_override():
     _, tight = style_clamp.clamp_paragraphs(art, language="en", max_units=20)
     _, loose = style_clamp.clamp_paragraphs(art, language="en", max_units=120)
     assert tight["breaks_inserted"] >= loose["breaks_inserted"]
+
+
+def test_zh_tail_merge_inserts_no_space():
+    """Greptile PR #87: when a short trailing chunk (< _PARA_MIN_TAIL) is merged
+    back into the previous chunk, CJK prose must NOT get an inter-sentence ASCII
+    space. Build a ZH paragraph that splits and leaves a tiny tail so the merge
+    path fires, then assert no `CJK<space>CJK` appears in the output."""
+    big = "该模型在多个基准测试中取得了优异的成绩并展示出明显的性能提升效果非常显著。"
+    short = "结论简短。"
+    art = f"# 标题\n\n## 1 章节\n\n{big * 12}{short}\n"
+    out, stats = style_clamp.clamp_paragraphs(art, language="zh")
+    assert stats["paragraphs_split"] == 1
+    # No space flanked by CJK on both sides (the tail-merge bug signature).
+    assert re.search(r"[一-鿿。][ ][一-鿿]", out) is None, "CJK tail merged with a stray space"
+    assert _nospace(art) == _nospace(out)
+
+
+def test_en_tail_merge_keeps_space():
+    """EN tail-merge still joins with a space (no run-on words)."""
+    sent = "The model achieves strong consistent measurable results across every benchmark studied here. "
+    art = f"# T\n\n## 1 C\n\n{sent * 12}Short tail.\n"
+    out, _ = style_clamp.clamp_paragraphs(art, language="en")
+    # The merged tail must not be glued to the preceding word.
+    assert "here.Short" not in out
+    assert _nospace(art) == _nospace(out)
