@@ -900,7 +900,7 @@ def _clamp_runaway_blocks(article: str) -> tuple[str, dict]:
     Language-agnostic: the threshold is token-based and `_SENT_TERMINALS` covers
     both EN and CJK terminals, so no `language` arg is needed (it was dead input
     that implied language-specific logic that does not exist)."""
-    stats = {"blocks_clamped": 0, "tokens_removed": 0}
+    stats = {"blocks_clamped": 0, "tokens_removed": 0, "blocks_unclamped_no_boundary": 0}
     if os.environ.get("DR_RUNAWAY_CLAMP", "on") == "off" or not article or not article.strip():
         return article, stats
     threshold = _runaway_block_tokens()
@@ -931,7 +931,13 @@ def _clamp_runaway_blocks(article: str) -> tuple[str, dict]:
             continue
         trimmed = _truncate_to_token_budget(body, threshold)
         if trimmed is None or trimmed == body:
-            out.append(block)  # no safe boundary — leave intact rather than hard-cut
+            # No safe sentence boundary in the budget window (e.g. a giant list
+            # or fence-only wall with no `.`/`。`) — leave the block intact rather
+            # than hard-cut, but COUNT the escape so it is observable (Greptile #90
+            # follow-up). Without this an operator reading runaway_clamp_stats sees
+            # blocks_clamped=0 and wrongly concludes the clamp was simply not needed.
+            stats["blocks_unclamped_no_boundary"] += 1
+            out.append(block)
             continue
         stats["blocks_clamped"] += 1
         stats["tokens_removed"] += body_tok - text_metrics.approx_tokens(trimmed)
@@ -942,6 +948,16 @@ def _clamp_runaway_blocks(article: str) -> tuple[str, dict]:
             f"block(s) (~{stats['tokens_removed']} tokens) that exceeded the "
             f"{threshold}-token per-section ceiling — a chapter ran away flat "
             f"instead of nesting. Check the architect outline / runaway budget.",
+            file=sys.stderr,
+            flush=True,
+        )
+    if stats["blocks_unclamped_no_boundary"]:
+        print(
+            f"[orchestrate] WARNING: {stats['blocks_unclamped_no_boundary']} runaway "
+            f"block(s) exceeded the {threshold}-token ceiling but had NO safe sentence "
+            f"boundary in the budget window — left INTACT (not clamped) to avoid a "
+            f"hard mid-token cut. A wall shipped; inspect the architect outline / the "
+            f"offending block.",
             file=sys.stderr,
             flush=True,
         )

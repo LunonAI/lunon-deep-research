@@ -118,6 +118,20 @@ def test_clamp_ignores_hash_comment_inside_code_fence(monkeypatch):
     assert o.text_metrics.approx_tokens(out) < o.text_metrics.approx_tokens(article)
 
 
+def test_clamp_counts_runaway_block_with_no_sentence_boundary(monkeypatch):
+    # Greptile #90 follow-up: an oversized block with NO sentence boundary (a
+    # giant list / fence-only wall, no `.`/`。`) is left intact rather than
+    # hard-cut — but the escape must be OBSERVABLE, not silent. blocks_clamped
+    # stays 0 while a dedicated counter records the un-clamped wall so an operator
+    # reading runaway_clamp_stats can tell the net let one through.
+    _small_threshold(monkeypatch)
+    article = "# 1 Wall\n" + "word " * 200 + "\n"  # over threshold, no sentence ender
+    out, stats = o._clamp_runaway_blocks(article)
+    assert stats["blocks_clamped"] == 0
+    assert stats["blocks_unclamped_no_boundary"] == 1
+    assert out == article  # left intact (no safe boundary to trim to)
+
+
 def test_clamp_noop_when_all_blocks_small(monkeypatch):
     _small_threshold(monkeypatch, 10_000)
     article = "# 1 A\nshort.\n\n# 2 B\nalso short.\n"
