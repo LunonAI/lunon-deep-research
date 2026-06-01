@@ -950,7 +950,13 @@ _CHAPTER_SYNTHESIS_RULE_ZH = (
     "synthesis REPLACES per-chapter synthesis and applies to FLAT reports ONLY "
     "(matching EN). For a non-flat report the per-chapter synthesis paragraphs "
     "ARE the synthesis — do NOT also add a separate article-level synthesis "
-    "chapter (it would be additive length with no budget source)."
+    "chapter (it would be additive length with no budget source).\n"
+    "OPTIONAL per-chapter closer (ZH prose, NO heading — parity with EN "
+    "technique 4): a 2-3 sentence '尚待解决的问题' micro-paragraph naming ONE "
+    "specific open question this chapter cannot settle, framed as the next "
+    "research question (NOT a generic '仍需进一步研究'). Skip it when the chapter "
+    "has no genuine open question — do NOT manufacture one (per AVOID FORMULAIC "
+    "INSERTION)."
 )
 
 _ARCH_REFINE_EMPHASIS = {

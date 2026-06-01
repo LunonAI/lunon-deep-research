@@ -135,6 +135,9 @@ def test_chapter_synthesis_rule_zh_has_flat_report_path():
     # reports. Pin that it appears exactly once and is flat-only.
     assert sys.count("overall synthesis chapter") == 1
     assert "FLAT reports ONLY" in sys
+    # Greptile #94 round-3: ZH parity with EN's optional "what remains unresolved"
+    # closer (a prose paragraph, so the zero-headings rationale doesn't exclude it).
+    assert "尚待解决的问题" in sys
 
 
 def test_writer_system_includes_new_insight_rule_for_every_archetype():
