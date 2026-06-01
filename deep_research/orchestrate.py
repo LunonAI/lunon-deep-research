@@ -849,7 +849,11 @@ def _runaway_block_tokens() -> int:
 def _truncate_to_token_budget(text: str, max_tokens: int) -> str | None:
     """Largest prefix of `text` at a sentence boundary within ~`max_tokens`.
     Uses a proportional char estimate (O(n), avoids per-sentence recount) then
-    backs up to the last sentence terminal. Returns None if no boundary fits.
+    backs up to the last sentence ENDER (keeping any closer that trails it).
+    Fence-aware: a candidate cut whose prefix would leave an unbalanced ``` code
+    fence (dangling open block) is skipped, so a truncated runaway block never
+    ships broken Markdown — matching `_trim_to_last_sentence`. Returns None if no
+    safe boundary fits.
 
     Approximate ceiling, NOT a strict bound: `char_budget` uses the block's
     AVERAGE chars-per-token, so a prefix denser in CJK than the block average
@@ -865,9 +869,26 @@ def _truncate_to_token_budget(text: str, max_tokens: int) -> str | None:
     # CJK-dense prefixes slightly overshooting the budget.
     char_budget = max(1, int(len(text) * max_tokens / total))
     head = text[:char_budget]
+    # Fence parity of the candidate prefix `head[:i+1]` (== `text[:i+1]`, since
+    # head is a prefix): `fence_ends[k]` is the last-char index of the k-th ```
+    # in head, so bisect_right counts fences fully closed at or before i. Mirrors
+    # _trim_to_last_sentence so a cut never lands inside an unclosed code block —
+    # which would ship a dangling open ``` fence mid-article.
+    fence_ends = [m.end() - 1 for m in re.finditer("```", head)]
     for i in range(len(head) - 1, -1, -1):
-        if head[i] in _SENT_TERMINALS:
-            return text[: i + 1]
+        if head[i] not in _SENT_ENDERS:
+            continue
+        if bisect.bisect_right(fence_ends, i) % 2 == 1:
+            continue  # ender sits inside an unclosed code fence -> would dangle
+        # Cut at a sentence ENDER, not the full _SENT_TERMINALS set, so a bare
+        # closer (e.g. the `)` in "...(see Fig 3) and more") is never treated as
+        # a boundary mid-sentence — matching _trim_to_last_sentence. Advance past
+        # any trailing closers (scanning the full text so a `."` straddling the
+        # char budget stays intact) to keep the complete sentence-closing run.
+        end = i
+        while end + 1 < len(text) and text[end + 1] in _SENT_CLOSERS:
+            end += 1
+        return text[: end + 1]
     return None
 
 

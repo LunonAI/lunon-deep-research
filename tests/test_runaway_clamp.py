@@ -26,6 +26,46 @@ def test_truncate_over_budget_cuts_at_sentence_boundary():
     assert out.endswith(".")  # ends on a complete sentence
     assert o.text_metrics.approx_tokens(out) <= o.text_metrics.approx_tokens(text)
     assert len(out) < len(text)
+    # Greptile #90: pin the approximate-ceiling contract. The result may overshoot
+    # max_tokens by a few % on CJK-dense text (see _truncate_to_token_budget
+    # docstring); a loose bound keeps that contract visible and catches a char-
+    # estimate regression that drifts far outside the budget. (This pure-EN case
+    # actually lands at/under budget.)
+    assert o.text_metrics.approx_tokens(out) <= int(30 * 1.2)
+
+
+def test_truncate_does_not_cut_at_bare_closing_paren():
+    # Greptile #90: a bare closer (`)`) is NOT a sentence boundary. When the char
+    # budget lands mid-sentence just after a parenthetical, the backward scan must
+    # skip the `)` and cut at the prior real ENDER — never leaving the fragment
+    # "...(Jones 2021)". Mirrors _trim_to_last_sentence's inline-paren guard.
+    text = (
+        "Complete sentence one here. "
+        "Now a clause with a citation (Jones 2021) keeps running on and on and on "
+        "without any terminator for a long stretch of words"
+    )
+    out = o._truncate_to_token_budget(text, 30)
+    assert out is not None
+    assert out.endswith(".")  # cut at the real ender, not the bare paren
+    assert not out.rstrip().endswith(")")
+    assert "(Jones 2021)" not in out  # the mid-sentence parenthetical is dropped wholesale
+
+
+def test_truncate_does_not_leave_dangling_code_fence():
+    # Greptile follow-up: truncating a runaway block must not cut inside a code
+    # fence and ship a dangling open ```. Enders inside the unclosed block are
+    # skipped; the cut falls back to a sentence ender OUTSIDE the block so the
+    # returned prefix has balanced fences (mirrors _trim_to_last_sentence).
+    text = (
+        "Intro sentence is complete here. ```python\n"
+        + "x = 1  # filler comment line.\n" * 12
+        + "```\ntrailing prose runs on after the block without a terminator for a long stretch of words here"
+    )
+    out = o._truncate_to_token_budget(text, 30)
+    assert out is not None
+    assert out.count("```") % 2 == 0  # balanced fences — no dangling open block
+    assert "```" not in out  # cut before the fence opened
+    assert out.endswith(".")
 
 
 def test_truncate_no_boundary_returns_none():
