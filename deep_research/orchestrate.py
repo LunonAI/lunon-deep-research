@@ -659,12 +659,15 @@ _REFS_HEADING_RE = re.compile(r"(?m)^[ \t]*#{1,3}[ \t]+\d*\.?[ \t]*References?[ 
 def _trim_to_last_sentence(body: str) -> str | None:
     """Trim a mid-sentence body tail back to its last complete sentence.
 
-    Operates on the FINAL paragraph only: cut after its last sentence-ENDER
-    (`_SENT_ENDERS`, keeping any closing bracket/quote that trails it so `."` /
-    `.)` survive intact), or — if that paragraph has no complete sentence at all
-    — drop the whole fragment paragraph. Scanning for an ender (not the full
-    `_SENT_TERMINALS` set) means an inline `"…(Smith 2023) continues the"` tail
-    is dropped wholesale rather than cut at the bare paren into a fragment.
+    Cuts after the last sentence-ENDER (`_SENT_ENDERS`, keeping any closing
+    bracket/quote that trails it so `."` / `.)` survive intact) in the final
+    paragraph. If that paragraph has no complete sentence at all, the whole
+    fragment paragraph is dropped and the scan retries on the preceding text,
+    so a non-None return always ends at a complete sentence even when several
+    trailing paragraphs are each mid-sentence (Greptile #88). Scanning for an
+    ender (not the full `_SENT_TERMINALS` set) means an inline
+    `"…(Smith 2023) continues the"` tail is dropped wholesale rather than cut
+    at the bare paren into a fragment.
 
     Fence-aware in two ways: (1) an unclosed ``` fence (odd count) means a code
     block was truncated mid-stream — sentence scanning can never close it, and
@@ -680,31 +683,41 @@ def _trim_to_last_sentence(body: str) -> str | None:
     stripped = body.rstrip()
     if stripped.count("```") % 2 == 1:
         stripped = stripped[: stripped.rfind("```")].rstrip()
-    para_start = stripped.rfind("\n\n")
-    head = stripped[: para_start + 2] if para_start >= 0 else ""
-    para = stripped[para_start + 2 :] if para_start >= 0 else stripped
-    # Fence parity of the candidate slice = head_fences + (complete ``` fences
-    # within para[:i+1]). `fence_ends[k]` is the last-char index of the k-th
-    # fence in para, so bisect_right(fence_ends, i) counts fences fully closed
-    # at or before i — O(log n) per ender instead of recounting the slice.
-    head_fences = head.count("```")
-    fence_ends = [m.end() - 1 for m in re.finditer("```", para)]
-    cut = -1
-    for i in range(len(para) - 1, -1, -1):
-        if para[i] not in _SENT_ENDERS:
-            continue
-        if (head_fences + bisect.bisect_right(fence_ends, i)) % 2 == 1:
-            continue  # ender sits inside a code block -> slice would be unbalanced
-        cut = i
-        # Keep any closing bracket/quote that belongs to this sentence
-        # (`."`, `.)`, `。」`) so a legitimate closer isn't stripped.
-        while cut + 1 < len(para) and para[cut + 1] in _SENT_CLOSERS:
-            cut += 1
-        break
-    if cut >= 0:
-        return (head + para[: cut + 1]).rstrip()
-    if head.strip():
-        return head.rstrip()
+    # Walk paragraphs from the end backward. If the final paragraph has no
+    # complete sentence, drop it and retry on the preceding text rather than
+    # returning the head blindly — otherwise a body whose last *several*
+    # paragraphs are each mid-sentence would still be returned mid-sentence
+    # (Greptile #88). Each iteration strictly shortens `stripped`, so this
+    # terminates; None means no complete sentence survives anywhere.
+    while stripped.strip():
+        para_start = stripped.rfind("\n\n")
+        head = stripped[: para_start + 2] if para_start >= 0 else ""
+        para = stripped[para_start + 2 :] if para_start >= 0 else stripped
+        # Fence parity of the candidate slice = head_fences + (complete ``` fences
+        # within para[:i+1]). `fence_ends[k]` is the last-char index of the k-th
+        # fence in para, so bisect_right(fence_ends, i) counts fences fully closed
+        # at or before i — O(log n) per ender instead of recounting the slice.
+        head_fences = head.count("```")
+        fence_ends = [m.end() - 1 for m in re.finditer("```", para)]
+        cut = -1
+        for i in range(len(para) - 1, -1, -1):
+            if para[i] not in _SENT_ENDERS:
+                continue
+            if (head_fences + bisect.bisect_right(fence_ends, i)) % 2 == 1:
+                continue  # ender sits inside a code block -> slice would be unbalanced
+            cut = i
+            # Keep any closing bracket/quote that belongs to this sentence
+            # (`."`, `.)`, `。」`) so a legitimate closer isn't stripped.
+            while cut + 1 < len(para) and para[cut + 1] in _SENT_CLOSERS:
+                cut += 1
+            break
+        if cut >= 0:
+            return (head + para[: cut + 1]).rstrip()
+        # No complete sentence in this final paragraph: drop it and retry on the
+        # head, re-resolving any fence the drop left unclosed in the shorter slice.
+        stripped = head.rstrip()
+        if stripped.count("```") % 2 == 1:
+            stripped = stripped[: stripped.rfind("```")].rstrip()
     return None
 
 
@@ -774,7 +787,11 @@ def _guarantee_complete_ending(s: PipelineState) -> str:
         s.completion_repair_stats = stats
         return article
     trimmed = _trim_to_last_sentence(body)
-    if not trimmed or trimmed == body.rstrip():
+    # `_trim_to_last_sentence` already guarantees a complete-sentence (or None)
+    # return; the explicit `_ends_mid_sentence` re-check is a defensive invariant
+    # so a future regression there can never let this layer claim a clean trim
+    # while still shipping a mid-sentence body (Greptile #88).
+    if not trimmed or trimmed == body.rstrip() or _ends_mid_sentence(trimmed):
         stats["still_incomplete"] = True
         print(
             "[orchestrate] WARNING: article body ends mid-sentence and no safe "

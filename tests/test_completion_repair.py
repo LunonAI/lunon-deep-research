@@ -93,6 +93,16 @@ def test_trim_keeps_sentence_after_closed_code_block():
     assert '{"v": 1.0}' in out
 
 
+def test_trim_walks_back_through_consecutive_fragment_paragraphs():
+    # Greptile #88: when the last *several* paragraphs are each mid-sentence,
+    # dropping only the final fragment would still return a mid-sentence head.
+    # The scan must walk back to the last paragraph that ends complete.
+    body = "The opening is complete.\n\nFirst dangling clause runs on without\n\nthe second clause also stops mid"
+    out = o._trim_to_last_sentence(body)
+    assert out == "The opening is complete."
+    assert not o._ends_mid_sentence(out)
+
+
 def test_guarantee_trims_body_preserves_references():
     article = (
         "# 1 Intro\nThis chapter is complete.\n\n"
@@ -123,6 +133,24 @@ def test_guarantee_flags_unrepairable_tail():
     out = o._guarantee_complete_ending(s)
     assert out == article
     assert s.completion_repair_stats["still_incomplete"] is True
+
+
+def test_guarantee_never_ships_mid_sentence_with_consecutive_fragments():
+    # Greptile #88: a body whose final two paragraphs are both mid-sentence must
+    # NOT ship mid-sentence while claiming a clean trim. The guarantee walks back
+    # to the last complete sentence; the result never ends mid-sentence and the
+    # bogus `trimmed`-without-still_incomplete state can't occur.
+    article = (
+        "# 1 Intro\nThe framework is fully established.\n\n"
+        "# 2 Analysis\nThe first dangling clause runs on without\n\n"
+        "the second dangling clause also stops mid"
+    )
+    s = SimpleNamespace(article=article, completion_repair_stats={})
+    out = o._guarantee_complete_ending(s)
+    assert not o._ends_mid_sentence(out)
+    assert out.rstrip().endswith("The framework is fully established.")
+    assert s.completion_repair_stats["trimmed"] is True
+    assert s.completion_repair_stats.get("still_incomplete") in (None, False)
 
 
 # ---- layer 1: bounded final-section re-roll ---------------------------------
