@@ -138,6 +138,10 @@ def test_chapter_synthesis_rule_zh_has_flat_report_path():
     # Greptile #94 round-3: ZH parity with EN's optional "what remains unresolved"
     # closer (a prose paragraph, so the zero-headings rationale doesn't exclude it).
     assert "尚待解决的问题" in sys
+    # Greptile #94 round-4: ZH parity with EN's synthesis-site constraints — no
+    # NEW entity in the synthesis, and one analytical theme only.
+    assert "do NOT profile any new entity" in sys
+    assert "One analytical theme only" in sys
 
 
 def test_writer_system_includes_new_insight_rule_for_every_archetype():
