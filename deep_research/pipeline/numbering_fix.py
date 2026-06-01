@@ -589,11 +589,11 @@ def _flatten_depth(text: str, max_depth: int) -> tuple[str, int]:
     """Demote any heading deeper than `max_depth` to `max_depth` markdown
     level, preserving the heading text (incl. its `N.M` number).
 
-    P3b-opt2 (2026-05-28): matches Qianfan's verified flat render — q91 puts
-    every section at `## N.M Title` (H3=H4=0). For list-all `max_depth=2`
-    (fully flat `##`); other archetypes `max_depth=3` (cap H4 → Qianfan's
-    universal `h4=0`). The per-entity bold paragraph lead-ins carry the
-    sub-structure, so no information is lost. Runs LAST (after renumber), so
+    P3b-opt2 (2026-05-28): caps heading depth so the render matches Qianfan's
+    universal `h4=0`. The production caller passes `max_depth=3` for ALL
+    archetypes (round 5 T2-PR4: list-all changed 2→3, so it now preserves H3
+    leaves like every other archetype). The per-entity bold paragraph lead-ins
+    carry the sub-structure, so no information is lost. Runs LAST (after renumber), so
     the assigned numbers + rewritten cross-refs are preserved — only the
     markdown hash level changes. The first H1 (title, depth 1 < max_depth) is
     never touched."""
@@ -650,11 +650,12 @@ def run(article: str, flatten_max_depth: int | None = None, promote_chapters: bo
             a, n_promote = _promote_chapters(a)
     # P3b-opt2: deterministic Qianfan-flatten runs LAST so numbers + rewritten
     # cross-refs survive — only the markdown hash level changes. The caller's cap
-    # (list-all=2, deep=3) needs NO adjustment for Wave B: promotion moves the
-    # deepest leaf from H4 (`#### N.M.K`) to H3 (`### N.M.K`), which is at/under
-    # both caps, so deep stays `# / ## / ###` (chapters at H1, no H4) and list-all
-    # collapses the promoted `### N.M.K` to `##` (title `#`, chapters `# N`, rest
-    # `##`). Both yield Qianfan's universal h4=0 in the promoted coordinate system.
+    # is 3 for ALL archetypes (round 5 T2-PR4: list-all changed 2→3, so list-all
+    # now preserves H3 leaves exactly like every other archetype). Wave B
+    # promotion moves the deepest leaf from H4 (`#### N.M.K`) to H3 (`### N.M.K`),
+    # which is at/under the cap, so the output stays `# / ## / ###` (chapters at
+    # H1, subs at H2, seeds at H3 — no H4). Qianfan's universal h4=0 is preserved
+    # in the promoted coordinate system.
     n_flat = 0
     if flatten_max_depth is not None:
         a, n_flat = _flatten_depth(a, flatten_max_depth)
