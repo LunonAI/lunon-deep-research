@@ -946,8 +946,11 @@ _CHAPTER_SYNTHESIS_RULE_ZH = (
     "FLAT reports (one entity per `##`, no sub-leaves — e.g. list-all): skip the "
     "per-chapter synthesis paragraph and instead close the ARTICLE with ONE "
     "overall synthesis chapter doing the same aggregation across all entities "
-    "(ZH-style closing prose, NO scaffolding heading).\n"
-    "The ARTICLE still closes with ONE overall synthesis chapter."
+    "(ZH-style closing prose, NO scaffolding heading). This article-level "
+    "synthesis REPLACES per-chapter synthesis and applies to FLAT reports ONLY "
+    "(matching EN). For a non-flat report the per-chapter synthesis paragraphs "
+    "ARE the synthesis — do NOT also add a separate article-level synthesis "
+    "chapter (it would be additive length with no budget source)."
 )
 
 _ARCH_REFINE_EMPHASIS = {

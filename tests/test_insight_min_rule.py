@@ -129,6 +129,12 @@ def test_chapter_synthesis_rule_zh_has_flat_report_path():
     assert "overall synthesis chapter" in sys
     # ZH variant suppresses the per-chapter synthesis HEADING (Qianfan ZH = 0).
     assert "小结" in sys
+    # Greptile #94 round-2: the article-level synthesis must be SCOPED to flat
+    # reports (it REPLACES per-chapter synthesis), not an unconditional trailing
+    # statement that makes it additive — and length-inflating — for non-flat ZH
+    # reports. Pin that it appears exactly once and is flat-only.
+    assert sys.count("overall synthesis chapter") == 1
+    assert "FLAT reports ONLY" in sys
 
 
 def test_writer_system_includes_new_insight_rule_for_every_archetype():
