@@ -104,6 +104,9 @@ def _persist_drift(s, language: str, query: str) -> None:
             # Non-empty/True = a final section ended mid-sentence and the gate
             # re-rolled and/or trimmed to guarantee a clean ending.
             "completion_repair": dict(getattr(s, "completion_repair_stats", {}) or {}),
+            # round 5 T1-PR3: runaway-block clamp. blocks_clamped>0 = a chapter
+            # ran away flat (didn't nest) and the safety net truncated it.
+            "runaway_clamp": dict(getattr(s, "runaway_clamp_stats", {}) or {}),
             # 2026-05-29: advisory final-article metrics (heading profile,
             # frontload_ratio, spaced-CJK + scaffolding RESIDUAL, paragraph
             # density) — distance-from-Qianfan structural signals + round-2 fix
@@ -338,6 +341,13 @@ def from_plan(ctx: dict, query: str, language: str, task_id: int | None = None) 
 
     # NEW: validation gate with cap-2 corrective refiner passes (item 35)
     s = _validation_loop(s, language)
+
+    # round 5 T1-PR3: deterministic runaway-block clamp (safety net for a flat
+    # chapter the budget didn't prevent). Runs early so footnote_normalize /
+    # numbering_fix see the clamped article.
+    clamped_r, cr_stats = _phase("runaway_clamp", _clamp_runaway_blocks, s.article)
+    s.article = clamped_r
+    s.runaway_clamp_stats = cr_stats
 
     # ZH writer-pass (item 27)
     if language == "zh":
@@ -816,6 +826,159 @@ def _guarantee_complete_ending(s: PipelineState) -> str:
     if refs:
         result += "\n\n" + refs.lstrip()
     return result
+
+
+# round 5 T1-PR3 (2026-05-31): runaway-block clamp. id=89's §2.3 was a single
+# FLAT 18,544-word block (50% of the body) the writer never subdivided — the
+# "disorganized collection of excerpts / wall of text" the judge scored
+# formatting 2.0. The init_format SECTION_BUDGET_CEILING (now 18000) prevents
+# the BUDGET; this is the deterministic post-assembly backstop for a block that
+# ran away anyway (inner-loop expand accumulation). It truncates ONLY a single
+# inter-heading block that is pathologically long — the threshold (default
+# 12000 tokens ≈ 9k EN words / ~19k CJK chars) is several× any legitimate
+# Qianfan section (its largest H2 is ~1.8k words), so it never trims real depth;
+# a flat block that large is structurally broken regardless of content value.
+# Cuts at the last sentence boundary; the following heading is preserved.
+_RUNAWAY_BLOCK_TOKENS_DEFAULT = 12_000
+_RUNAWAY_BLOCK_TOKENS_MIN = 4_000  # never below ~3k words — would risk legit deep sections
+_RUNAWAY_BLOCK_TOKENS_MAX = 40_000
+_HEADING_LINE_RE = re.compile(r"(?m)^#{1,6}[ \t]+\S")
+
+
+def _runaway_block_tokens() -> int:
+    """Resolve the per-block runaway threshold from DR_RUNAWAY_BLOCK_TOKENS.
+    Fail loud on a non-integer / out-of-range value rather than silently
+    clamping legit content (too low) or never firing (too high)."""
+    raw = os.environ.get("DR_RUNAWAY_BLOCK_TOKENS")
+    if raw is None:
+        return _RUNAWAY_BLOCK_TOKENS_DEFAULT
+    try:
+        val = int(raw)
+    except ValueError:
+        raise ValueError(f"DR_RUNAWAY_BLOCK_TOKENS must be a non-negative integer; got {raw!r}") from None
+    if not (_RUNAWAY_BLOCK_TOKENS_MIN <= val <= _RUNAWAY_BLOCK_TOKENS_MAX):
+        raise ValueError(
+            f"DR_RUNAWAY_BLOCK_TOKENS out of range [{_RUNAWAY_BLOCK_TOKENS_MIN}, {_RUNAWAY_BLOCK_TOKENS_MAX}]: {val}"
+        )
+    return val
+
+
+def _truncate_to_token_budget(text: str, max_tokens: int) -> str | None:
+    """Largest prefix of `text` at a sentence boundary within ~`max_tokens`.
+    Uses a proportional char estimate (O(n), avoids per-sentence recount) then
+    backs up to the last sentence ENDER (keeping any closer that trails it).
+    Fence-aware: a candidate cut whose prefix would leave an unbalanced ``` code
+    fence (dangling open block) is skipped, so a truncated runaway block never
+    ships broken Markdown — matching `_trim_to_last_sentence`. Returns None if no
+    safe boundary fits.
+
+    Approximate ceiling, NOT a strict bound: `char_budget` uses the block's
+    AVERAGE chars-per-token, so a prefix denser in CJK than the block average
+    (CJK ≈1.6 chars/tok vs non-CJK ≈4) can carry somewhat more than `max_tokens`
+    (≈15% over for a 50/50 block at 2× threshold). The only caller is the
+    runaway-clamp safety net, which fires on pathological walls where a few-%
+    overshoot on already-truncated content is immaterial; callers must not rely
+    on the returned prefix being strictly within `max_tokens`."""
+    total = text_metrics.approx_tokens(text)
+    if total <= max_tokens:
+        return text
+    # Average chars/token across the whole block — see the docstring caveat on
+    # CJK-dense prefixes slightly overshooting the budget.
+    char_budget = max(1, int(len(text) * max_tokens / total))
+    head = text[:char_budget]
+    # Fence parity of the candidate prefix `head[:i+1]` (== `text[:i+1]`, since
+    # head is a prefix): `fence_ends[k]` is the last-char index of the k-th ```
+    # in head, so bisect_right counts fences fully closed at or before i. Mirrors
+    # _trim_to_last_sentence so a cut never lands inside an unclosed code block —
+    # which would ship a dangling open ``` fence mid-article.
+    fence_ends = [m.end() - 1 for m in re.finditer("```", head)]
+    for i in range(len(head) - 1, -1, -1):
+        if head[i] not in _SENT_ENDERS:
+            continue
+        if bisect.bisect_right(fence_ends, i) % 2 == 1:
+            continue  # ender sits inside an unclosed code fence -> would dangle
+        # Cut at a sentence ENDER, not the full _SENT_TERMINALS set, so a bare
+        # closer (e.g. the `)` in "...(see Fig 3) and more") is never treated as
+        # a boundary mid-sentence — matching _trim_to_last_sentence. Advance past
+        # any trailing closers (scanning the full text so a `."` straddling the
+        # char budget stays intact) to keep the complete sentence-closing run.
+        end = i
+        while end + 1 < len(text) and text[end + 1] in _SENT_CLOSERS:
+            end += 1
+        return text[: end + 1]
+    return None
+
+
+def _clamp_runaway_blocks(article: str) -> tuple[str, dict]:
+    """Deterministic safety net: truncate any single inter-heading block whose
+    body exceeds the runaway threshold. Env-gated (DR_RUNAWAY_CLAMP=off to
+    disable), fail-loud. The heading lines and all other blocks are untouched.
+
+    Language-agnostic: the threshold is token-based and `_SENT_TERMINALS` covers
+    both EN and CJK terminals, so no `language` arg is needed (it was dead input
+    that implied language-specific logic that does not exist)."""
+    stats = {"blocks_clamped": 0, "tokens_removed": 0, "blocks_unclamped_no_boundary": 0}
+    if os.environ.get("DR_RUNAWAY_CLAMP", "on") == "off" or not article or not article.strip():
+        return article, stats
+    threshold = _runaway_block_tokens()
+    # Fence-aware heading scan: a `# ...` line at column 0 INSIDE a ``` code
+    # block is a comment (e.g. a Python/shell `# ...` line), not a heading.
+    # Splitting on it would fragment a genuine runaway block into sub-blocks that
+    # each fall under the threshold, so the clamp would silently never fire
+    # (Greptile #90 follow-up). An odd number of ``` fences opened at-or-before a
+    # match means it sits inside an open block — drop those matches.
+    fence_starts = [mm.start() for mm in re.finditer("```", article)]
+    heads = [
+        m.start() for m in _HEADING_LINE_RE.finditer(article) if bisect.bisect_right(fence_starts, m.start()) % 2 == 0
+    ]
+    if not heads:
+        return article, stats
+    bounds = [*heads, len(article)]
+    out = [article[: heads[0]]]  # preamble before the first heading, left as-is
+    for i in range(len(heads)):
+        block = article[heads[i] : bounds[i + 1]]
+        nl = block.find("\n")
+        if nl < 0:
+            out.append(block)
+            continue
+        heading_line, body = block[: nl + 1], block[nl + 1 :]
+        body_tok = text_metrics.approx_tokens(body)
+        if body_tok <= threshold:
+            out.append(block)
+            continue
+        trimmed = _truncate_to_token_budget(body, threshold)
+        if trimmed is None or trimmed == body:
+            # No safe sentence boundary in the budget window (e.g. a giant list
+            # or fence-only wall with no `.`/`。`) — leave the block intact rather
+            # than hard-cut, but COUNT the escape so it is observable (Greptile #90
+            # follow-up). Without this an operator reading runaway_clamp_stats sees
+            # blocks_clamped=0 and wrongly concludes the clamp was simply not needed.
+            stats["blocks_unclamped_no_boundary"] += 1
+            out.append(block)
+            continue
+        stats["blocks_clamped"] += 1
+        stats["tokens_removed"] += body_tok - text_metrics.approx_tokens(trimmed)
+        out.append(heading_line + trimmed.rstrip() + "\n\n")
+    if stats["blocks_clamped"]:
+        print(
+            f"[orchestrate] WARNING: clamped {stats['blocks_clamped']} runaway "
+            f"block(s) (~{stats['tokens_removed']} tokens) that exceeded the "
+            f"{threshold}-token per-section ceiling — a chapter ran away flat "
+            f"instead of nesting. Check the architect outline / runaway budget.",
+            file=sys.stderr,
+            flush=True,
+        )
+    if stats["blocks_unclamped_no_boundary"]:
+        print(
+            f"[orchestrate] WARNING: {stats['blocks_unclamped_no_boundary']} runaway "
+            f"block(s) exceeded the {threshold}-token ceiling but had NO safe sentence "
+            f"boundary in the budget window — left INTACT (not clamped) to avoid a "
+            f"hard mid-token cut. A wall shipped; inspect the architect outline / the "
+            f"offending block.",
+            file=sys.stderr,
+            flush=True,
+        )
+    return "".join(out), stats
 
 
 def _expected_tok_for(scaffold, sid: str) -> int:

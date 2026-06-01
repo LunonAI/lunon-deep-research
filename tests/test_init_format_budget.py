@@ -60,10 +60,11 @@ def test_section_budget_ceiling_not_below_old_value():
 
 
 def test_section_budget_ceiling_uses_post_p1_value():
-    """Pin the ceiling at 30_000 (P3b-v5: raised 20_000→30_000 in lockstep with
-    writer max_tokens 14000→21000, 30000×0.7=21000, for the ZH length lever).
-    Allows future bumps but flags accidental reverts."""
-    assert SECTION_BUDGET_CEILING == 30_000
+    """Pin the ceiling at 18_000 (round-5 T1-PR3: lowered 30_000→18_000 to cap a
+    chapter at Qianfan's largest observed chapter ~13.5k words and prevent the
+    id=89 §2.3 runaway BUDGET; writer max_tokens stays 21000, 0.7×18000=12600 is
+    comfortably inside the call). Flags accidental reverts in either direction."""
+    assert SECTION_BUDGET_CEILING == 18_000
 
 
 # --- P3b-v5: leaf-aware allocation (the candidate-vs-reference length lever) ---
@@ -87,16 +88,32 @@ def _expected_map(plan, language="zh", domain="default"):
 
 
 def test_leaf_aware_budget_scales_with_planned_leaves():
-    """A deep multi-leaf section gets proportionally more budget than a shallow
-    1-leaf section — was ~equal under the old depth-only split, the root cause of
-    starved deep ZH chapters."""
+    """A deep multi-leaf section gets more budget than a shallow 1-leaf section —
+    was ~equal under the old depth-only split, the root cause of starved deep ZH
+    chapters. round-5 T1-PR3: a section heavy enough to blow past the 18000
+    ceiling SATURATES at it (the runaway cap) while still exceeding the shallow
+    section — leaf-aware ordering holds, the runaway budget does not."""
     plan = {
         "_outline_audit": {"archetype": "explain-mechanism"},
         "report_toc": [_toc_section("S1", 5, 3), _toc_section("S2", 1, 0)],  # 15 leaves vs 1
     }
     em = _expected_map(plan, language="zh")
-    assert em["S1"] >= 3 * em["S2"], f"leaf-heavy section not scaled: {em}"
-    assert em["S1"] >= 15 * initf._PER_LEAF_TOKENS * 0.9  # near the leaf floor
+    assert em["S1"] > em["S2"], f"leaf-heavy section not scaled: {em}"
+    assert em["S1"] == initf.SECTION_BUDGET_CEILING  # 15-leaf section saturates the ceiling
+
+
+def test_leaf_aware_scaling_proportional_below_ceiling():
+    """Under the ceiling, budget still scales with leaf count: a 4-leaf section
+    gets more than a 1-leaf section (many sections dilute each share so neither
+    saturates the 18000 runaway cap)."""
+    fillers = [_toc_section(f"F{i}", 2, 2) for i in range(10)]
+    plan = {
+        "_outline_audit": {"archetype": "explain-mechanism"},
+        "report_toc": [_toc_section("S1", 2, 2), _toc_section("S2", 1, 0), *fillers],  # 4 leaves vs 1
+    }
+    em = _expected_map(plan, language="zh")
+    assert em["S1"] < initf.SECTION_BUDGET_CEILING and em["S2"] < initf.SECTION_BUDGET_CEILING
+    assert em["S1"] > em["S2"], f"leaf-aware ordering broke below the ceiling: {em}"
 
 
 def test_en_list_all_allocation_is_leaf_blind_regression_lock():

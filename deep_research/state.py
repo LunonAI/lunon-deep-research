@@ -175,6 +175,10 @@ class PipelineState:
     # truncated mid-sentence past the per-section CUT re-roll. Non-zero/True
     # fields = the gate fired (re-rolled and/or deterministically trimmed).
     completion_repair_stats: dict = field(default_factory=dict)
+    # round 5 T1-PR3: runaway-block clamp telemetry {blocks_clamped, tokens_removed}.
+    # >0 = a chapter ran away as a flat block past the section budget and the
+    # deterministic safety net truncated it (id=89 §2.3 = 18.5k-word wall).
+    runaway_clamp_stats: dict = field(default_factory=dict)
     # 2026-05-29: advisory final-article metrics computed on the shipped article
     # (pipeline/article_metrics.py): heading_profile, frontload_ratio,
     # spaced_cjk_rate, scaffold_residual, paragraph density. Distance-from-Qianfan
