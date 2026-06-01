@@ -116,6 +116,34 @@ def test_chapter_synthesis_rule_in_writer_system():
         assert "What remains unresolved" in sys  # technique 4 (per-chapter limits)
 
 
+def test_chapter_synthesis_rule_zh_has_flat_report_path():
+    """round 5 T3-PR7 (Greptile #94): the ZH synthesis rule must carry the same
+    flat-report exemption as EN. Without it, a flat ZH report (one entity per
+    `##`, no sub-leaves) fails the ≥2-leaf per-chapter gate AND has no
+    instruction to fall through to one article-level synthesis chapter — so it
+    would emit no synthesis at all. Pin the fall-through, plus the ZH-prose
+    style (no scaffolding heading) that distinguishes the ZH variant from EN."""
+    sys = writer_system("list-all", "default", "zh", ["甲", "乙"], task_id=None)
+    assert "END-OF-CHAPTER SYNTHESIS" in sys
+    assert "FLAT reports" in sys  # the flat-report fall-through Greptile flagged
+    assert "overall synthesis chapter" in sys
+    # ZH variant suppresses the per-chapter synthesis HEADING (Qianfan ZH = 0).
+    assert "小结" in sys
+    # Greptile #94 round-2: the article-level synthesis must be SCOPED to flat
+    # reports (it REPLACES per-chapter synthesis), not an unconditional trailing
+    # statement that makes it additive — and length-inflating — for non-flat ZH
+    # reports. Pin that it appears exactly once and is flat-only.
+    assert sys.count("overall synthesis chapter") == 1
+    assert "FLAT reports ONLY" in sys
+    # Greptile #94 round-3: ZH parity with EN's optional "what remains unresolved"
+    # closer (a prose paragraph, so the zero-headings rationale doesn't exclude it).
+    assert "尚待解决的问题" in sys
+    # Greptile #94 round-4: ZH parity with EN's synthesis-site constraints — no
+    # NEW entity in the synthesis, and one analytical theme only.
+    assert "do NOT profile any new entity" in sys
+    assert "One analytical theme only" in sys
+
+
 def test_writer_system_includes_new_insight_rule_for_every_archetype():
     """Wired through writer_system() — the rule appears regardless of which
     archetype the caller passes. (Old rule was always included too, just
