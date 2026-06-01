@@ -904,7 +904,16 @@ def _clamp_runaway_blocks(article: str) -> tuple[str, dict]:
     if os.environ.get("DR_RUNAWAY_CLAMP", "on") == "off" or not article or not article.strip():
         return article, stats
     threshold = _runaway_block_tokens()
-    heads = [m.start() for m in _HEADING_LINE_RE.finditer(article)]
+    # Fence-aware heading scan: a `# ...` line at column 0 INSIDE a ``` code
+    # block is a comment (e.g. a Python/shell `# ...` line), not a heading.
+    # Splitting on it would fragment a genuine runaway block into sub-blocks that
+    # each fall under the threshold, so the clamp would silently never fire
+    # (Greptile #90 follow-up). An odd number of ``` fences opened at-or-before a
+    # match means it sits inside an open block — drop those matches.
+    fence_starts = [mm.start() for mm in re.finditer("```", article)]
+    heads = [
+        m.start() for m in _HEADING_LINE_RE.finditer(article) if bisect.bisect_right(fence_starts, m.start()) % 2 == 0
+    ]
     if not heads:
         return article, stats
     bounds = [*heads, len(article)]

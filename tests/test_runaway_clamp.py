@@ -95,6 +95,29 @@ def test_clamp_truncates_runaway_block_preserves_others(monkeypatch):
     assert o.text_metrics.approx_tokens(out) < o.text_metrics.approx_tokens(article)
 
 
+def test_clamp_ignores_hash_comment_inside_code_fence(monkeypatch):
+    # Greptile #90 follow-up: a `# comment` at column 0 INSIDE a ``` fence is not
+    # a heading. If the scan split on it, this genuine runaway block would split
+    # into a "before" and "after" sub-block that EACH fall under the threshold, so
+    # the clamp would silently fire on neither and the wall would ship intact.
+    _small_threshold(monkeypatch)
+    before = "Prose before the fence here. " * 3  # ~24 tok with the open fence
+    after = "Prose after the comment here. " * 3  # ~25 tok with the close fence
+    article = (
+        "# 1 Runaway\n"
+        + before
+        + "```python\n# a comment at column zero\nx = 1\n```\n"
+        + after
+        + "\n"
+    )
+    out, stats = o._clamp_runaway_blocks(article)
+    # Treated as ONE runaway block (not split at the in-fence `# comment`), so the
+    # full wall is actually clamped instead of silently escaping.
+    assert stats["blocks_clamped"] == 1
+    assert stats["tokens_removed"] > 0
+    assert o.text_metrics.approx_tokens(out) < o.text_metrics.approx_tokens(article)
+
+
 def test_clamp_noop_when_all_blocks_small(monkeypatch):
     _small_threshold(monkeypatch, 10_000)
     article = "# 1 A\nshort.\n\n# 2 B\nalso short.\n"
