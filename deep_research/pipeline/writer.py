@@ -1056,16 +1056,21 @@ def write_section(
     feedback_block = (
         f"\nREVISION FEEDBACK — fix these and integrate the cited evidence inline:\n{feedback}\n" if feedback else ""
     )
-    # 2026-05-31 (round 4): revert 96000 -> 21000, drop think/effort. dev8 proved
-    # effort=high/max made the writer over-generate — sections ran to 56-96k tokens
-    # (vs ~8.5k baseline) and hit the ceiling, for NO leaderboard-score gain. This is
-    # the proven pre-#86 prose-only call. The 21000 ceiling == the 0.7x validator
-    # pass-line for the SECTION_BUDGET_CEILING=30000 CAPEL cap, so a full-length
-    # section still fits. Total-article length parity with the reference (~80k EN words /
-    # ~110k ZH chars) comes from BREADTH — more chapters (architect TOC) + the
-    # per-language CAPEL target — NOT from inflating this single call (which would
-    # re-introduce the streaming-timeout/truncation risk).
-    raw = llm.call("writer", user, system=sys, max_tokens=21000, note=f"writer.sec.{sid}", user_suffix=feedback_block)
+    # 2026-06-02 (round 7): raise 21000 -> 32000. The prior 21000 = 0.7x the
+    # SECTION_BUDGET_CEILING=30000 was wrong in practice: round-6/7 logs show 139
+    # writer.sec calls hitting stop_reason=max_tokens at 21000 (every section
+    # S1-S11), i.e. sections were CUT MID-SENTENCE at the cap — and the client does
+    # NOT re-roll a large truncation (only thin <0.5x ones), so those cuts shipped
+    # as-is (lost chapter tails; for id-44, mid-table cuts corrupted the numeric
+    # spine). Critically we are UNDER-length on every dev6 task (ZH 0.46-0.69x, EN
+    # 0.91x of the reference), so the cap was throttling content we NEED, not trimming
+    # bloat. 32000 = SECTION_BUDGET_CEILING (30000) + headroom, lets a full-budget
+    # section complete in one pass. The dev8 56-96k ballooning was effort=high/max
+    # driven; this call uses NO think/effort, so it tracks the length directive
+    # (~30k) without over-generating. Opus 4.8 streams clean at 32000 no-think
+    # (verified, see anthropic_client). Total length parity still comes mostly from
+    # BREADTH (more chapters) — this just stops the mid-section cut.
+    raw = llm.call("writer", user, system=sys, max_tokens=32000, note=f"writer.sec.{sid}", user_suffix=feedback_block)
     if capel_active:
         text, stats = strip_capel_markers(raw)
     else:
