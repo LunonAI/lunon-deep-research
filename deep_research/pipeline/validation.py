@@ -505,6 +505,34 @@ def run(inp: ValidationInput) -> ValidationOutput:
                 }
             )
 
+    # 12. NUMERIC-SPINE CONSISTENCY (round 8, id-44). When the architect planned
+    # a quantitative deliverable (`plan["numeric_spine"]`), fire a HARD failure if
+    # ≥2 figures EACH self-declare THE headline total (主脊/头条) yet disagree by
+    # >3× or across count-units — the dev6 id-44 "体系崩塌". The detail string IS
+    # the corrective instruction the refiner receives; it leads with the action
+    # because feedback_text truncates each detail to 600 chars. Returns None
+    # (silent) for qualitative plans or non-CJK articles.
+    ns_audit = _validate_numeric_spine_consistency(inp.article, inp.plan.get("numeric_spine"))
+    if ns_audit is not None:
+        counts["numeric_spine_consistency"] = ns_audit
+        if ns_audit["conflict"]:
+            failures.append(
+                {
+                    "check": "numeric_spine_conflict",
+                    "severity": "high",
+                    "detail": (
+                        "Pick the owner chapter's ONE triangulated headline figure, restate that "
+                        "EXACT value+unit VERBATIM in the abstract and EVERY chapter, and DEMOTE all "
+                        "other totals to explicitly scope-tagged sub-figures (e.g. 在弓存量/纯消耗口径/"
+                        "全口径轨交) so no two figures both claim to be the report's single headline "
+                        f"answer. Conflict: {ns_audit['n_headline_figures']} figures self-declared as THE "
+                        f"headline (主脊/头条) disagree by {ns_audit['spread_ratio']:.0f}x"
+                        + (f" and mix units {ns_audit['units']}" if len(ns_audit["units"]) > 1 else "")
+                        + f": {ns_audit['headline_values']}."
+                    ),
+                }
+            )
+
     ok = not failures
 
     # Build structured feedback for the refiner (NOT free-text)
@@ -1242,6 +1270,78 @@ def _validate_entity_coverage(article: str, entity_matrix) -> dict | None:
     total = n_expanded + len(missing)
     coverage = round(n_expanded / total, 3) if total else 1.0
     return {"n_entities": total, "n_expanded": n_expanded, "coverage": coverage, "missing": missing[:20]}
+
+
+# ---------------------------------------------------------------------------
+# NUMERIC-SPINE CONSISTENCY (round 8, id-44). The dev6/round-7b id-44 collapse
+# (0.476 / 0.5365) was 3+ figures EACH self-declared as THE headline total
+# (数字主脊 / 头条数字) at conflicting values — 120万 vs 4.5万 vs 40万 条/年, a ~28x
+# spread; the judge called it "体系崩塌" and it dragged Readability (0.43),
+# Insight-rigor and Comprehensiveness even though we BEAT the reference on every
+# other criterion. Fix C's soft "restate VERBATIM" prompt could not enforce it:
+# each section is an isolated llm.call that never sees the owner chapter's number,
+# so every chapter re-derived its own total. This DETERMINISTIC gate fires when
+# ≥2 figures that BOTH self-declare headline status conflict by >ratio or across
+# count-units, routing a targeted reconcile instruction to the EXISTING refiner
+# (which has whole-article view and runs on id-44's ~78k chars).
+#
+# The discriminator is HEADLINE SELF-DECLARATION, not raw magnitude divergence —
+# this is what makes it safe where the earlier flag-any-two gate was not. A
+# correct triangulation (Qianfan-style) tags its divergent figures as
+# scope/scenario/method COMPONENTS (中枢/区间/情景/自上而下) with only ONE figure
+# declared THE headline, so the headline-declared set collapses to size 1 and the
+# gate stays silent. The cues below are the STRONG self-declaration tokens our
+# spine writer emits next to the single headline total — deliberately NOT 中枢/
+# 基准/区间, which consistent reports also attach to legitimate components.
+_SPINE_HEADLINE_CUES = ("主脊", "头条")
+# A count figure in the spine's domain: [约] <digits>[.<digits>] [万|亿] <条|片|根|件>.
+# Currency (元/亿元) and percentages carry no count-unit so they are ignored.
+_SPINE_FIGURE_RE = re.compile(r"(?:约|近|逾|超|达)?\s*([0-9]+(?:\.[0-9]+)?)\s*([万亿])?\s*([条片根件])")
+_SPINE_MULT = {"万": 1e4, "亿": 1e8, None: 1.0}
+_SPINE_RATIO_MAX = 3.0
+
+
+def _validate_numeric_spine_consistency(article: str, numeric_spine) -> dict | None:
+    """Flag ≥2 mutually-contradictory figures that each self-declare THE headline.
+
+    Returns None (silent) unless the architect planned a quantitative deliverable
+    (``numeric_spine`` is a non-null dict) AND the article is CJK (the cue lexicon
+    and 万/亿 magnitude parsing are Chinese-specific; gated on actual text, not the
+    possibly-mislabeled ``language``). Conflict = the set of
+    headline-declared count figures spans a >``_SPINE_RATIO_MAX`` magnitude ratio
+    OR mixes count-units (条 vs 片 — the口径/unit-switch failure mode).
+    """
+    if not (isinstance(numeric_spine, dict) and numeric_spine.get("quantity")):
+        return None
+    if not _is_cjk_text(article):
+        return None
+    figures: list[tuple] = []  # (magnitude_in_base_units, unit_char)
+    for sent in re.split(r"[。！？\n]", article):
+        if not any(cue in sent for cue in _SPINE_HEADLINE_CUES):
+            continue
+        for m in _SPINE_FIGURE_RE.finditer(sent):
+            mag = float(m.group(1)) * _SPINE_MULT[m.group(2)]
+            # Floor: a headline ANNUAL TOTAL is 万-scale. Exclude per-unit/per-line
+            # coefficients (每弓2条, 单条, 80根/线) that can also sit near a cue token
+            # — they are not totals and would inflate the spread spuriously.
+            if mag >= 1000:
+                figures.append((mag, m.group(3)))
+    if len(figures) < 2:
+        return {"conflict": False, "n_headline_figures": len(figures), "headline_values": []}
+    mags = [f[0] for f in figures]
+    units = sorted({f[1] for f in figures})
+    spread = max(mags) / min(mags) if min(mags) > 0 else 0.0
+    conflict = spread > _SPINE_RATIO_MAX or len(units) > 1
+    # de-dup for the report: distinct values rendered in 万 (central+range
+    # restatements of the SAME value collapse to one entry).
+    distinct = sorted({round(v, -3) for v in mags})
+    return {
+        "conflict": conflict,
+        "n_headline_figures": len(figures),
+        "spread_ratio": round(spread, 1),
+        "units": units,
+        "headline_values": [f"{v / 1e4:.2f}万" for v in distinct][:8],
+    }
 
 
 def _validate_limitations_chapter(article: str, limitations_chapter) -> dict | None:
