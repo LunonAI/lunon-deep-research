@@ -98,6 +98,17 @@ criteria into a STRICT JSON research plan. Output ONLY this JSON object:
                                       the writer compliance floor — every
                                       entity must instantiate at least this
                                       many axes from the dimensions list.   */
+ "numeric_spine": {                /* round 7: REQUIRED (non-null) for QUANTITATIVE */
+   "quantity": str,                /* prompts whose core deliverable is a headline */
+   "unit": str,                    /* count/total/market-size/quantity; null otherwise. */
+   "owner_section": str,           /* `quantity`=what's measured; `unit`=the ONE canonical */
+   "methods": [str, str]           /* unit; `owner_section`=the chapter id that derives + */
+ },                                /* owns the headline; `methods`=the >=2 triangulation
+                                      methods (bottom-up formula + top-down cross-check).
+                                      The single headline figure derived here MUST be
+                                      reused VERBATIM (same figure + unit) everywhere —
+                                      see L2 NUMERIC SPINE in HARD RULES. Set to null for
+                                      qualitative prompts.                            */
  "report_toc": [ {"id": "S1", "title": str,
     "subsections": [ {"id": "S1.1", "title": str,
                       "depth_seeds": [str, ...] /* 2-4 specific
@@ -292,16 +303,26 @@ HARD RULES:
   contract with the reader — Qianfan's verified corpus-wide pattern
   (10/11 articles) and the single most distinguishing structural move
   separating their record-class scores from a survey-style report.
-- L2 NUMERIC SPINE (quantitative prompts — those whose core deliverable is a
-  headline count / total / market size / quantity): in the framing/methodology
-  chapter, anchor ONE base headline figure to a NAMED, CITED datapoint and a
-  stated derivation; that single figure (and anything derived from it) MUST be
-  reused VERBATIM in the abstract, every body chapter, and the forecast — never
-  re-derive a different total per chapter. A quantitative report must yield ONE
-  coherent, extractable headline answer; emitting multiple conflicting totals is
-  the worst possible instruction-following defect for a quantitative prompt.
-  Make the anchoring datapoint + derivation explicit in the plan so every
-  downstream chapter computes from the same base.
+- L2 NUMERIC SPINE (quantitative prompts whose core deliverable is a headline
+  count / total / market size / quantity): set `numeric_spine` (non-null) and
+  build the report around ONE coherent answer, using the industry-standard
+  TRIANGULATION method:
+  • ONE owner chapter (`numeric_spine.owner_section`) DERIVES the headline figure
+    via BOTH a bottom-up parameterized formula (named parameters — e.g.
+    units × rate × frequency — each given a range + a cited source) AND an
+    independent top-down method (e.g. market value ÷ unit price), then CONVERGES
+    the two in a single reconciliation table → ONE range + ONE central ("中枢")
+    estimate. The two methods should land within ~20%; if they diverge, disclose
+    the gap rather than pick one silently.
+  • State the headline as a SINGLE figure in ONE canonical unit
+    (`numeric_spine.unit`). That SAME figure + unit MUST be restated VERBATIM in
+    the abstract, in every body chapter that references the total, and in the
+    conclusion. NEVER re-derive a different total per chapter and NEVER switch
+    units (e.g. 条 vs 片, units vs pieces) without a stated conversion factor.
+    Emitting multiple conflicting totals (the dev-run failure mode) is the single
+    worst instruction-following + readability defect for a quantitative prompt.
+  • Police 口径/scope consistency: define the counting scope ONCE (what is
+    included / excluded) and reconcile any sub-scope figures back to the headline.
 - L7 META-CAUSAL SYNTHESIS (explain-mechanism / predict / trend archetypes):
   include a dedicated synthesis chapter near the end whose depth_seeds build an
   EXPLICIT causal scaffold — (a) enumerate the coupling paths among the

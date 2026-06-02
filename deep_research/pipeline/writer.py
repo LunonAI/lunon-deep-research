@@ -919,6 +919,36 @@ def write_section(
             )
             stakeholder_block = "\n".join(parts) + "\n"
 
+    # round 7 Fix C: numeric-spine directive (mirrors entity_matrix_block). When
+    # the architect flagged a quantitative deliverable (`plan["numeric_spine"]`),
+    # enforce ONE coherent headline figure across sections — the dev6 id-44
+    # failure was 6+ conflicting totals (judge "体系崩塌"). The OWNER chapter derives
+    # it (triangulated); every other chapter REUSES it verbatim, same unit.
+    numeric_spine_block = ""
+    ns = plan.get("numeric_spine")
+    if isinstance(ns, dict) and ns.get("quantity"):
+        ns_unit = ns.get("unit") or ""
+        ns_owner = ns.get("owner_section") or ""
+        ns_methods = "; ".join(str(m) for m in (ns.get("methods") or [])) or (
+            "a bottom-up parameterized formula + an independent top-down cross-check"
+        )
+        if sid == ns_owner:
+            numeric_spine_block = (
+                f"NUMERIC SPINE — this is the OWNER chapter for the headline figure "
+                f"({ns['quantity']}). Derive ONE central estimate + range here using BOTH methods "
+                f"({ns_methods}), converge them in a reconciliation table, and state the result as a "
+                f"SINGLE bolded figure in ONE canonical unit ({ns_unit}). That exact figure + unit is "
+                f"the report's headline answer — the abstract, every other chapter, and the conclusion "
+                f"must restate it VERBATIM.\n"
+            )
+        else:
+            numeric_spine_block = (
+                f"NUMERIC SPINE — the report's ONE headline figure ({ns['quantity']}, unit {ns_unit}) "
+                f"is derived in {ns_owner or 'the owner chapter'}. If this section references the total, "
+                f"restate that SAME figure + unit VERBATIM — never compute or imply a different total, "
+                f"and never switch units.\n"
+            )
+
     user = (
         f"PROMPT ({language}):\n{prompt}\n\n"
         f"You are writing ONLY this section of the report (other sections are "
@@ -929,6 +959,7 @@ def write_section(
         f"DEPTH TARGET: {unit['depth']}\n"
         f"{depth_block}"
         f"{entity_matrix_block}"
+        f"{numeric_spine_block}"
         f"{framing_block}"
         f"{tier_ranking_block}"
         f"{limitations_block}"
