@@ -47,7 +47,16 @@ _DOUBLED_WS_RE = re.compile(r"[ \t]{2,}")
 # non-whitespace character is `#` so prose like "section 4 . 1 . 1" (rare,
 # but possible in citation patterns) is not silently rewritten.
 _HEADING_LINE_RE = re.compile(r"^[ \t]*#+[ \t].*$", re.MULTILINE)
-_DOT_NUMBER_RE = re.compile(r"(\d+)\s+\.\s+(\d+)")
+# round 7 Fix A: full dotted-number token. CAPEL space-injection produces
+# ASYMMETRIC, MULTI-LEVEL fragments like `6 .1`, `6. 1`, `7 .1 .1` (the dev6
+# id-44 collapse — a `6.1` subsection became 1 of 36 fake H1 chapters because
+# numbering_fix read the fragmented `6` as a chapter). The old
+# `(\d+)\s+\.\s+(\d+)` required a space on BOTH sides AND collapsed one dot per
+# pass, so it missed `6 .1` entirely and left `7.1 .1` half-fixed. This matches
+# the WHOLE dotted-number run and strips its internal whitespace in one sub.
+# `(?:...)+` requires a DIGIT after every dot, so `5 . Results`, a list-style
+# `100. Item`, and version prose are never joined.
+_FRAG_NUM_RE = re.compile(r"\d+(?:[ \t]*\.[ \t]*\d+)+")
 
 # Wave 0 §11: word-fragment repair. The two-tier strategy is documented at
 # `_repair_word_fragments` below. The stopword list blocks rejoins of
@@ -281,25 +290,25 @@ _FOOTNOTE_BRACKET_RE = re.compile(r"\[\^([^\]]*)\]")
 
 
 def _repair_heading_numbers(text: str) -> tuple[str, int]:
-    """Repair `## 4 . 1 . 1` → `## 4.1.1` in heading lines.
+    """Repair fragmented heading numbers (`## 6 .1`, `## 6. 1`, `## 7 .1 .1`,
+    `## 4 . 1 . 1`) → `## 6.1` / `## 7.1.1` / `## 4.1.1`.
 
-    Restricted to lines starting with `#` so the rejoin can't silently
-    rewrite legitimate `4 . 1 . 1` patterns in prose (rare but possible
-    in citation patterns or footnoted technical text). Iterative replace
-    handles multi-dot numbering — a single pass converts `4 . 1 . 1` to
-    `4.1 . 1`; the loop runs until the line stabilises.
-    """
+    Restricted to lines starting with `#` so the rejoin can't silently rewrite a
+    legitimate `4 . 1 . 1` pattern in prose. Matches the whole dotted-number run
+    and strips its internal whitespace in a single sub (multi-level safe — the
+    old one-dot-per-pass loop left asymmetric multi-level fragments half-fixed)."""
     n_fixed = 0
 
-    def _fix_line(match: re.Match) -> str:
+    def _collapse(m: re.Match) -> str:
         nonlocal n_fixed
-        line = match.group(0)
-        prev = None
-        while prev != line:
-            prev = line
-            line, n = _DOT_NUMBER_RE.subn(r"\1.\2", line)
-            n_fixed += n
-        return line
+        orig = m.group(0)
+        joined = re.sub(r"[ \t]+", "", orig)
+        if joined != orig:
+            n_fixed += orig.count(".")  # ~dot-levels repaired (keeps telemetry semantics)
+        return joined
+
+    def _fix_line(match: re.Match) -> str:
+        return _FRAG_NUM_RE.sub(_collapse, match.group(0))
 
     return _HEADING_LINE_RE.sub(_fix_line, text), n_fixed
 
