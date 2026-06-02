@@ -192,6 +192,12 @@ def test_heading_dot_asymmetric_space_repaired():
         out, _ = _repair_heading_numbers(frag)
         assert "## 6.1 供应商全景" in out, f"{frag!r} -> {out!r}"
 
+    # multi-level asymmetric (the specific 36-fake-H1 artifact): space before the
+    # first dot only, three levels — `## 7 .1 .1 供应商` must collapse to `## 7.1.1`.
+    for frag in ["## 7 .1 .1 供应商", "## 7. 1. 1 供应商", "## 7 . 1 . 1 供应商", "## 7.1.1 供应商"]:
+        out, _ = _repair_heading_numbers(frag)
+        assert "## 7.1.1 供应商" in out, f"{frag!r} -> {out!r}"
+
 
 def test_heading_dot_repair_precision_digit_dot_digit_only():
     # `\s*` must still only join DIGIT.DIGIT, only on heading lines:

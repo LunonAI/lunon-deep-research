@@ -929,6 +929,16 @@ def write_section(
     if isinstance(ns, dict) and ns.get("quantity"):
         ns_unit = ns.get("unit") or ""
         ns_owner = ns.get("owner_section") or ""
+        # Greptile #95: owner_section is an LLM-generated id. If it is not a real
+        # TOC section id (typo/hallucination), NO section matches `sid == ns_owner`
+        # — every chapter falls to the reuse branch and is told to restate "the
+        # figure derived in <nonexistent>", which no chapter ever derives. That
+        # silently re-introduces the exact conflicting-totals failure this contract
+        # prevents. Fall back to the first TOC section so SOME chapter always owns
+        # the derivation (fail-soft, deterministic).
+        toc_ids = [u.get("id") for u in plan.get("report_toc", []) if isinstance(u, dict) and u.get("id")]
+        if ns_owner not in toc_ids:
+            ns_owner = toc_ids[0] if toc_ids else sid
         ns_methods = "; ".join(str(m) for m in (ns.get("methods") or [])) or (
             "a bottom-up parameterized formula + an independent top-down cross-check"
         )
