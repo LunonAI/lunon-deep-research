@@ -180,6 +180,37 @@ def test_heading_dot_repair_only_touches_heading_lines():
     assert stats["n_heading_repairs"] == 0
 
 
+def test_heading_dot_asymmetric_space_repaired():
+    # round 7 Fix A: the dev6 id-44 collapse. CAPEL space-injection produced
+    # `## 6 .1` (space ONLY before the dot) and `## 6. 1` (only after) — the old
+    # `\s+`-both-sides regex missed both, so numbering_fix read `6` as a chapter
+    # and promoted the 6.1 subsection to an H1 (1 of 36 fake chapters). `\s*`
+    # both sides repairs every spacing variant.
+    from deep_research.pipeline._capel_strip import _repair_heading_numbers
+
+    for frag in ["## 6 .1 供应商全景", "## 6. 1 供应商全景", "## 6 . 1 供应商全景", "## 6.1 供应商全景"]:
+        out, _ = _repair_heading_numbers(frag)
+        assert "## 6.1 供应商全景" in out, f"{frag!r} -> {out!r}"
+
+    # multi-level asymmetric (the specific 36-fake-H1 artifact): space before the
+    # first dot only, three levels — `## 7 .1 .1 供应商` must collapse to `## 7.1.1`.
+    for frag in ["## 7 .1 .1 供应商", "## 7. 1. 1 供应商", "## 7 . 1 . 1 供应商", "## 7.1.1 供应商"]:
+        out, _ = _repair_heading_numbers(frag)
+        assert "## 7.1.1 供应商" in out, f"{frag!r} -> {out!r}"
+
+
+def test_heading_dot_repair_precision_digit_dot_digit_only():
+    # `\s*` must still only join DIGIT.DIGIT, only on heading lines:
+    from deep_research.pipeline._capel_strip import _repair_heading_numbers
+
+    # digit-then-word is NOT joined (no \d after the dot)
+    out, n = _repair_heading_numbers("## Top 5 . Results")
+    assert "5 . Results" in out and n == 0
+    # prose (non-heading line) is untouched
+    out2, n2 = _repair_heading_numbers("see clause 6 .1 of the spec")
+    assert "6 .1" in out2 and n2 == 0
+
+
 def test_heading_dot_repair_no_trigger_without_markers():
     # Input with no CAPEL markers MUST be returned verbatim — the repair
     # runs only when markers were actually stripped. This protects code

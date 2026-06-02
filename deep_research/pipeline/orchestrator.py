@@ -400,7 +400,10 @@ def _compact(parts):
     joined = "\n".join(parts)
     if len(joined) < 6000:
         return joined
-    return llm.call("orchestrator", joined[:48000], system=_COMPACT_SYSTEM, max_tokens=6000, note="orch.compact")
+    # max_tokens 6000 -> 8000 (round 7): round-6/7 logs showed orch.compact hitting
+    # stop_reason=max_tokens (4x), i.e. the evidence-digest summary was itself being
+    # truncated, silently dropping research context fed to the writer/gap-review.
+    return llm.call("orchestrator", joined[:48000], system=_COMPACT_SYSTEM, max_tokens=8000, note="orch.compact")
 
 
 def _gap_review(plan, digest_parts):

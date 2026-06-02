@@ -919,6 +919,46 @@ def write_section(
             )
             stakeholder_block = "\n".join(parts) + "\n"
 
+    # round 7 Fix C: numeric-spine directive (mirrors entity_matrix_block). When
+    # the architect flagged a quantitative deliverable (`plan["numeric_spine"]`),
+    # enforce ONE coherent headline figure across sections — the dev6 id-44
+    # failure was 6+ conflicting totals (judge "体系崩塌"). The OWNER chapter derives
+    # it (triangulated); every other chapter REUSES it verbatim, same unit.
+    numeric_spine_block = ""
+    ns = plan.get("numeric_spine")
+    if isinstance(ns, dict) and ns.get("quantity"):
+        ns_unit = ns.get("unit") or ""
+        ns_owner = ns.get("owner_section") or ""
+        # Greptile #95: owner_section is an LLM-generated id. If it is not a real
+        # TOC section id (typo/hallucination), NO section matches `sid == ns_owner`
+        # — every chapter falls to the reuse branch and is told to restate "the
+        # figure derived in <nonexistent>", which no chapter ever derives. That
+        # silently re-introduces the exact conflicting-totals failure this contract
+        # prevents. Fall back to the first TOC section so SOME chapter always owns
+        # the derivation (fail-soft, deterministic).
+        toc_ids = [u.get("id") for u in plan.get("report_toc", []) if isinstance(u, dict) and u.get("id")]
+        if ns_owner not in toc_ids:
+            ns_owner = toc_ids[0] if toc_ids else sid
+        ns_methods = "; ".join(str(m) for m in (ns.get("methods") or [])) or (
+            "a bottom-up parameterized formula + an independent top-down cross-check"
+        )
+        if sid == ns_owner:
+            numeric_spine_block = (
+                f"NUMERIC SPINE — this is the OWNER chapter for the headline figure "
+                f"({ns['quantity']}). Derive ONE central estimate + range here using BOTH methods "
+                f"({ns_methods}), converge them in a reconciliation table, and state the result as a "
+                f"SINGLE bolded figure in ONE canonical unit ({ns_unit}). That exact figure + unit is "
+                f"the report's headline answer — the abstract, every other chapter, and the conclusion "
+                f"must restate it VERBATIM.\n"
+            )
+        else:
+            numeric_spine_block = (
+                f"NUMERIC SPINE — the report's ONE headline figure ({ns['quantity']}, unit {ns_unit}) "
+                f"is derived in {ns_owner or 'the owner chapter'}. If this section references the total, "
+                f"restate that SAME figure + unit VERBATIM — never compute or imply a different total, "
+                f"and never switch units.\n"
+            )
+
     user = (
         f"PROMPT ({language}):\n{prompt}\n\n"
         f"You are writing ONLY this section of the report (other sections are "
@@ -929,6 +969,7 @@ def write_section(
         f"DEPTH TARGET: {unit['depth']}\n"
         f"{depth_block}"
         f"{entity_matrix_block}"
+        f"{numeric_spine_block}"
         f"{framing_block}"
         f"{tier_ranking_block}"
         f"{limitations_block}"
@@ -1025,16 +1066,21 @@ def write_section(
     feedback_block = (
         f"\nREVISION FEEDBACK — fix these and integrate the cited evidence inline:\n{feedback}\n" if feedback else ""
     )
-    # 2026-05-31 (round 4): revert 96000 -> 21000, drop think/effort. dev8 proved
-    # effort=high/max made the writer over-generate — sections ran to 56-96k tokens
-    # (vs ~8.5k baseline) and hit the ceiling, for NO leaderboard-score gain. This is
-    # the proven pre-#86 prose-only call. The 21000 ceiling == the 0.7x validator
-    # pass-line for the SECTION_BUDGET_CEILING=30000 CAPEL cap, so a full-length
-    # section still fits. Total-article length parity with Qianfan (~80k EN words /
-    # ~110k ZH chars) comes from BREADTH — more chapters (architect TOC) + the
-    # per-language CAPEL target — NOT from inflating this single call (which would
-    # re-introduce the streaming-timeout/truncation risk).
-    raw = llm.call("writer", user, system=sys, max_tokens=21000, note=f"writer.sec.{sid}", user_suffix=feedback_block)
+    # 2026-06-02 (round 7): raise 21000 -> 32000. The prior 21000 = 0.7x the
+    # SECTION_BUDGET_CEILING=30000 was wrong in practice: round-6/7 logs show 139
+    # writer.sec calls hitting stop_reason=max_tokens at 21000 (every section
+    # S1-S11), i.e. sections were CUT MID-SENTENCE at the cap — and the client does
+    # NOT re-roll a large truncation (only thin <0.5x ones), so those cuts shipped
+    # as-is (lost chapter tails; for id-44, mid-table cuts corrupted the numeric
+    # spine). Critically we are UNDER-length on every dev6 task (ZH 0.46-0.69x, EN
+    # 0.91x of Qianfan), so the cap was throttling content we NEED, not trimming
+    # bloat. 32000 = SECTION_BUDGET_CEILING (30000) + headroom, lets a full-budget
+    # section complete in one pass. The dev8 56-96k ballooning was effort=high/max
+    # driven; this call uses NO think/effort, so it tracks the length directive
+    # (~30k) without over-generating. Opus 4.8 streams clean at 32000 no-think
+    # (verified, see anthropic_client). Total length parity still comes mostly from
+    # BREADTH (more chapters) — this just stops the mid-section cut.
+    raw = llm.call("writer", user, system=sys, max_tokens=32000, note=f"writer.sec.{sid}", user_suffix=feedback_block)
     if capel_active:
         text, stats = strip_capel_markers(raw)
     else:
