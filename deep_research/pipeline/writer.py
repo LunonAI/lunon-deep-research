@@ -212,7 +212,7 @@ _SPINE_DERIVE_SYSTEM = (
 )
 
 
-def derive_numeric_spine(plan, digest, language, *, task_id=None):
+def derive_numeric_spine(plan, digest, language):
     """round 8: pre-derive the ONE headline figure BEFORE the section fan-out so
     every isolated section call (and the abstract) can restate the SAME literal
     instead of each re-deriving its own from its evidence slice — the structural
