@@ -60,6 +60,56 @@ def test_score_section_default_note_preserved(monkeypatch):
     assert captured["note"] == "inner_loop"
 
 
+def test_score_section_excludes_na_criteria_from_passfail(monkeypatch):
+    """Per-section scope (2026-06-03): a criterion the grader marks `na` (owned by
+    a DIFFERENT chapter) must be EXCLUDED from this section's min_score/fail — the
+    fix for every-section-failing on other chapters' criteria. Here the only LOW
+    score is na, and the in-scope criteria pass, so the section is OK."""
+    scores = [
+        {"dimension": "comprehensiveness", "criterion": "in-scope", "score": 7.5, "na": False, "rationale": "ok"},
+        {"dimension": "instruction_following", "criterion": "in-scope 2", "score": 8, "na": False, "rationale": "ok"},
+        {"dimension": "comprehensiveness", "criterion": "supplier-share (other chapter)", "score": 1.0, "na": True, "rationale": "out of scope"},
+    ]
+    monkeypatch.setattr(inner_loop.llm, "call_json", lambda *a, **k: {"scores": scores})
+    r = inner_loop.score_section("body", {}, "zh", "产品定义章", section_scope="product definitions")
+    assert r["ok"] is True, r
+    assert r["min_score"] == 7.5  # the na=1.0 is excluded
+    assert r["fail"] == []
+    assert r["n_in_scope"] == 2
+
+
+def test_score_section_passes_scope_to_grader(monkeypatch):
+    """The section's planned scope reaches the grader prompt so it can judge
+    which criteria are in-scope."""
+    captured = {}
+    monkeypatch.setattr(
+        inner_loop.llm, "call_json", lambda role, user, **k: captured.update(user=user) or {"scores": []}
+    )
+    inner_loop.score_section("body", {}, "zh", "T", section_scope="covers suppliers and shares")
+    assert "covers suppliers and shares" in captured["user"]
+
+
+def test_score_section_all_na_falls_back_not_vacuous_pass(monkeypatch):
+    """Degenerate guard: if the grader marks EVERYTHING na, fall back to scoring
+    all criteria so a section can't pass vacuously on zero judged criteria."""
+    scores = [{"dimension": "d", "criterion": "c", "score": 2.0, "na": True, "rationale": "x"}]
+    monkeypatch.setattr(inner_loop.llm, "call_json", lambda *a, **k: {"scores": scores})
+    r = inner_loop.score_section("body", {}, "zh", "T", section_scope="s")
+    assert r["ok"] is False and r["min_score"] == 2.0  # fell back, did not pass on 0 criteria
+
+
+def test_score_section_degraded_path_returns_n_in_scope(monkeypatch):
+    """Return-type consistency: the scorer-failure (degraded) path includes
+    n_in_scope so a caller using r['n_in_scope'] can't KeyError (Greptile #98)."""
+
+    def boom(*a, **k):
+        raise RuntimeError("scorer outage")
+
+    monkeypatch.setattr(inner_loop.llm, "call_json", boom)
+    r = inner_loop.score_section("body", {}, "en", "T")
+    assert r["degraded"] is True and r["n_in_scope"] == 0
+
+
 def test_trajectory_entry_shape():
     """The trajectory entry shape that orchestrate records must carry the
     fields the analysis script reads: i, grounding_ok, scored, score_ok,
