@@ -357,12 +357,18 @@ HARD RULES:
 # different shapes (list-all wants flat 30-80 H2 with no H3/H4 per
 # id=91's verified 78 H2 / 0 H3; compare wants moderate 15-30 H2;
 # explain-mechanism stays at the deeper hierarchical shape).
-_TOP_SECTIONS_MIN = 8
-_TOP_SECTIONS_MAX = 12
+# round 8 (2026-06-02): default top band 8-12 → 12-16, sub/seed 3-6/2-4 → 3-5/2-3,
+# in LOCKSTEP with init_format ceiling 30k→12k. The same total_tokens now spreads
+# across MORE, SHORTER chapters (Qianfan's actual ~11-16 H2 shape) so each
+# completes in one pass instead of clamping to the old 30k ceiling and truncating.
+# Tighter sub/seed keeps per-section leaf_count ~6-12 so leaf_floor (leaves×650)
+# stays ~a Qianfan chapter rather than re-inflating per-chapter size.
+_TOP_SECTIONS_MIN = 12
+_TOP_SECTIONS_MAX = 16
 _SUBSECTIONS_MIN = 3
-_SUBSECTIONS_MAX = 6
+_SUBSECTIONS_MAX = 5
 _SEEDS_MIN = 2
-_SEEDS_MAX = 4
+_SEEDS_MAX = 3
 # P2-Option-A-#4 Greptile PR #22 follow-up (2026-05-25): query-count band
 # enforced in the HARD RULES section of _SYSTEM. Tracked here next to the
 # other structural bounds so a plan that silently regresses to the pre-#4
@@ -493,40 +499,40 @@ _ARCHETYPE_OUTLINE_SHAPE: dict[str, dict[str, int]] = {
     # band to 8-14 + sub band to 4-8 + keep H4 (2-4 seeds) so total
     # H3+H4 leaf count approaches Qianfan's per-article density.
     "explain-mechanism": {
-        "top_min": 8,
-        "top_max": 14,
+        "top_min": 12,
+        "top_max": 18,
         "sub_min": 4,
-        "sub_max": 8,
+        "sub_max": 6,
         "seed_min": 2,
-        "seed_max": 4,
+        "seed_max": 3,
     },
     # predict / trend / recommend: forward-looking analysis archetypes.
     # Qianfan id=38 (trends): 58 H2 / 115 H3. Use the default-shape
     # bounds (closer to the historical 8-12 / 3-6 / 2-4) since these
     # archetypes show wide structural variance across the corpus.
     "predict": {
-        "top_min": 8,
-        "top_max": 12,
+        "top_min": 12,
+        "top_max": 16,
         "sub_min": 3,
-        "sub_max": 6,
+        "sub_max": 5,
         "seed_min": 2,
-        "seed_max": 4,
+        "seed_max": 3,
     },
     "trend": {
-        "top_min": 8,
-        "top_max": 12,
+        "top_min": 12,
+        "top_max": 16,
         "sub_min": 3,
-        "sub_max": 6,
+        "sub_max": 5,
         "seed_min": 2,
-        "seed_max": 4,
+        "seed_max": 3,
     },
     "recommend": {
-        "top_min": 8,
-        "top_max": 12,
+        "top_min": 12,
+        "top_max": 16,
         "sub_min": 3,
-        "sub_max": 6,
+        "sub_max": 5,
         "seed_min": 2,
-        "seed_max": 4,
+        "seed_max": 3,
     },
 }
 

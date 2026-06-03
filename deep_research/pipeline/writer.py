@@ -1066,21 +1066,18 @@ def write_section(
     feedback_block = (
         f"\nREVISION FEEDBACK — fix these and integrate the cited evidence inline:\n{feedback}\n" if feedback else ""
     )
-    # 2026-06-02 (round 7): raise 21000 -> 32000. The prior 21000 = 0.7x the
-    # SECTION_BUDGET_CEILING=30000 was wrong in practice: round-6/7 logs show 139
-    # writer.sec calls hitting stop_reason=max_tokens at 21000 (every section
-    # S1-S11), i.e. sections were CUT MID-SENTENCE at the cap — and the client does
-    # NOT re-roll a large truncation (only thin <0.5x ones), so those cuts shipped
-    # as-is (lost chapter tails; for id-44, mid-table cuts corrupted the numeric
-    # spine). Critically we are UNDER-length on every dev6 task (ZH 0.46-0.69x, EN
-    # 0.91x of Qianfan), so the cap was throttling content we NEED, not trimming
-    # bloat. 32000 = SECTION_BUDGET_CEILING (30000) + headroom, lets a full-budget
-    # section complete in one pass. The dev8 56-96k ballooning was effort=high/max
-    # driven; this call uses NO think/effort, so it tracks the length directive
-    # (~30k) without over-generating. Opus 4.8 streams clean at 32000 no-think
-    # (verified, see anthropic_client). Total length parity still comes mostly from
-    # BREADTH (more chapters) — this just stops the mid-section cut.
-    raw = llm.call("writer", user, system=sys, max_tokens=32000, note=f"writer.sec.{sid}", user_suffix=feedback_block)
+    # 2026-06-02 (round 8): 32000 -> 14000, in lockstep with SECTION_BUDGET_CEILING
+    # 30000 -> 12000 (init_format.py). 14000 = ceiling 12000 + 16.7% headroom, so a
+    # full-budget section still completes in one pass while the cap sits just above
+    # the new ceiling. This is NOT a speed lever per se (max_tokens caps what a call
+    # MAY stream, not what a no-think writer WILL generate — it stops at the CAPEL
+    # length directive, ~ceiling×0.75 markers); the real win is that sections now
+    # TARGET ~6-8k tokens (total_tokens spread across more chapters) and finish well
+    # under 14000, eliminating the mid-section cut that drove the 3.75× truncation
+    # re-roll. Keep this >= SECTION_BUDGET_CEILING + headroom (pinned by
+    # test_init_format_budget) or mid-section truncation returns and re-corrupts the
+    # numeric spine. Opus 4.8 streams clean here no-think.
+    raw = llm.call("writer", user, system=sys, max_tokens=14000, note=f"writer.sec.{sid}", user_suffix=feedback_block)
     if capel_active:
         text, stats = strip_capel_markers(raw)
     else:

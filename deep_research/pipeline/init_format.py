@@ -34,27 +34,39 @@ _WORDS_PER_TOKEN = 0.75
 # `writer.write_section` can produce in one llm.call. Validator passes at
 # >= 0.7× expected, so ceiling × 0.7 must be <= writer_max_tokens.
 #
-# P3b-v5 (2026-05-29): the head-to-head showed Lunon at QUALITY parity with
-# Qianfan (~0.498) but trailing on the leaderboard's candidate-vs-reference
-# ratio (0.582 vs 0.640) because Qianfan's ZH reports are 1.9-3.5× longer —
-# the pairwise judge scores the shared reference relatively weaker next to a
-# longer article. The lever is to lift Lunon's ZH length to Qianfan's profile
-# with GROUNDED depth (one developed leaf per planned depth_seed), so ceiling
-# 20000→30000 and writer max_tokens 14000→21000 in lockstep (30000×0.7=21000).
+# round 8 (2026-06-02): 30_000 → 12_000. The P3b-v5 raise to 30000 chased ZH
+# length parity by making each chapter FATTER, but the id-44 profiling exposed
+# the failure mode: total_tokens (the domain governor's length target, ~96k ZH)
+# was divided across only ~8 chapters, so each chapter's share/leaf-floor hit the
+# 30k ceiling, the writer ran to its 32k cap, got CUT mid-section, and the cut
+# tripped the truncation + quality re-rolls (30 writer calls for 8 sections,
+# 3.75×, 63 min, 697k tokens) — AND we STILL came out UNDER-length (0.56× of
+# Qianfan) because the cut/re-rolled content was lost. The fix takes the SAME
+# total_tokens to Qianfan's actual shape — ~11-16 chapters each ~one Qianfan
+# chapter (~6-8k tokens) that COMPLETE in one pass. So the ceiling drops to
+# 12_000 (no section exceeds ~a Qianfan chapter + headroom, well under the writer
+# cap → single-pass, no cut, no re-roll) and the architect chapter bands rise in
+# LOCKSTEP (architect.py) so the unchanged total_tokens spreads across more,
+# shorter chapters — length from BREADTH, not per-chapter inflation. The total is
+# a distribution of the fixed total_tokens (sum of shares == total_tokens), so
+# total_target is preserved; test_init_format_budget pins this.
 # EN list-all (id91) is already LONGER than Qianfan and is gated out below.
-SECTION_BUDGET_CEILING = 30_000
+SECTION_BUDGET_CEILING = 12_000
 
-# P3b-v5: target tokens per planned H3/H4 LEAF (~675 words ≈ a Qianfan
-# ~700-1000 CJK/leaf at _WORDS_PER_TOKEN). The per-section budget floors at
+# target tokens per planned H3/H4 LEAF. The per-section budget floors at
 # leaf_count × this, so length scales with the architect's planned leaf count
-# (which today is invisible to the allocator) rather than the H2 share split
-# thin. Env-overridable so a dev4 sanity can dial it without a redeploy; a
-# malformed override falls back to the default rather than crashing at import.
+# rather than the H2 share split thin. round 8 (2026-06-02): 900 → 650 in
+# lockstep with the 30k→12k ceiling. At 900/leaf an 8-12-leaf chapter floored to
+# 7.2-10.8k and a leaf-heavy one pinned straight to the 30k ceiling; 650/leaf
+# keeps a Qianfan-sized chapter (~8 leaves ≈ 5.2k) without the floor becoming the
+# binding constraint that re-inflates per-chapter size — so length comes from
+# more chapters (breadth), not deeper ones. Env-overridable so a dev4 sanity can
+# dial it; a malformed override falls back to the default rather than crashing.
 _DR_PER_LEAF_ENV = os.environ.get("DR_PER_LEAF_TOKENS")
 try:
-    _PER_LEAF_TOKENS = int(_DR_PER_LEAF_ENV) if _DR_PER_LEAF_ENV else 900
+    _PER_LEAF_TOKENS = int(_DR_PER_LEAF_ENV) if _DR_PER_LEAF_ENV else 650
 except ValueError:
-    _PER_LEAF_TOKENS = 900
+    _PER_LEAF_TOKENS = 650
 _MIN_LEAVES_PER_SECTION = 3  # back-compat floor for an under-seeded section
 
 

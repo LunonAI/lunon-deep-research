@@ -60,10 +60,11 @@ def test_section_budget_ceiling_not_below_old_value():
 
 
 def test_section_budget_ceiling_uses_post_p1_value():
-    """Pin the ceiling at 30_000 (P3b-v5: raised 20_000→30_000 in lockstep with
-    writer max_tokens 14000→21000, 30000×0.7=21000, for the ZH length lever).
-    Allows future bumps but flags accidental reverts."""
-    assert SECTION_BUDGET_CEILING == 30_000
+    """Pin the ceiling at 12_000 (round 8: lowered 30_000→12_000 in lockstep with
+    writer max_tokens 32000→14000 and the architect 12-16 chapter bands — length
+    now comes from BREADTH, so each chapter completes in one pass instead of
+    clamping to 30k and truncating). Flags accidental reverts in either direction."""
+    assert SECTION_BUDGET_CEILING == 12_000
 
 
 # --- P3b-v5: leaf-aware allocation (the candidate-vs-reference length lever) ---
@@ -95,8 +96,10 @@ def test_leaf_aware_budget_scales_with_planned_leaves():
         "report_toc": [_toc_section("S1", 5, 3), _toc_section("S2", 1, 0)],  # 15 leaves vs 1
     }
     em = _expected_map(plan, language="zh")
-    assert em["S1"] >= 3 * em["S2"], f"leaf-heavy section not scaled: {em}"
-    assert em["S1"] >= 15 * initf._PER_LEAF_TOKENS * 0.9  # near the leaf floor
+    # round 8: the 12k ceiling compresses the achievable ratio (S1 clamps at 12k,
+    # S2 sits at its share/floor) — the leaf-aware scaling still holds, just not 3×.
+    assert em["S1"] >= 1.5 * em["S2"], f"leaf-heavy section not scaled: {em}"
+    assert em["S1"] >= 12 * initf._PER_LEAF_TOKENS * 0.9  # near the leaf floor (15 leaves capped by ceiling)
 
 
 def test_en_list_all_allocation_is_leaf_blind_regression_lock():
@@ -109,3 +112,22 @@ def test_en_list_all_allocation_is_leaf_blind_regression_lock():
     # the SAME toc on a ZH task DOES scale → proves the gate is the only difference
     zh = _expected_map({"_outline_audit": {"archetype": "list-all"}, "report_toc": toc}, language="zh")
     assert zh["S1"] > zh["S2"]
+
+
+def test_round8_length_preserved_by_breadth_and_no_section_clamps():
+    """round-8 lockstep guard: lowering the ceiling 30k→12k must NOT shrink total
+    length — the same total_tokens spreads across the new 12-16 chapter bands. With
+    a representative ZH 'predict' plan (14 chapters × 4 subs × 3 seeds = 12 leaves
+    each) the total must stay in the Qianfan band AND no section may clamp to the
+    ceiling (a clamp == the mid-section truncation this change exists to remove).
+    If a future edit drops the chapter bands or raises the leaf floor, this fails
+    loudly instead of silently regressing length or re-introducing truncation."""
+    toc = [_toc_section(f"S{i + 1}", 4, 3, depth="deep" if i % 3 == 0 else "broad") for i in range(14)]
+    plan = {"_outline_audit": {"archetype": "predict"}, "report_toc": toc}
+    em = _expected_map(plan, language="zh")
+    total = sum(em.values())
+    # Qianfan ZH ≈ 96k tok-equivalent; we target ≥ that (longer scores better on the
+    # pairwise judge) but bounded so a runaway leaf-floor can't explode length.
+    assert 80_000 <= total <= 180_000, f"total_target out of band: {total} ({em})"
+    # NO section at the ceiling → every chapter completes in one writer pass.
+    assert max(em.values()) < SECTION_BUDGET_CEILING, f"a section clamped to the ceiling (truncation risk): {em}"

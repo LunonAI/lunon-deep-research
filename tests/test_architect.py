@@ -172,7 +172,7 @@ def test_normalize_records_shortfall_when_outline_over_bounds():
 
 
 def test_normalize_records_no_shortfall_when_outline_meets_bounds():
-    """A plan that hits the 8-12 / 3-6 / 2-4 bounds AND the 48-64 query band
+    """A plan that hits the 12-16 / 3-5 / 2-3 bounds AND the 48-64 query band
     records zero shortfalls. (Greptile PR #22 follow-up added the
     query-count check; this test now exercises the queries band too.)"""
     plan = {
@@ -190,7 +190,7 @@ def test_normalize_records_no_shortfall_when_outline_meets_bounds():
                 ],
                 "depth_target": "deep",
             }
-            for i in range(8)
+            for i in range(13)  # round 8: 8→13 to meet the new 12-16 top-section band
         ],
         # 48 queries — at the lower edge of the post-#4 48-64 HARD RULE band.
         "queries": [{"id": f"Q{i + 1}", "text": f"q{i + 1}", "type": "factual"} for i in range(48)],
@@ -198,9 +198,9 @@ def test_normalize_records_no_shortfall_when_outline_meets_bounds():
     }
     architect._normalize(plan)
     audit = plan["_outline_audit"]
-    assert audit["n_top_sections"] == 8
-    assert audit["n_subsections_total"] == 24
-    assert audit["n_seeds_total"] == 48
+    assert audit["n_top_sections"] == 13
+    assert audit["n_subsections_total"] == 39  # 13 × 3
+    assert audit["n_seeds_total"] == 78  # 13 × 3 × 2
     assert audit["n_queries"] == 48
     assert audit["shortfalls"] == []
     assert audit["subsections_missing_seeds"] == 0
@@ -357,7 +357,7 @@ def _build_good_plan_obj():
                 ],
                 "depth_target": "broad",
             }
-            for i in range(9)
+            for i in range(13)  # round 8: 9→13 to meet the new 12-16 top-section band
         ],
         "queries": [{"id": f"Q{i + 1}", "text": f"q{i + 1}", "type": "factual"} for i in range(architect._QUERIES_MIN)],
         "acceptance_criteria": [],
@@ -497,7 +497,7 @@ def test_build_triggers_retry_when_first_plan_has_shortfalls(monkeypatch):
     assert calls == ["architect", "architect.retry"], f"unexpected calls: {calls}"
     assert plan["_outline_audit"]["retry_attempted"] is True
     # Retry succeeded — final plan should be the deep one.
-    assert plan["_outline_audit"]["n_top_sections"] == 9
+    assert plan["_outline_audit"]["n_top_sections"] == 13
     assert plan["_outline_audit"]["shortfalls"] == []
     # The original shortfalls are preserved for diagnostics so a dev-run
     # reader can see what the retry fixed.

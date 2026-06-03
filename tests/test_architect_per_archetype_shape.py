@@ -56,13 +56,15 @@ def test_bounds_for_archetype_dispatches_correctly():
     assert compare["seed_max"] == 0  # no H4 for compare
 
     explain = architect._bounds_for_archetype("explain-mechanism")
-    assert explain["top_min"] == 8
-    assert explain["sub_max"] == 8
-    assert explain["seed_max"] == 4  # H4 OK for explain-mechanism
+    assert explain["top_min"] == 12  # round 8: 8→12 (breadth lever, lockstep w/ 12k ceiling)
+    assert explain["top_max"] == 18  # round 8: 14→18
+    assert explain["sub_max"] == 6  # round 8: 8→6 (tighter so leaf_floor stays ~Qianfan-chapter)
+    assert explain["seed_max"] == 3  # round 8: 4→3; H4 still OK for explain-mechanism
 
     predict = architect._bounds_for_archetype("predict")
-    assert predict["top_min"] == 8
-    assert predict["seed_max"] == 4
+    assert predict["top_min"] == 12  # round 8: 8→12
+    assert predict["top_max"] == 16  # round 8: 12→16
+    assert predict["seed_max"] == 3  # round 8: 4→3
 
     # Unknown archetype falls back to DEFAULT.
     default = architect._bounds_for_archetype("unknown-archetype")
@@ -179,16 +181,15 @@ def test_format_retry_feedback_interpolates_per_archetype_bounds():
 
 def test_format_retry_feedback_falls_back_to_default_when_archetype_none():
     """Back-compat: calling _format_retry_feedback without archetype
-    must produce the same string the pre-Wave-2 caller would have seen
-    (uses default 8-12 / 3-6 / 2-4 bounds)."""
+    uses the DEFAULT bounds (round 8: 12-16 / 3-5 / 2-3)."""
     audit = {
         "n_top_sections": 5,
         "n_subsections_total": 0,
         "n_seeds_total": 0,
-        "shortfalls": ["top_sections=5<8"],
+        "shortfalls": ["top_sections=5<12"],
     }
     feedback = architect._format_retry_feedback(audit)
-    assert "8-12 top sections" in feedback, feedback
+    assert "12-16 top sections" in feedback, feedback
 
 
 def test_writer_system_interpolates_per_archetype_subsection_bounds():
