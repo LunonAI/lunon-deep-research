@@ -172,16 +172,85 @@ def write_opening(plan, prompt, language, archetype, domain, digest, *, task_id=
         has_limitations_chapter=bool(plan.get("limitations_chapter")),
         has_tier_ranking=bool(plan.get("tier_ranking")),
     )
+    # round 8: if the headline figure was pre-derived once before the section
+    # fan-out (orchestrate numeric_spine_derive), inject that ONE literal so the
+    # abstract states the SAME number as every chapter. Without this the opening
+    # was the one site that got NO spine directive — a guaranteed extra conflicting
+    # total (the dev6 id-44 體系崩塌). None-safe: resolved is absent on qualitative
+    # plans and when the derive call fail-softs to None.
+    _ns = plan.get("numeric_spine")
+    _resolved = _ns.get("resolved") if isinstance(_ns, dict) else None
+    spine_directive = ""
+    if isinstance(_resolved, dict) and _resolved.get("literal"):
+        spine_directive = (
+            f"\n\nHEADLINE FIGURE — the report's ONE headline number is {_resolved['literal']}. "
+            f"If the opening states the total, use this EXACT string + unit verbatim; never a different value."
+        )
     user = (
         f"PROMPT ({language}):\n{prompt}\n\nREPORT TITLE: "
         f"{plan.get('report_title', '')}\n\nEVIDENCE DIGEST (synthesis "
-        f"input):\n{digest[:18000]}\n\nWrite ONLY the report title (as "
+        f"input):\n{digest[:18000]}{spine_directive}\n\nWrite ONLY the report title (as "
         f"'# Title') followed by the OPENING per the position-1 rule "
         f"(~200 tokens, hard max ~300). Then STOP — sections follow "
         f"separately."
     )
     raw = llm.call("writer", user, system=sys, max_tokens=1400, note="writer.open")
     return _cap_opening_length(raw)
+
+
+_SPINE_DERIVE_SYSTEM = (
+    "You are a quantitative research analyst. Given a research evidence digest and a "
+    "target headline quantity, derive ONE central estimate with a range by triangulating "
+    "the two specified methods (a bottom-up build-up and an independent top-down "
+    "cross-check) and reconciling them to a single figure in ONE canonical counting unit. "
+    'Output ONLY JSON: {"value": str, "range": str, "unit": str, "literal": str, '
+    '"method_note": str, "converged": bool}. `literal` is the EXACT short string every '
+    "chapter and the abstract will restate verbatim — include the central value, the "
+    "range, and the unit (write it in the report's language), e.g. "
+    "'约 7-8 万根/年（区间 6-10 万根/年）'. Set converged=false ONLY if the two methods "
+    "diverge by more than ~20% and you cannot defensibly reconcile them."
+)
+
+
+def derive_numeric_spine(plan, digest, language):
+    """round 8: pre-derive the ONE headline figure BEFORE the section fan-out so
+    every isolated section call (and the abstract) can restate the SAME literal
+    instead of each re-deriving its own from its evidence slice — the structural
+    cause of the dev6 id-44 6-conflicting-totals collapse. Returns a dict
+    {value,range,unit,literal,method_note} or None (fail-soft) for qualitative
+    plans, parse failures, or when the two methods diverge >~20% (in which case the
+    pipeline falls back to the soft owner/reuse directive rather than pinning a
+    non-converged number)."""
+    ns = plan.get("numeric_spine")
+    if not (isinstance(ns, dict) and ns.get("quantity")):
+        return None
+    methods = "; ".join(str(m) for m in (ns.get("methods") or [])) or (
+        "a bottom-up parameterized build-up + an independent top-down cross-check"
+    )
+    user = (
+        f"LANGUAGE: {language}\n"
+        f"TARGET HEADLINE QUANTITY: {ns.get('quantity')}\n"
+        f"CANONICAL UNIT (preferred): {ns.get('unit') or '(choose the natural counting unit)'}\n"
+        f"TRIANGULATION METHODS: {methods}\n\n"
+        f"EVIDENCE DIGEST:\n{digest[:18000]}\n\n"
+        f"Derive the ONE headline figure. Reconcile bottom-up vs top-down to a single central "
+        f"estimate + range in ONE canonical unit, then output the JSON."
+    )
+    try:
+        obj = llm.call_json("writer", user, system=_SPINE_DERIVE_SYSTEM, max_tokens=2000, note="writer.spine")
+    except Exception:  # noqa: BLE001 — derive is fail-soft enhancement; never crash the task
+        return None
+    if not isinstance(obj, dict) or not obj.get("literal"):
+        return None
+    if obj.get("converged") is False:
+        return None
+    return {
+        "value": str(obj.get("value", "")),
+        "range": str(obj.get("range", "")),
+        "unit": str(obj.get("unit") or ns.get("unit") or ""),
+        "literal": str(obj["literal"]),
+        "method_note": str(obj.get("method_note", "")),
+    }
 
 
 def write_section(
@@ -939,25 +1008,48 @@ def write_section(
         toc_ids = [u.get("id") for u in plan.get("report_toc", []) if isinstance(u, dict) and u.get("id")]
         if ns_owner not in toc_ids:
             ns_owner = toc_ids[0] if toc_ids else sid
-        ns_methods = "; ".join(str(m) for m in (ns.get("methods") or [])) or (
-            "a bottom-up parameterized formula + an independent top-down cross-check"
-        )
-        if sid == ns_owner:
+        resolved = ns.get("resolved")
+        if isinstance(resolved, dict) and resolved.get("literal"):
+            # round 8: the headline figure was PRE-DERIVED once before the fan-out
+            # (orchestrate numeric_spine_derive) so every isolated section call now
+            # receives the SAME literal string instead of re-deriving its own — the
+            # structural fix for the dev6 id-44 體系崩塌. Owner & reuse collapse to
+            # ONE directive: restate this exact literal. The owner chapter MAY still
+            # show the reconciliation table, but the NUMBER is fixed input.
+            owner_extra = (
+                " As the OWNER chapter you may show the bottom-up + top-down reconciliation table, "
+                "but the headline NUMBER is fixed input — do not derive or present a different one."
+                if sid == ns_owner
+                else ""
+            )
             numeric_spine_block = (
-                f"NUMERIC SPINE — this is the OWNER chapter for the headline figure "
-                f"({ns['quantity']}). Derive ONE central estimate + range here using BOTH methods "
-                f"({ns_methods}), converge them in a reconciliation table, and state the result as a "
-                f"SINGLE bolded figure in ONE canonical unit ({ns_unit}). That exact figure + unit is "
-                f"the report's headline answer — the abstract, every other chapter, and the conclusion "
-                f"must restate it VERBATIM.\n"
+                f"NUMERIC SPINE — the report's ONE headline figure ({ns['quantity']}) is: "
+                f"{resolved['literal']}. Wherever this section states the total, use this EXACT "
+                f"figure + unit VERBATIM; never re-derive, round, or switch units.{owner_extra}\n"
             )
         else:
-            numeric_spine_block = (
-                f"NUMERIC SPINE — the report's ONE headline figure ({ns['quantity']}, unit {ns_unit}) "
-                f"is derived in {ns_owner or 'the owner chapter'}. If this section references the total, "
-                f"restate that SAME figure + unit VERBATIM — never compute or imply a different total, "
-                f"and never switch units.\n"
+            # Fail-soft fallback (derive returned None / older plans): the soft Fix-C
+            # owner/reuse split. Weaker (each section can still re-derive), but better
+            # than nothing; the validation telemetry monitor flags any residual conflict.
+            ns_methods = "; ".join(str(m) for m in (ns.get("methods") or [])) or (
+                "a bottom-up parameterized formula + an independent top-down cross-check"
             )
+            if sid == ns_owner:
+                numeric_spine_block = (
+                    f"NUMERIC SPINE — this is the OWNER chapter for the headline figure "
+                    f"({ns['quantity']}). Derive ONE central estimate + range here using BOTH methods "
+                    f"({ns_methods}), converge them in a reconciliation table, and state the result as a "
+                    f"SINGLE bolded figure in ONE canonical unit ({ns_unit}). That exact figure + unit is "
+                    f"the report's headline answer — the abstract, every other chapter, and the conclusion "
+                    f"must restate it VERBATIM.\n"
+                )
+            else:
+                numeric_spine_block = (
+                    f"NUMERIC SPINE — the report's ONE headline figure ({ns['quantity']}, unit {ns_unit}) "
+                    f"is derived in {ns_owner or 'the owner chapter'}. If this section references the total, "
+                    f"restate that SAME figure + unit VERBATIM — never compute or imply a different total, "
+                    f"and never switch units.\n"
+                )
 
     user = (
         f"PROMPT ({language}):\n{prompt}\n\n"
