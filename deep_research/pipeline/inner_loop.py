@@ -85,7 +85,7 @@ def score_section(
         # ship (re-writing a probably-fine section while the scorer is down would
         # just burn the inner-loop budget) — but it ships honestly labelled, not
         # as a top-quality pass.
-        return {"ok": True, "scores": [], "min_score": None, "fail": [], "degraded": True}
+        return {"ok": True, "scores": [], "min_score": None, "fail": [], "degraded": True, "n_in_scope": 0}
     scores = obj.get("scores", []) if isinstance(obj, dict) else []
     # Per-section scope (2026-06-03): a criterion the grader marked `na` (owned by
     # a DIFFERENT chapter) is EXCLUDED from this section's pass/fail — previously
