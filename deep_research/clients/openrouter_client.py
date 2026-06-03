@@ -16,6 +16,20 @@ from .._env import get, log_usage
 _KEY = get("OPENROUTER_API_KEY")
 _URL = "https://openrouter.ai/api/v1/chat/completions"
 _PINNED = get("DR_OPENROUTER_PROVIDER")
+# round 10 (2026-06-03): when NO provider is explicitly pinned, route by
+# THROUGHPUT so OpenRouter serves the model on its FASTEST provider instead of
+# the cheapest. The Nemotron specialist EXTRACTS (~14k-token structured output)
+# were auto-routed to slow providers (DekaLLM/Nebius) and timing out at the 1000s
+# specialist cap → the structured findings were DISCARDED and the run degraded to
+# crude snippet evidence AND ate the full timeout. Throughput routing keeps the
+# extract inside budget, so we keep the rich findings (better Comprehensiveness/
+# Insight) and finish faster. Set DR_OPENROUTER_SORT="" / "off" to disable, or
+# "price"/"latency" to choose a different OpenRouter sort key.
+# Default ON: an unset/empty env means throughput routing (get() returns "" for
+# unset). Explicit "off"/"none" disables it (revert to the _PINNED order).
+_SORT = (get("DR_OPENROUTER_SORT") or "throughput").lower()
+if _SORT in ("off", "none"):
+    _SORT = ""
 # Thread-safe Session for TCP+TLS reuse — pool sized for workers=20+
 # concurrency (50+ concurrent OpenRouter calls). Mounted on both schemes;
 # pool_connections matches pool_maxsize so multi-provider routes don't
@@ -24,6 +38,34 @@ _SESSION = requests.Session()
 _ADAPTER = requests.adapters.HTTPAdapter(pool_connections=100, pool_maxsize=100)
 _SESSION.mount("http://", _ADAPTER)
 _SESSION.mount("https://", _ADAPTER)
+
+
+def _provider_config(provider):
+    """Build the OpenRouter `provider` routing object.
+
+    Per-call `provider` semantics:
+      None → default auto-routing. Throughput sort (`_SORT`, default "throughput")
+        picks the FASTEST provider and takes PRECEDENCE over a legacy fixed-provider
+        pin (`_PINNED`/DR_OPENROUTER_PROVIDER) — pinning DeepInfra was the root cause
+        of the slow Nemotron extracts (served slow / fell back to DekaLLM/Nebius and
+        blew the 1000s specialist cap). DR_OPENROUTER_SORT=off restores the pin.
+      "" → no pin, any provider (still throughput-sorted when `_SORT` is on).
+      "X" → STRICT pin to X, no fallback, no sort (repro experiments).
+    The served provider is logged per-call in `note=...provider=X` for audit.
+    """
+    if provider is None:
+        cfg = {"allow_fallbacks": True}
+        if _SORT:
+            cfg["sort"] = _SORT
+        elif _PINNED:
+            cfg["order"] = [_PINNED]
+        return cfg
+    if provider == "":
+        cfg = {"allow_fallbacks": True}
+        if _SORT:
+            cfg["sort"] = _SORT
+        return cfg
+    return {"allow_fallbacks": False, "order": [provider]}
 
 
 def raw_call(model, user, system="", max_tokens=8000, seed=None, max_retries=3, timeout=180, note="", provider=None):
@@ -44,22 +86,7 @@ def raw_call(model, user, system="", max_tokens=8000, seed=None, max_retries=3, 
         "Content-Type": "application/json",
         "X-Title": "lunon-deep-research",
     }
-    # Per-call provider override semantics:
-    #   provider=None → primary _PINNED with fallback ALLOWED (default).
-    #     Trades strict reproducibility for reliability under provider load
-    #     (e.g. DeepInfra Nemotron slowness can fall through to Together/etc).
-    #     We log the actual serving provider per-call in `note=...provider=X`
-    #     so the post-hoc distribution is auditable.
-    #   provider="" → no pin, any provider with fallback (W6 ZH writers).
-    #   provider="X" → STRICT pin to X, no fallback (for repro experiments).
-    if provider is None:
-        provider = {"allow_fallbacks": True}
-        if _PINNED:
-            provider["order"] = [_PINNED]
-    elif provider == "":
-        provider = {"allow_fallbacks": True}
-    else:
-        provider = {"allow_fallbacks": False, "order": [provider]}
+    provider = _provider_config(provider)
     last = ""
     for attempt in range(max_retries):
         payload = {
