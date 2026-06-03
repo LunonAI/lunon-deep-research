@@ -740,7 +740,17 @@ def _run_section_loop(s: PipelineState, query, language):
             # marks out-of-scope criteria `na` instead of failing the section on
             # OTHER chapters' obligations — the every-section-fails (min_score 0.5-4.5)
             # + scope-drift-degradation bug the round-9 drift exposed.
-            _scope_acs = writer._acs_for_section(plan, sid)
+            # EXPLICIT assignments only — exclude UNIVERSAL ACs (empty target_sections,
+            # the `not ts` branch of writer._acs_for_section). A whole-report AC listed
+            # as this section's "assigned obligation" would tell the scorer the chapter
+            # MUST satisfy it, conflicting with the system prompt's na-the-whole-report
+            # rule and risking a fail on a criterion one chapter can't meet alone.
+            _scope_acs = [
+                a
+                for a in (plan.get("acceptance_criteria") or [])
+                if a.get("target_sections")
+                and (sid in a["target_sections"] or sid.split(".")[0] in a["target_sections"])
+            ]
             _section_scope = (
                 "Subsections: "
                 + ("; ".join(sub.get("title", "") for sub in u.get("subs", []) if sub.get("title")) or "(none)")
