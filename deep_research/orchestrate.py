@@ -735,7 +735,21 @@ def _run_section_loop(s: PipelineState, query, language):
                 )
                 _accum(stats)
                 continue
-            r = inner_loop.score_section(draft_s, spec, language, u["title"], note=f"inner_loop.{sid}")
+            # Per-section scope (2026-06-03): tell the scorer what THIS chapter is
+            # responsible for (its subsections + assigned acceptance_criteria) so it
+            # marks out-of-scope criteria `na` instead of failing the section on
+            # OTHER chapters' obligations — the every-section-fails (min_score 0.5-4.5)
+            # + scope-drift-degradation bug the round-9 drift exposed.
+            _scope_acs = writer._acs_for_section(plan, sid)
+            _section_scope = (
+                "Subsections: "
+                + ("; ".join(sub.get("title", "") for sub in u.get("subs", []) if sub.get("title")) or "(none)")
+                + ". Assigned obligations: "
+                + (" | ".join(a.get("text", "") for a in _scope_acs if a.get("text")) or "(general)")
+            )
+            r = inner_loop.score_section(
+                draft_s, spec, language, u["title"], note=f"inner_loop.{sid}", section_scope=_section_scope
+            )
             last_scores = r
             traj.append(
                 {
