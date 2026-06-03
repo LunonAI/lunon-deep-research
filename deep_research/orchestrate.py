@@ -264,6 +264,20 @@ def from_plan(ctx: dict, query: str, language: str, task_id: int | None = None) 
     _dedup_mode = os.environ.get("DR_EVIDENCE_DEDUP", "url+embedding")
     s.evidence_dedup_stats = _phase("evidence_dedup", evidence_dedup.dedup_bank, s.memory_bank, mode=_dedup_mode)
 
+    # round 8: pre-derive the ONE headline figure BEFORE the opening + section
+    # fan-out so the abstract and every isolated section restate the SAME literal
+    # instead of each re-deriving its own from its evidence slice (the structural
+    # cause of the dev6 id-44 6-conflicting-totals 體系崩塌). This is ONE ~15-30s
+    # serial call strictly before the fan-out — it does NOT serialize the parallel
+    # sections. The in-place mutation of s.plan["numeric_spine"]["resolved"] is seen
+    # by BOTH write_opening (below) and the section-loop closure (closes over s.plan).
+    # Gated on a quantitative plan; fail-soft to None → the soft owner/reuse directive.
+    _ns_plan = s.plan.get("numeric_spine") if isinstance(s.plan.get("numeric_spine"), dict) else None
+    if _ns_plan and _ns_plan.get("quantity"):
+        _resolved = _phase("numeric_spine_derive", writer.derive_numeric_spine, s.plan, s.digest, language)
+        if _resolved:
+            _ns_plan["resolved"] = _resolved
+
     # Writer opening + per-section quality loop (W3 + W5)
     s.opening = _phase(
         "writer_opening",
