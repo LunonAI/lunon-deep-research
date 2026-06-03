@@ -274,9 +274,7 @@ def from_plan(ctx: dict, query: str, language: str, task_id: int | None = None) 
     # Gated on a quantitative plan; fail-soft to None → the soft owner/reuse directive.
     _ns_plan = s.plan.get("numeric_spine") if isinstance(s.plan.get("numeric_spine"), dict) else None
     if _ns_plan and _ns_plan.get("quantity"):
-        _resolved = _phase(
-            "numeric_spine_derive", writer.derive_numeric_spine, s.plan, s.digest, language, task_id=s.task_id
-        )
+        _resolved = _phase("numeric_spine_derive", writer.derive_numeric_spine, s.plan, s.digest, language)
         if _resolved:
             _ns_plan["resolved"] = _resolved
 
