@@ -98,6 +98,18 @@ def test_score_section_all_na_falls_back_not_vacuous_pass(monkeypatch):
     assert r["ok"] is False and r["min_score"] == 2.0  # fell back, did not pass on 0 criteria
 
 
+def test_score_section_degraded_path_returns_n_in_scope(monkeypatch):
+    """Return-type consistency: the scorer-failure (degraded) path includes
+    n_in_scope so a caller using r['n_in_scope'] can't KeyError (Greptile #98)."""
+
+    def boom(*a, **k):
+        raise RuntimeError("scorer outage")
+
+    monkeypatch.setattr(inner_loop.llm, "call_json", boom)
+    r = inner_loop.score_section("body", {}, "en", "T")
+    assert r["degraded"] is True and r["n_in_scope"] == 0
+
+
 def test_trajectory_entry_shape():
     """The trajectory entry shape that orchestrate records must carry the
     fields the analysis script reads: i, grounding_ok, scored, score_ok,
