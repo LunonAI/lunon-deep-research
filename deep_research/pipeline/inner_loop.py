@@ -93,8 +93,11 @@ def score_section(
     # failed the supplier-share criteria it was never meant to cover (min_score
     # 0.5-4.5 on every section, wasted re-rolls + scope-drift degradation).
     in_scope = [s for s in scores if isinstance(s, dict) and not s.get("na")]
-    # Guard: if the grader marked EVERYTHING na (degenerate), fall back to all
-    # scored criteria so a section can't pass vacuously.
+    # Guard: if the grader marked EVERYTHING na (degenerate/hallucinated), fall
+    # back to all scored criteria so the section isn't graded on zero criteria.
+    # Note: an empty `scores` list still yields judged=[] -> mn=10.0 -> ok=True
+    # (unchanged pre-scope behaviour; a genuine scorer FAILURE takes the
+    # `except` path above and ships honestly labelled `degraded=True`).
     judged = in_scope or [s for s in scores if isinstance(s, dict)]
     nums = [float(s.get("score", 0)) for s in judged]
     mn = min(nums) if nums else 10.0
