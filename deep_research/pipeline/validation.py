@@ -505,33 +505,21 @@ def run(inp: ValidationInput) -> ValidationOutput:
                 }
             )
 
-    # 12. NUMERIC-SPINE CONSISTENCY (round 8, id-44). When the architect planned
-    # a quantitative deliverable (`plan["numeric_spine"]`), fire a HARD failure if
-    # ≥2 figures EACH self-declare THE headline total (主脊/头条) yet disagree by
-    # >3× or across count-units — the dev6 id-44 "体系崩塌". The detail string IS
-    # the corrective instruction the refiner receives; it leads with the action
-    # because feedback_text truncates each detail to 600 chars. Returns None
-    # (silent) for qualitative plans or non-CJK articles.
+    # 12. NUMERIC-SPINE CONSISTENCY (round 8, id-44) — TELEMETRY MONITOR, not a
+    # hard failure. When the architect planned a quantitative deliverable
+    # (`plan["numeric_spine"]`), detect ≥2 figures that EACH self-declare THE
+    # headline total (主脊/头条) yet disagree by >3× or across count-units — the
+    # dev6 id-44 "体系崩塌". The GENERATIVE pre-derive (orchestrate
+    # numeric_spine_derive → writer.derive_numeric_spine) now prevents this at the
+    # source by injecting ONE resolved literal into every section + the abstract;
+    # this gate is the safety net that surfaces any RESIDUAL conflict in counts /
+    # drift telemetry. It deliberately does NOT append a failure: the only
+    # corrective path is the whole-article refiner, a verified no-op on long CJK
+    # reports (reverts at ratio<0.70), so a failure would burn a refiner pass that
+    # cannot fix it. Returns None (silent) for qualitative / non-CJK articles.
     ns_audit = _validate_numeric_spine_consistency(inp.article, inp.plan.get("numeric_spine"))
     if ns_audit is not None:
         counts["numeric_spine_consistency"] = ns_audit
-        if ns_audit["conflict"]:
-            failures.append(
-                {
-                    "check": "numeric_spine_conflict",
-                    "severity": "high",
-                    "detail": (
-                        "Pick the owner chapter's ONE triangulated headline figure, restate that "
-                        "EXACT value+unit VERBATIM in the abstract and EVERY chapter, and DEMOTE all "
-                        "other totals to explicitly scope-tagged sub-figures (e.g. 在弓存量/纯消耗口径/"
-                        "全口径轨交) so no two figures both claim to be the report's single headline "
-                        f"answer. Conflict: {ns_audit['n_headline_figures']} figures self-declared as THE "
-                        f"headline (主脊/头条) disagree by {ns_audit['spread_ratio']:.0f}x"
-                        + (f" and mix units {ns_audit['units']}" if len(ns_audit["units"]) > 1 else "")
-                        + f": {ns_audit['headline_values']}."
-                    ),
-                }
-            )
 
     ok = not failures
 
