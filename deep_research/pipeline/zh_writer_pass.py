@@ -74,7 +74,7 @@ _REGISTER_SYSTEM = (
     "· 去模糊：把“可能/似乎/大约”换成量化区间（如“由约75–80%升至84%”）。\n"
     "· 不在行文中写算式：“A×B=C”改写为“A与B的乘积为C”。\n"
     "· 破折号克制：以逗号、冒号替代，每千字不超过约12个。\n"
-    "只输出改写后的这段内容（含原标题），不要任何前言。"
+    "只输出改写后的正文本身，不要重复或新增任何标题行，不要任何前言。"
 )
 
 _CRITIC_SYSTEM = (
@@ -85,13 +85,37 @@ _CRITIC_SYSTEM = (
 
 
 def _split_leading_headings(text: str) -> tuple[str, str]:
-    """Split off the leading run of heading/blank lines so the model never sees
-    (and so cannot renumber/retitle) the chunk's own heading — reattached verbatim."""
+    """Freeze ONLY the chunk's OWN top heading (its first heading line + the blank
+    lines around it) so the model can't renumber/retitle the chapter — reattached
+    verbatim. A stacked sub-heading (## N immediately followed by ### N.M before any
+    prose) STAYS in the body so the model keeps its sub-section context (Greptile
+    #101 issue 1); numbering_fix repairs any in-body sub-heading numbering."""
     lines = text.splitlines(keepends=True)
     h = 0
-    while h < len(lines) and (lines[h].lstrip().startswith("#") or not lines[h].strip()):
+    while h < len(lines) and not lines[h].strip():  # leading blanks
         h += 1
+    if h < len(lines) and lines[h].lstrip().startswith("#"):  # the chunk's OWN heading (one line)
+        h += 1
+        while h < len(lines) and not lines[h].strip():  # + its trailing blanks
+            h += 1
     return "".join(lines[:h]), "".join(lines[h:])
+
+
+def _drop_echoed_heading(out: str, head: str) -> str:
+    """If the model echoed/fabricated the frozen CHAPTER heading at the start of its
+    output (despite the prompt forbidding it), drop ONLY that exact duplicate line —
+    never a legitimate in-body sub-heading — so the reattached `head` isn't doubled
+    (Greptile #101 issue 2)."""
+    head_heading = next((ln.strip() for ln in head.splitlines() if ln.lstrip().startswith("#")), "")
+    if not head_heading:
+        return out
+    lines = out.splitlines(keepends=True)
+    i = 0
+    while i < len(lines) and not lines[i].strip():  # skip blanks the model may have led with
+        i += 1
+    if i < len(lines) and lines[i].strip() == head_heading:
+        return "".join(lines[i + 1 :]).lstrip("\n")
+    return out
 
 
 def _polish_chunk(text: str, prompt: str, role_model: str, spine_literal: str) -> tuple[str, dict]:
@@ -118,7 +142,9 @@ def _polish_chunk(text: str, prompt: str, role_model: str, spine_literal: str) -
         )
     except Exception as e:  # noqa: BLE001 — enhancement only; revert this chunk
         return orig, {"applied": False, "reason": f"err:{type(e).__name__}"}
-    out = (head + out.strip()) if head else out.strip()
+    out = out.strip()
+    if head:
+        out = head + _drop_echoed_heading(out, head).strip()
     # Restore the chunk's ORIGINAL trailing whitespace (the blank line(s) that
     # separate chapters) so the verbatim reassembly never runs two chapters
     # together — and so an identity polish round-trips byte-for-byte.
@@ -196,9 +222,11 @@ def _zh_pass_chunked(article: str, prompt: str, role_model: str, spine_literal: 
     if len(chapters) < 2:  # no top-chapter structure → fall back to one call
         return _zh_pass_single(article, prompt, role_model, spine_literal)
     # _top_chapters EXCLUDES the title/preamble before chapter 1 — capture it or
-    # the abstract (which carries the spine literal) is lost on reassembly.
-    first_start = article.index(chapters[0])
-    preamble = article[:first_start]
+    # the abstract (which carries the spine literal) is lost on reassembly. The
+    # chapter slices are contiguous to end-of-article, so the preamble length is
+    # exactly article_len - joined_chapters_len — robust vs str.index, which would
+    # mis-locate the boundary if a heading repeats verbatim (Greptile #101 issue 3).
+    preamble = article[: len(article) - sum(len(c) for c in chapters)]
     units = ([preamble] if preamble.strip() else []) + list(chapters)
 
     def polish_unit(u: str) -> tuple[str, dict]:

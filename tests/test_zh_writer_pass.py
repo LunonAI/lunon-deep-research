@@ -134,6 +134,28 @@ def test_fail_soft_on_exception(monkeypatch):
     assert r["article"] == art
 
 
+def test_split_freezes_only_own_heading_keeps_subheading(monkeypatch):
+    # Greptile #101 issue 1: a stacked sub-heading stays in the body (context),
+    # only the chunk's OWN chapter heading is frozen out.
+    head, body = z._split_leading_headings("## 1 章\n### 1.1 小节\n\n正文")
+    assert head == "## 1 章\n"
+    assert body == "### 1.1 小节\n\n正文"
+    head2, body2 = z._split_leading_headings("## 1 章\n\n### 1.1 小节\n\n正文")
+    assert head2 == "## 1 章\n\n" and body2.startswith("### 1.1")
+    head3, body3 = z._split_leading_headings("无标题正文。")  # no heading
+    assert head3 == "" and body3 == "无标题正文。"
+
+
+def test_drop_echoed_heading_only_strips_exact_duplicate():
+    # Greptile #101 issue 2: a model echo of the frozen heading is dropped, but a
+    # legitimate in-body sub-heading is NOT.
+    head = "## 1 第一章\n\n"
+    assert z._drop_echoed_heading("## 1 第一章\n\n正文。", head) == "正文。"
+    assert z._drop_echoed_heading("### 1.1 小节\n\n正文。", head) == "### 1.1 小节\n\n正文。"
+    assert z._drop_echoed_heading("正文。", head) == "正文。"
+    assert z._drop_echoed_heading("正文。", "") == "正文。"  # no frozen heading → untouched
+
+
 def test_register_proxies_logged(monkeypatch):
     _patch(monkeypatch, lambda model, user, **kw: (_body_of(user).replace("是因为", "由于"), {}))
     art = _long_article()
