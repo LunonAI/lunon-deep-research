@@ -50,10 +50,16 @@ def test_sort_default_is_throughput_when_env_unset(monkeypatch):
     # oc.get to the live function before _SORT is computed. get() reads the
     # .env ENV map first, then os.environ, so neutralise BOTH sources to make
     # the test hermetic regardless of the host/CI environment.
+    original_sort = oc._SORT
     monkeypatch.setitem(_env.ENV, "DR_OPENROUTER_SORT", "")
     monkeypatch.delenv("DR_OPENROUTER_SORT", raising=False)
     importlib.reload(oc)
     try:
         assert oc._SORT == "throughput"
     finally:
-        importlib.reload(oc)
+        # Restore the recomputed module global directly. A second
+        # importlib.reload here would run while monkeypatch is STILL active
+        # (teardown fires only after the test returns), recomputing _SORT from
+        # the patched env and leaving it stale on hosts that set
+        # DR_OPENROUTER_SORT. Direct restore is env-independent.
+        oc._SORT = original_sort
