@@ -1,10 +1,11 @@
 """OpenRouter client (OpenAI-compatible) — Nemotron researcher specialists and
 the ZH writer-pass candidates. Mirrors gpt55.py retry + auto cost-log.
 
-Reproducibility (decision #1): pin ONE underlying provider. Set
-`DR_OPENROUTER_PROVIDER=<slug>` to hard-pin; otherwise allow_fallbacks=false and
-the served provider is recorded in the cost-log note so it can be pinned once
-observed.
+Default routing (round 10+): sort by THROUGHPUT (fastest provider) so large
+structured extracts finish inside the 1000 s specialist cap. Set
+`DR_OPENROUTER_SORT=off` to restore the legacy fixed-provider pin
+(`DR_OPENROUTER_PROVIDER=<slug>`). The served provider is recorded in the
+cost-log note for post-hoc audit.
 """
 
 import time
@@ -23,7 +24,7 @@ _PINNED = get("DR_OPENROUTER_PROVIDER")
 # specialist cap → the structured findings were DISCARDED and the run degraded to
 # crude snippet evidence AND ate the full timeout. Throughput routing keeps the
 # extract inside budget, so we keep the rich findings (better Comprehensiveness/
-# Insight) and finish faster. Set DR_OPENROUTER_SORT="" / "off" to disable, or
+# Insight) and finish faster. Set DR_OPENROUTER_SORT="off" to disable, or
 # "price"/"latency" to choose a different OpenRouter sort key.
 # Default ON: an unset/empty env means throughput routing (get() returns "" for
 # unset). Explicit "off"/"none" disables it (revert to the _PINNED order).
