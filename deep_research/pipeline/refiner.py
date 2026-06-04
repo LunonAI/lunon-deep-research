@@ -12,6 +12,7 @@ import re
 
 from .. import llm
 from .. import writing_rules as wr
+from ..text_metrics import approx_tokens
 
 # Adapted from AI-Q REWRITE_PROMPT (aiq_teardown.md §6) — generalized, NOT
 # overfit to the 100 tasks (v4 §4.5 repro-risk note).
@@ -73,11 +74,20 @@ opening verbatim. Obey the source-attribution rule below.
 # the path to actually deduping reference-length articles — deferred, evidence-gated.)
 _MAX_OUT_TOKENS = 32000
 _REVERT_RATIO = 0.70
-_TOK = 4  # ~chars-per-token heuristic (non-CJK rate; cf. text_metrics.approx_tokens)
+_TOK = 4  # legacy chars-per-token heuristic (non-CJK rate); test-only — the skip
+# estimate now uses the CJK-aware text_metrics.approx_tokens (see below).
 
 
 def refine(draft: str, *, archetype: str, language: str, section_scores=None, failing_rationales=None) -> dict:
-    est_out_tokens = len(draft) // _TOK
+    # round 10 (2026-06-03): use the CJK-aware estimator, not len//4. The old
+    # `len(draft)//4` UNDER-counted CJK ~2.6x, so a ~110k-char ZH draft estimated
+    # ~27.5k tok and PASSED the skip check → the refiner RAN (billed input + ~3.5min)
+    # then REVERTED at the 0.70 floor (can't regenerate ~68k CJK tokens within the
+    # 32000 output cap) — a paid no-op on ~half the benchmark (every long ZH task).
+    # approx_tokens gives ~68k for the same draft → 68k×0.7=47.8k > 32000 → it now
+    # SKIPS honestly (free, no wasted call). Semantically correct too: the refiner
+    # is a PRUNING pass we do NOT want on an already-under-length ZH article.
+    est_out_tokens = approx_tokens(draft)
     if est_out_tokens * _REVERT_RATIO > _MAX_OUT_TOKENS:
         return {
             "article": draft,
