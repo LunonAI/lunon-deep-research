@@ -117,6 +117,7 @@ def _persist_drift(s, language: str, query: str) -> None:
             # the band without un-citing claims — it never does).
             "clamp_citations": dict(getattr(s, "clamp_citations_stats", {}) or {}),
             "clamp_emdash": dict(getattr(s, "clamp_emdash_stats", {}) or {}),
+            "zh_writer_pass": dict(getattr(s, "zh_writer_pass_stats", {}) or {}),
             # P3b-OPT2 (2026-05-27): per-section inner-loop trajectory so
             # scripts/inner_cap_ab_analysis.py can measure whether the 2nd/3rd
             # corrective pass (only reachable at INNER_CAP=3) earns its cost.
@@ -338,10 +339,16 @@ def from_plan(ctx: dict, query: str, language: str, task_id: int | None = None) 
     # NEW: validation gate with cap-2 corrective refiner passes (item 35)
     s = _validation_loop(s, language)
 
-    # ZH writer-pass (item 27)
+    # ZH writer-pass (item 27) — chunked for long ZH (round 10). Pass the
+    # numeric_spine so the per-chunk guard reverts any chapter that mutates the
+    # headline figure. Runs after validation, before xref_repair/footnote_normalize/
+    # numbering_fix/cjk_despace, which clean up anything the register polish touches.
     if language == "zh":
-        zp = _phase("zh_writer_pass", zh_writer_pass.zh_pass, s.article, query)
+        zp = _phase(
+            "zh_writer_pass", zh_writer_pass.zh_pass, s.article, query, numeric_spine=s.plan.get("numeric_spine")
+        )
         s.article = zp["article"]
+        s.zh_writer_pass_stats = zp.get("stats", {})
 
     # P3-W3.b (2026-05-27): xref_repair safety-net post-pass. The
     # writer's in-prompt `_MID_PARAGRAPH_XREF_RULE` (writing_rules.py) is
