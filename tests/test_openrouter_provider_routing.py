@@ -9,6 +9,7 @@ provider), overriding the legacy fixed-provider pin.
 
 import importlib
 
+from deep_research import _env
 from deep_research.clients import openrouter_client as oc
 
 
@@ -43,8 +44,14 @@ def test_sort_off_restores_legacy_pin(monkeypatch):
 
 
 def test_sort_default_is_throughput_when_env_unset(monkeypatch):
-    # get() returns "" for an unset env var; the module must still default ON
-    monkeypatch.setattr(oc, "get", lambda k: "" if k == "DR_OPENROUTER_SORT" else None)
+    # An unset DR_OPENROUTER_SORT must still default routing ON (throughput).
+    # Patch the real env BEFORE the reload — monkeypatching oc.get is futile
+    # because importlib.reload re-runs `from .._env import get`, rebinding
+    # oc.get to the live function before _SORT is computed. get() reads the
+    # .env ENV map first, then os.environ, so neutralise BOTH sources to make
+    # the test hermetic regardless of the host/CI environment.
+    monkeypatch.setitem(_env.ENV, "DR_OPENROUTER_SORT", "")
+    monkeypatch.delenv("DR_OPENROUTER_SORT", raising=False)
     importlib.reload(oc)
     try:
         assert oc._SORT == "throughput"
