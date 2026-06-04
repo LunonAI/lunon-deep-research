@@ -46,6 +46,26 @@ def test_skip_threshold_ties_to_revert_ratio(monkeypatch):
     draft that could prune-to-fit."""
     monkeypatch.setattr(refiner.llm, "call", lambda *a, **k: "x " * 100)
     # Just BELOW the skip threshold: est_out * 0.70 < budget → must NOT skip.
+    # (ASCII, so approx_tokens == len//4 == _TOK math — these EN tests stay green.)
     fits_chars = int(refiner._MAX_OUT_TOKENS * refiner._TOK / refiner._REVERT_RATIO) - 8000
     out = refiner.refine("a" * fits_chars, archetype="trend", language="en")
     assert "exceeds rewrite output budget" not in out["reason"]
+
+
+def test_long_zh_draft_skips_honestly(monkeypatch):
+    """round 10: the CJK-aware estimator must SKIP a long ZH draft (not run-then-
+    paid-revert). A ~112k-char ZH draft is ~64k tokens (vs the old len//4=28k that
+    wrongly PASSED the skip check and ran a doomed call)."""
+    called = {"n": 0}
+
+    def fake_call(*a, **k):  # pragma: no cover - must not run
+        called["n"] += 1
+        return "x"
+
+    monkeypatch.setattr(refiner.llm, "call", fake_call)
+    zh = "数据分析报告。" * 16000  # ~112k chars, ~96k CJK → ~64k approx_tokens
+    out = refiner.refine(zh, archetype="explain-mechanism", language="zh")
+    assert out["applied"] is False
+    assert out["reason"].startswith("skip:")
+    assert out["article"] == zh  # unchanged passthrough
+    assert called["n"] == 0  # the no-op is now FREE (no paid revert)
