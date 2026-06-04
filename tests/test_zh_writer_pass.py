@@ -162,3 +162,45 @@ def test_register_proxies_logged(monkeypatch):
     r = z.zh_pass(art, "p", numeric_spine=_NS)
     pre, post = r["stats"]["proxies_pre"], r["stats"]["proxies_post"]
     assert pre["shi_yinwei"] > 0 and post["shi_yinwei"] < pre["shi_yinwei"]  # 是因为 dropped
+
+
+def test_duplicate_citation_drop_reverts_chunk(monkeypatch):
+    """Greptile #101 follow-up: a chunk that keeps each DISTINCT marker but drops
+    REPEATED occurrences (5×[^1] → 1×[^1]) must still revert. Set-subset would pass
+    it; the count-preserving guard catches it — and the chunk is long enough that the
+    dropped markers don't trip the 0.85 length floor first."""
+    chunk = "## 1 章\n\n" + ("这是一段较长的中文论证正文用于充实篇幅。" * 200) + ("结论见[^1]。" * 6) + "\n\n"
+
+    def fake(model, user, **kw):
+        body = _body_of(user)
+        head, _, rest = body.partition("[^1]")  # keep the first [^1], drop the other five
+        return head + "[^1]" + rest.replace("[^1]", ""), {}
+
+    _patch(monkeypatch, fake)
+    out, st = z._polish_chunk(chunk, "p", "test-zh-model", "")
+    assert st["applied"] is False and st["reason"] == "citation-lost"
+    assert out == chunk  # reverted verbatim
+
+
+def test_select_zh_writer_uses_register_prompt_and_chunk_sample(monkeypatch):
+    """Greptile #101 follow-up: W6 selection must score candidates under the runtime
+    _REGISTER_SYSTEM prompt on a per-chunk sample (a single chapter body), not the
+    legacy whole-article _PASS_SYSTEM path — so the winner matches production."""
+    seen = []
+
+    def fake(model, user, system="", **kw):
+        seen.append({"system": system, "user": user})
+        return "润色后的中文正文。", {}
+
+    monkeypatch.setattr(z.openrouter_client, "raw_call", fake)
+    monkeypatch.setattr(z, "_critic_score", lambda txt: {"score": 8.0, "reason": ""})
+    art = _long_article()
+    dec = z.select_zh_writer([{"id": "t1", "prompt": "p", "opus_article": art}])
+    assert seen, "no smoke calls made"
+    for c in seen:
+        assert c["system"] == z._REGISTER_SYSTEM
+        assert "待润色正文" in c["user"]
+        body = _body_of(c["user"])
+        assert body and not body.lstrip().startswith("#")  # a heading-stripped chunk body
+        assert len(body) < len(art)  # one chunk, NOT the whole multi-chapter article
+    assert dec["winner"] in z.config.ZH_WRITER_CANDIDATES  # all viable @ 8.0
