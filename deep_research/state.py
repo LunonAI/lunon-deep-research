@@ -196,6 +196,9 @@ class PipelineState:
     # corpus bands.
     clamp_citations_stats: dict = field(default_factory=dict)
     clamp_emdash_stats: dict = field(default_factory=dict)
+    # round 10: chunked ZH register-pass telemetry {mode, n_units, n_reverted,
+    # n_subchunked, revert_reasons, proxies_pre/post (是因为/median-para/em-dash/hedge)}.
+    zh_writer_pass_stats: dict = field(default_factory=dict)
     # round 4 W4: paragraph-density clamp telemetry.
     clamp_paragraphs_stats: dict = field(default_factory=dict)
     # P3b-OPT2 (2026-05-27): per-section inner-loop iteration trajectory.
