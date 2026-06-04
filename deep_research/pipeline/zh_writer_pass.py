@@ -20,6 +20,7 @@ native-register critic, applies the falsifiable winner rule (plan point 13).
 
 import os
 import re
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 
 from .. import config, llm
@@ -36,14 +37,6 @@ _CHUNK_GUARD_HI = 1.6  # a chunk grown past this → padding/hallucination → r
 _CHUNK_WORKERS = int(os.environ.get("DR_ZH_CHUNK_WORKERS", "4"))
 _MARKER_RE = re.compile(r"\[\^[^\]]+\]")  # inline citation markers [^N]
 _HEDGE_RE = re.compile(r"可能|似乎|大约")
-
-# Legacy prompt — kept for select_zh_writer (whole-article W6 smoke compatibility).
-_PASS_SYSTEM = (
-    "你是一名资深中文研究报告编辑。将给定报告改写为地道、专业、书面化的简体中文研究"
-    "报告：保持全部事实、数据、来源署名、结构与篇幅不变（不得删减、不得缩写），仅提升"
-    "中文表达的地道性与专业语域。保留正文内联的来源署名（如“据麦肯锡2025”），不要把"
-    "事实只放进脚注或编号。只输出改写后的完整报告，不要任何前言。"
-)
 
 # Runtime register prompt (round 10): targets the corpus-measured gaps vs Qianfan
 # (是因为 pseudo-connectives, choppy paragraphs, gloss overload, bare cross-refs,
@@ -155,7 +148,11 @@ def _polish_chunk(text: str, prompt: str, role_model: str, spine_literal: str) -
         return orig, {"applied": False, "reason": "overgrown"}
     if spine_literal and spine_literal in orig and spine_literal not in out:
         return orig, {"applied": False, "reason": "spine-mutated"}
-    if not set(_MARKER_RE.findall(orig)).issubset(set(_MARKER_RE.findall(out))):
+    # Count-preserving (multiset) check, not set-subset: the register prompt forbids
+    # deleting marker occurrences ("不删除"), so a chunk that collapses repeated cites
+    # (e.g. 5×[^1] → 1×[^1]) without shrinking past the length floor must still revert
+    # — set-subset would silently pass it (Greptile #101 follow-up).
+    if Counter(_MARKER_RE.findall(orig)) - Counter(_MARKER_RE.findall(out)):
         return orig, {"applied": False, "reason": "citation-lost"}
     return out, {"applied": True, "reason": "ok"}
 
@@ -324,21 +321,38 @@ def _critic_score(zh_text: str) -> dict:
         return {"score": 0.0, "reason": f"critic-error {str(e)[:60]}"}
 
 
+def _smoke_chunk(article: str) -> str:
+    """Runtime-shaped W6 smoke input: the body of the first top chapter (its heading
+    split off, exactly as _polish_chunk feeds the model at runtime), or the whole
+    short article when it has no top-chapter structure. Keeps select_zh_writer
+    scoring candidates on the SAME per-chunk shape they run under in production, not
+    a whole multi-chapter article (Greptile #101 follow-up)."""
+    chapters = article_metrics._top_chapters(article, article_metrics._headings(article))
+    seg = chapters[0] if chapters else article
+    _, body = _split_leading_headings(seg)
+    return body.strip() or seg.strip()
+
+
 def select_zh_writer(zh_drafts: list) -> dict:
     """zh_drafts: [{id, prompt, opus_article}] (5 ZH tasks). Returns the W6
-    decision dict; caller writes p1_artifacts/zh_writer_pass_selection.md."""
+    decision dict; caller writes p1_artifacts/zh_writer_pass_selection.md. Scores
+    each candidate under the runtime _REGISTER_SYSTEM prompt on a per-chunk sample
+    (Greptile #101 follow-up) so the winner is the best model for the actual chunked
+    runtime path, not the retired whole-article rewrite."""
     candidates = config.ZH_WRITER_CANDIDATES
+    samples = [(d, _smoke_chunk(d["opus_article"])) for d in zh_drafts]
     per_task, means = [], {}
     for cand in candidates:
         rows = []
-        for d in zh_drafts:
+        for d, sample in samples:
             try:
                 txt, _ = openrouter_client.raw_call(
                     cand,
-                    f"原始任务：{d['prompt'][:400]}\n\n报告：\n{d['opus_article']}",
-                    system=_PASS_SYSTEM,
-                    max_tokens=32000,
+                    f"原始任务：{d['prompt'][:400]}\n\n待润色正文（保持编号、数字、引用标记不变）：\n{sample}",
+                    system=_REGISTER_SYSTEM,
+                    max_tokens=_OUT_TOKEN_BUDGET,
                     note=f"zh_sel.{cand}",
+                    provider="",  # ZH writers aren't on our Nemotron provider pin
                 )
                 sc = _critic_score(txt)
             except Exception as e:  # noqa: BLE001
