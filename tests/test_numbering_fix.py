@@ -6,6 +6,9 @@ Tests use small synthetic articles; the full 89-W9 validation lives in
 scripts/p2_validate_f.py.
 """
 
+import re  # noqa: E402
+
+from deep_research.pipeline import numbering_fix as _nf  # noqa: E402
 from deep_research.pipeline.numbering_fix import (
     _flatten_depth,
     _normalize_hash_from_number,
@@ -510,3 +513,69 @@ if __name__ == "__main__":
     if failed:
         sys.exit(1)
     print(f"\n{len(funcs)} tests passed")
+
+
+# --- Phase 1 A1 (2026-06-04): H1 chapter-count telemetry vs Qianfan band ---
+_BODY = "A substantial body paragraph that is clearly not empty and safely over the collapse threshold. " * 4
+
+
+def test_h1_chapter_count_under_band():
+    art = "# Title\n\n" + "".join(f"## {i} Chapter {i}\n\n{_BODY}\n\n" for i in range(1, 6))
+    o = numbering_fix_run(art, flatten_max_depth=3)
+    assert o.h1_chapter_count == 6  # 5 promoted chapters + title
+    assert o.h1_over_band is False
+
+
+# --- Phase 1 A1 (2026-06-04): conservative promotion guard ---
+# With the guard ON (default), a >12-chapter outline is NOT promoted, so it never
+# explodes to N H1 — the round-5 group-and-nest regression is structurally avoided.
+
+
+def test_h1_over_band_guard_prevents_explosion(monkeypatch):
+    monkeypatch.setattr(_nf, "_PROMOTE_GUARD", True)
+    art = "# Title\n\n" + "".join(f"## {i} Chapter {i}\n\n{_BODY}\n\n" for i in range(1, 21))
+    o = numbering_fix_run(art, flatten_max_depth=3)
+    assert o.promotion_skipped is True
+    assert o.h1_chapter_count == 1 and o.h1_over_band is False
+
+
+def test_promote_skips_when_over_cap(monkeypatch):
+    monkeypatch.setattr(_nf, "_PROMOTE_GUARD", True)
+    art = "# Title\n\n" + "".join(f"## {i} Chapter {i}\n\n{_BODY}\n\n" for i in range(1, 48))
+    o = numbering_fix_run(art, flatten_max_depth=3)
+    assert o.promotion_skipped is True
+    assert o.promotable_top_chapters == 47
+    assert o.headings_promoted == 0
+    assert o.h1_chapter_count == 1 and o.h1_over_band is False
+
+
+def test_promote_fires_when_in_band(monkeypatch):
+    monkeypatch.setattr(_nf, "_PROMOTE_GUARD", True)
+    art = "# Title\n\n" + "".join(f"## {i} Chapter {i}\n\n{_BODY}\n\n" for i in range(1, 10))
+    o = numbering_fix_run(art, flatten_max_depth=3)
+    assert o.promotion_skipped is False
+    assert o.h1_chapter_count == 10  # 9 promoted chapters + title
+
+
+def test_references_never_promoted_to_h1(monkeypatch):
+    monkeypatch.setattr(_nf, "_PROMOTE_GUARD", True)
+    art = "# Title\n\n" + "".join(f"## {i} Chapter {i}\n\n{_BODY}\n\n" for i in range(1, 6))
+    art += "## References\n\n[^1]: a source\n"
+    o = numbering_fix_run(art, flatten_max_depth=3)
+    refs = re.findall(r"(?m)^(#{1,6})\s+.*References.*$", o.article)
+    assert refs and all(len(h) >= 2 for h in refs)  # References never lifted to H1
+    assert o.promotable_top_chapters == 5  # References excluded from the count
+
+
+def test_promote_guard_off_restores_main(monkeypatch):
+    monkeypatch.setattr(_nf, "_PROMOTE_GUARD", False)
+    art = "# Title\n\n" + "".join(f"## {i} Chapter {i}\n\n{_BODY}\n\n" for i in range(1, 48))
+    o = numbering_fix_run(art, flatten_max_depth=3)
+    # kill-switch: behaves like round-4 main (blanket promote 47 -> # N)
+    assert o.promotion_skipped is False
+    assert o.h1_chapter_count == 48  # 47 promoted + title
+
+
+def test_count_excludes_subsections_title_and_references():
+    art = "# Title\n\n## 1 A\n\n### 1.1 sub\n\n## 2 B\n\n## References\n\n[^1]: s\n"
+    assert _nf._count_promotable_top_chapters(art) == 2  # ## 1, ## 2 only

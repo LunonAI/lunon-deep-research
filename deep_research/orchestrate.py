@@ -94,6 +94,15 @@ def _persist_drift(s, language: str, query: str) -> None:
             # modes the writer most often hits.
             "mermaid_validate": dict(getattr(s, "mermaid_validate_stats", {}) or {}),
             "cjk_despace": dict(getattr(s, "cjk_despace_stats", {}) or {}),
+            # Phase 1 A2 (2026-06-04): meta-scaffolding strip {sections_removed,
+            # chars_removed, titles}. Qianfan corpus ~0 scaffold sections; non-zero
+            # here quantifies how much 本章小结/路线图/阅读路径 overhead we shed.
+            "scaffold_strip": dict(getattr(s, "scaffold_strip_stats", {}) or {}),
+            # Phase 1 A1-REAL (2026-06-04): chapter grouping {applied, reason,
+            # n_entities, n_chapters} — proves the Qianfan-shape regroup fired.
+            "chapter_grouping": dict(getattr(s, "chapter_grouping_stats", {}) or {}),
+            # Phase 3 (2026-06-04): formulaic-connective clamp {stripped, per_phrase}.
+            "density_clamp": dict(getattr(s, "density_clamp_stats", {}) or {}),
             "completion": dict(getattr(s, "completion_stats", {}) or {}),
             # 2026-05-29: advisory final-article metrics (heading profile,
             # frontload_ratio, spaced-CJK + scaffolding RESIDUAL, paragraph
@@ -136,8 +145,10 @@ from ._env import assert_phase, log_usage
 from .pipeline import (
     architect,
     article_metrics,
+    chapter_grouping,
     cjk_despace,
     criteria_spec,
+    density_clamp,
     design_guide,
     evidence_dedup,
     footnote_normalize,
@@ -151,6 +162,7 @@ from .pipeline import (
     refiner,
     refiner_gate,
     role_play,
+    scaffold_strip,
     scout,
     style_clamp,
     validation,
@@ -350,6 +362,24 @@ def from_plan(ctx: dict, query: str, language: str, task_id: int | None = None) 
         s.article = zp["article"]
         s.zh_writer_pass_stats = zp.get("stats", {})
 
+    # Phase 1 A1-REAL (2026-06-04): thematic chapter grouping for many-entity
+    # list-all/compare. Inserts ~9 thematic chapter headers + demotes each entity
+    # heading one level so the render matches Qianfan (≈11 H1 / entities at H2)
+    # instead of our 19-47 flat H1. GENERATION IS UNTOUCHED — every entity is still
+    # its own full-budget write_section call with the byte-identical bold-axis
+    # micro-template — so the round-5 group-and-nest regression (write_section
+    # budget collapse + template fragmentation) is structurally impossible. Runs
+    # BEFORE xref_repair/footnote_normalize/numbering_fix so they operate on the
+    # grouped structure; numbering_fix then promotes group headers + framing
+    # chapters to H1 and entities to H2. Fail-soft + kill-switch DR_CHAPTER_GROUPING.
+    _arch_name = (s.archetype or {}).get("archetype", "") if isinstance(s.archetype, dict) else ""
+    grouped_a, cg_stats = _phase(
+        "chapter_grouping", chapter_grouping.group_into_chapters, s.article,
+        language=language, plan=s.plan, archetype=_arch_name,
+    )
+    s.article = grouped_a
+    s.chapter_grouping_stats = cg_stats
+
     # P3-W3.b (2026-05-27): xref_repair safety-net post-pass. The
     # writer's in-prompt `_MID_PARAGRAPH_XREF_RULE` (writing_rules.py) is
     # the primary force producing clean mid-paragraph cross-references;
@@ -402,6 +432,26 @@ def from_plan(ctx: dict, query: str, language: str, task_id: int | None = None) 
         s.article = clamped_p
         s.clamp_paragraphs_stats = cp_stats
 
+    # Phase 3 (2026-06-04): deterministic redundancy clamp. Caps over-used
+    # formulaic ZH sentence-openers (由此可以预见/究其根本/值得注意的是 — id-38 shipped 142
+    # vs Qianfan ~5) at a small budget, stripping only the discourse marker (+ its
+    # comma), never a fact/number/citation. The judge's named "重复使用…句式"
+    # readability tax. ZH-only; fail-soft; verified citation- and number-preserving.
+    clamped_d, dc_stats = _phase("density_clamp", density_clamp.clamp_connectives, s.article, language=language)
+    s.article = clamped_d
+    s.density_clamp_stats = dc_stats
+
+    # Phase 1 A2 (2026-06-04): deterministic meta-scaffolding strip. Removes whole
+    # 本章小结/本章综合 recaps, 报告路线图/章节导读 roadmaps, §N→§M 阅读路径 nav, and
+    # 可信度分级 preambles (Qianfan #1 corpus carries ~0; ours emit 3-9) — a top
+    # GPT-5.5 readability loss ("层级过多/重复小节"). Runs BEFORE footnote_normalize
+    # so removed `[^N]` markers become unused defs that normalize auto-drops, and
+    # BEFORE numbering_fix so the heading tree is renumbered to close the gap.
+    # No-op on EN (patterns are CJK). Fail-soft; never removes an H1 chapter.
+    stripped_s, ss_stats = _phase("scaffold_strip", scaffold_strip.strip_meta_sections, s.article, language=language)
+    s.article = stripped_s
+    s.scaffold_strip_stats = ss_stats
+
     # P2-Option-A-#6 (2026-05-23): footnote_normalize runs BEFORE
     # numbering_fix so the renumber step sees the final article shape
     # (including the appended `## References` block) when it assigns
@@ -444,6 +494,12 @@ def from_plan(ctx: dict, query: str, language: str, task_id: int | None = None) 
         "xref_orphaned": nfo.cross_refs_orphaned,
         "cap_violations": nfo.cap_violations,
         "skipped_reason": nfo.skipped_reason,
+        # Phase 1 A1 (2026-06-04): H1 chapter count vs Qianfan band (p90=12) +
+        # conservative promotion guard (skip promotion of an over-wide outline).
+        "h1_chapter_count": nfo.h1_chapter_count,
+        "h1_over_band": nfo.h1_over_band,
+        "promotion_skipped": nfo.promotion_skipped,
+        "promotable_top_chapters": nfo.promotable_top_chapters,
     }
 
     # G7 (2026-05-28): ZH-aware de-spacing. Runs LAST (after numbering_fix /

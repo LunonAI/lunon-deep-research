@@ -32,6 +32,7 @@ _DEFAULTS = {
     "writer": OPUS,
     "intent": GPT55,
     "archetype": GPT55,
+    "chapter_grouper": GPT55,
     "criteria_gen": GPT55,
     "inner_scorer": GPT55,
     "grounding": GPT55,

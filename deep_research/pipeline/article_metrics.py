@@ -35,6 +35,7 @@ import statistics as _st
 # Reuse the de-spacer's single-source-of-truth character classes so the
 # spaced-CJK measurement can never drift from what the de-spacer actually
 # collapses.
+from . import scaffold_strip as _scaffold_strip
 from .cjk_despace import _ABNORMAL_WS, _CJK
 
 _HEADING_RE = re.compile(r"(?m)^(#{1,6})\s+(.+?)\s*$")
@@ -179,6 +180,16 @@ def _scaffold_residual(article):
     res["evidence_uncovered"] = article.count("证据未覆盖")
     res["weak_evidence"] = article.count("弱证据")
     res["section_defers"] = article.count("本节不展开")
+    # Phase 1 A2 (2026-06-04): residual meta-scaffold SECTIONS on the shipped
+    # article (本章小结/路线图/阅读路径/可信度分级 headings at H2+). scaffold_strip
+    # should drive these to ~0 (Qianfan full-100 corpus = 0); a non-zero here is
+    # a scaffold title the strip's pattern missed. Reuses scaffold_strip's pattern
+    # (single source of truth).
+    res["scaffold_sections"] = sum(
+        1
+        for m in _HEADING_RE.finditer(article)
+        if len(m.group(1)) >= 2 and _scaffold_strip._SCAFFOLD_TITLE_RE.search(m.group(2))
+    )
     return res
 
 
