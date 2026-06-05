@@ -164,10 +164,6 @@ class PipelineState:
     # Phase 1 A2 (2026-06-04): scaffold_strip stats {sections_removed, chars_removed,
     # titles} — meta-scaffolding sections (本章小结/路线图/阅读路径) shed toward Qianfan ~0.
     scaffold_strip_stats: dict = field(default_factory=dict)
-    # Phase 1 A1-REAL (2026-06-04): chapter_grouping stats {applied, reason,
-    # n_entities, n_chapters} — many-entity list-all/compare grouped into ~9
-    # thematic H1 chapters w/ entities as H2 (Qianfan shape), generation untouched.
-    chapter_grouping_stats: dict = field(default_factory=dict)
     # Phase 3 (2026-06-04): density_clamp stats {stripped, per_phrase} — over-used
     # formulaic ZH connectives capped toward Qianfan's ~5 (id-38 shipped 142).
     density_clamp_stats: dict = field(default_factory=dict)
