@@ -14,7 +14,6 @@
 <p align="center">
   <a href="#how-it-works">How it works</a> ·
   <a href="#run-it">Run it</a> ·
-  <a href="#reproducing-our-benchmark-results">Reproduce</a> ·
   <a href="#about-lunon">About</a>
 </p>
 
@@ -93,24 +92,6 @@ Or run a whole query file (the DRB format, `{id, prompt, language}` per line):
 ```bash
 DRB_PHASE=P1 python -m deep_research.adapter --query-file queries.jsonl --out reports.jsonl --workers 4
 ```
-
-## Repository structure
-
-```
-lunon-deep-research/
-├── deep_research/          # the agent
-│   ├── pipeline/           #   plan → research → write → edit stages
-│   ├── clients/            #   Anthropic / OpenAI / OpenRouter wrappers
-│   ├── orchestrate.py      #   the end-to-end flow
-│   └── adapter.py          #   batch runner (resumable, incremental)
-├── scripts/                # asset-render + research / grading helpers
-├── tests/                  # unit + integration tests
-└── pyproject.toml          # deps (+ [dev] / [viz] extras) and tooling config
-```
-
-## Reproducing our benchmark results
-
-The benchmark's own verification is intentionally output-based: you send the generated reports to the DRB maintainers and they re-score them with their harness. Our submission is the 100 reports this engine produced (`{id, prompt, article}` JSONL). To regenerate them yourself, run the engine against the unmodified DRB query set (`data/prompt_data/query.jsonl` from the [benchmark repo](https://github.com/Ayanami0730/deep_research_bench)) and submit the output per their [instructions](https://github.com/Ayanami0730/deep_research_bench#submit-to-leaderboard).
 
 ## About Lunon
 
