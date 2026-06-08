@@ -23,6 +23,16 @@
 
 You give it a hard question. It scopes what you're really asking, researches the open web, drafts a structured report section-by-section, then edits the whole thing down to something a senior analyst would actually hand you — tight, scannable, and sourced. It's the engine behind [Lunon](https://lunon.ai)'s research work, and we benchmark it in the open on [DeepResearch Bench](https://github.com/Ayanami0730/deep_research_bench) (DRB).
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/leaderboard-overall-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="assets/leaderboard-overall-light.png">
+    <img src="assets/leaderboard-overall-light.png" alt="DeepResearch-Bench Overall (RACE, GPT-5.5 judge): Lunon at 54.0, ahead of dalpha-deepresearch 53.1, sourcery 51.2, gemini-2.5-pro 50.0, openai 47.8, perplexity 43.1, grok 41.2." width="680">
+  </picture>
+</p>
+
+<p align="center"><sub>RACE overall (×100) on DeepResearch Bench, GPT-5.5 judge. Our submission is being processed by the benchmark maintainers — treat as a verified pre-print until it posts.</sub></p>
+
 ## How it works
 
 One question flows through four stages — **plan → research → write → edit** — each handing typed state to the next:
