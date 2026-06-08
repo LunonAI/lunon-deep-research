@@ -1,0 +1,90 @@
+{
+  "_meta": {
+    "purpose": "Source of truth for scripts/render_architecture_diagram.py (the README 'How it works' diagram).",
+    "regen": "python scripts/render_architecture_diagram.py",
+    "faithful_to": "deep_research/orchestrate.py (stage order + post-pass chain), config.py (role->model), state.py (PipelineState)"
+  },
+  "kicker": "THE ENGINE",
+  "title": "From one question to a cited report",
+  "subtitle": "A typed state object is handed through four stages — plan, research, write, edit.",
+  "inflow": "your question",
+  "outflow": "cited final report",
+  "phases": [
+    {
+      "n": "01",
+      "key": "plan",
+      "name": "Plan",
+      "tag": "scope what's really being asked",
+      "stages": [
+        { "name": "intent", "model": "gpt" },
+        { "name": "archetype", "model": "gpt" },
+        { "name": "role_play", "model": "opus" },
+        { "name": "scout", "model": "opus" },
+        { "name": "criteria_spec", "model": "gpt" },
+        { "name": "architect", "model": "opus" }
+      ],
+      "note": "a typed plan — 48–64 research queries + acceptance criteria the engine can check"
+    },
+    {
+      "n": "02",
+      "key": "research",
+      "name": "Research",
+      "tag": "evidence from the open web",
+      "stages": [
+        { "name": "design_guide", "model": "gpt" },
+        { "name": "init_format", "model": "det" },
+        { "name": "orchestrator", "model": "opus" }
+      ],
+      "fanout": {
+        "specialists": ["evidence_gatherer", "mechanism_explorer", "comparator", "critic", "horizon_scanner"],
+        "model": "nemo",
+        "model_full": "Nemotron-3-Super-120B",
+        "note": "five isolated-context specialists · 64-tool budget · evidence dedup · gap-fill → memory bank"
+      }
+    },
+    {
+      "n": "03",
+      "key": "write",
+      "name": "Write",
+      "tag": "section by section, grounded in evidence",
+      "stages": [
+        { "name": "numeric_spine", "model": "opus" },
+        { "name": "opening", "model": "opus" },
+        { "name": "write_section ×4", "model": "opus" }
+      ],
+      "loop": {
+        "steps": ["grounding", "score", "regen"],
+        "model": "gpt",
+        "note": "cap 2 · truncation-retry · not-hollow gate"
+      }
+    },
+    {
+      "n": "04",
+      "key": "edit",
+      "name": "Edit",
+      "tag": "fill gaps, enforce the contract, tighten",
+      "stages": [
+        { "name": "refiner", "model": "gpt" },
+        { "name": "refiner_gate", "model": "gpt" },
+        { "name": "validation", "model": "gpt" },
+        { "name": "zh_writer", "model": "deepseek", "cond": "zh" },
+        { "name": "readability_rewrite", "model": "opus" }
+      ],
+      "chain": {
+        "label": "deterministic post-pass chain",
+        "sub": "no LLM · idempotent · fail-soft",
+        "passes": [
+          "xref_repair",
+          "mermaid_validate",
+          "clamp_citations",
+          "clamp_emdash",
+          "clamp_paragraphs",
+          "footnote_normalize",
+          "numbering_fix",
+          "cjk_despace",
+          "article_metrics"
+        ]
+      }
+    }
+  ]
+}
