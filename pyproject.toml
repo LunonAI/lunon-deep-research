@@ -17,8 +17,9 @@ dependencies = [
   "anthropic>=0.105.2,<1.0", # clients/anthropic_client.py (messages.stream, cache_control)
   "httpx>=0.28.1,<1.0",      # clients/anthropic_client.py (layered streaming timeouts)
   "requests>=2.33.1,<3.0",   # clients/openai_client.py, openrouter_client.py, retrieval/*
-  # evidence_dedup.py uses numpy for the vectorized cosine pass (pure-Python fallback
-  # without it). Floor >=2.0 (not the newest) because numpy>=2.3 drops Python 3.10.
+  # numpy powers the vectorized cosine in evidence_dedup.py — a hard dep here (the
+  # code falls back to a slower pure-Python path only if it's manually stripped).
+  # Floor >=2.0 because numpy>=2.3 drops Python 3.10.
   "numpy>=2.0,<3.0",
 ]
 
@@ -29,11 +30,10 @@ dev = [
   "ruff==0.14.11",  # pinned to match .github/workflows/ci.yml
 ]
 # Build-time only — regenerating README chart/diagram assets:  pip install -e ".[viz]"
-# scripts/render_leaderboard_chart.py + render_architecture_diagram.py screenshot
-# HTML/CSS via headless Chromium; one-time after install: python -m playwright install chromium
+# scripts/render_leaderboard_chart.py + render_architecture_diagram.py render HTML/CSS
+# and screenshot it via headless Chromium (playwright); render_architecture_diagram.py
+# also uses pillow. One-time after install: python -m playwright install chromium
 viz = [
-  "plotly>=6.1.1,<7",
-  "kaleido>=1.0,<2",
   "playwright>=1.49,<2",
   "pillow>=10",
 ]
