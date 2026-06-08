@@ -27,7 +27,7 @@ You give it a hard question. It scopes what you're really asking, researches the
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/leaderboard-overall-dark.png">
     <source media="(prefers-color-scheme: light)" srcset="assets/leaderboard-overall-light.png">
-    <img src="assets/leaderboard-overall-light.png" alt="DeepResearch-Bench Overall (RACE, GPT-5.5 judge): Lunon ranked #1 at 54.0, ahead of dalpha-deepresearch 53.1, sourcery 51.2, gemini-2.5-pro 50.0, openai 47.8, perplexity 43.1, grok 41.2." width="680">
+    <img src="assets/leaderboard-overall-light.png" alt="DeepResearch-Bench Overall (RACE, GPT-5.5 judge): Lunon at 54.0, ahead of dalpha-deepresearch 53.1, sourcery 51.2, gemini-2.5-pro 50.0, openai 47.8, perplexity 43.1, grok 41.2." width="680">
   </picture>
 </p>
 
