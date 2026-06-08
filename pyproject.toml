@@ -1,3 +1,50 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lunon-deep-research"
+version = "0.1.0"
+description = "An autonomous research agent that turns one question into a cited, PhD-level report."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+# Runtime dependencies for the deep_research engine. Compatible-release floors:
+# `>=` the version verified against the test suite, `<` the next major so CI stays
+# reproducible without silently absorbing a breaking bump. Bump deliberately.
+dependencies = [
+  "anthropic>=0.105.2,<1.0", # clients/anthropic_client.py (messages.stream, cache_control)
+  "httpx>=0.28.1,<1.0",      # clients/anthropic_client.py (layered streaming timeouts)
+  "requests>=2.33.1,<3.0",   # clients/openai_client.py, openrouter_client.py, retrieval/*
+  # numpy powers the vectorized cosine in evidence_dedup.py — a hard dep here (the
+  # code falls back to a slower pure-Python path only if it's manually stripped).
+  # Floor >=2.0 because numpy>=2.3 drops Python 3.10.
+  "numpy>=2.0,<3.0",
+]
+
+[project.optional-dependencies]
+# Dev / CI deps:  pip install -e ".[dev]"
+dev = [
+  "pytest>=8.3,<9", # floor = current 8.x line; <9 guards a breaking major on clean CI
+  "ruff==0.14.11",  # pinned to match .github/workflows/ci.yml
+]
+# Build-time only — regenerating README chart/diagram assets:  pip install -e ".[viz]"
+# scripts/render_leaderboard_chart.py + render_architecture_diagram.py render HTML/CSS
+# and screenshot it via headless Chromium (playwright); render_architecture_diagram.py
+# also uses pillow. One-time after install: python -m playwright install chromium
+viz = [
+  "playwright>=1.49,<2",
+  "pillow>=10",
+]
+
+[project.urls]
+Homepage = "https://lunon.ai"
+Repository = "https://github.com/LunonAI/lunon-deep-research"
+
+[tool.setuptools.packages.find]
+include = ["deep_research*"]
+
 [tool.ruff]
 target-version = "py310"
 line-length = 120
