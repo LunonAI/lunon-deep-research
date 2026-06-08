@@ -148,10 +148,12 @@ def _phase(ph):
 STATIC_CSS = """
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{background:transparent}
+/* full-bleed, square corners (screenshotted directly) — like the leaderboard chart.
+   No border-radius: a rounded screenshotted element would expose white in the
+   rectangular PNG's corners. */
 #diagram{width:1140px;font-family:'Inter',-apple-system,Helvetica,Arial,sans-serif;color:var(--text);
-  -webkit-font-smoothing:antialiased;padding:46px 50px 44px;border-radius:22px;
-  background:linear-gradient(180deg,var(--page-top),var(--page-bot));
-  border:1px solid var(--card-bd)}
+  -webkit-font-smoothing:antialiased;padding:46px 50px 44px;
+  background:linear-gradient(180deg,var(--page-top),var(--page-bot))}
 
 .masthead{margin-bottom:26px}
 .kicker{font-size:11.5px;font-weight:700;letter-spacing:.16em;color:var(--accent-soft);text-transform:uppercase}
