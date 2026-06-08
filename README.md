@@ -66,7 +66,7 @@ A few things we found mattered more than expected:
 - **The last edit is the biggest lever.** A whole-article *readability rewrite* takes a sprawling, over-structured draft and tightens it into a reference-length report. That single stage moved our RACE overall from 0.527 → 0.540 and readability from 0.427 → 0.504 — past the #1 model. It's fail-soft (a bad rewrite ships the original draft) and toggleable via `DR_READABILITY_REWRITE=off`.
 - **It's tested.** A broad unit-test suite, with deterministic post-passes pinned against their live constants.
 
-**Model stack:** Claude Opus 4.8 for planning / writing, GPT-5.5 for intent / criteria / refining / scoring, and Nemotron-3 specialists (via OpenRouter) for parallel research. Each role is swappable with one env var (`DR_ROLE_<ROLE>=…`).
+**Model stack:** Claude Opus 4.8 for planning / writing / readability, GPT-5.5 for intent / criteria / refining / scoring, and two models via OpenRouter — Nemotron-3-Super-120B (NVIDIA) for the five parallel research specialists, and DeepSeek-V4-Pro for the Chinese-language writer pass. Each role is swappable with one env var (`DR_ROLE_<ROLE>=…`).
 
 ## Run it
 
