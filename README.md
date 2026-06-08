@@ -9,7 +9,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/RACE_(GPT--5.5)-0.540-2563EB?style=flat-square" alt="RACE">
   <img src="https://img.shields.io/badge/Readability-0.504_(beats_%231)-16A34A?style=flat-square" alt="Readability">
-  <img src="https://img.shields.io/badge/tests-1192_passing-0A2236?style=flat-square" alt="tests">
+  <img src="https://img.shields.io/badge/tests-passing-0A2236?style=flat-square" alt="tests">
   <img src="https://img.shields.io/badge/license-MIT-0A2236?style=flat-square" alt="License">
 </p>
 
@@ -34,13 +34,9 @@ DeepResearch Bench scores 100 expert-written tasks (50 EN / 50 ZH) with **RACE**
 | 🥇 Qianfan (current #1) | **0.549** | 0.480 | 0.572 | 0.557 | 0.543 |
 | **Lunon Deep Research** | **0.540** | **0.504** 🔼 | 0.553 | 0.541 | 0.539 |
 
-```mermaid
-xychart-beta
-    title "GPT-5.5 RACE — Overall score"
-    x-axis ["Lunon (start)", "Lunon (now)", "Qianfan #1"]
-    y-axis "Overall" 0.50 --> 0.56
-    bar [0.527, 0.540, 0.549]
-```
+<p align="center">
+  <img src="assets/race-overall.png" alt="GPT-5.5 RACE overall: Lunon improved from 0.527 to 0.540, vs Qianfan #1 at 0.549" width="600">
+</p>
 
 The headline: **we beat the #1 model on Readability** (0.504 vs 0.480) — the dimension we used to lose to everyone — and sit a hair behind it on raw research depth. Net, that's second on the board and closing.
 
@@ -68,7 +64,7 @@ A few things we found mattered more than expected:
 - **A depth contract, not just a prompt.** The architect emits a *typed* plan — explicit research queries plus acceptance criteria — so coverage is something the engine can check and the writer can't quietly skip.
 - **Deterministic safety nets beat prompt-nagging.** Models ignore soft instructions, so structure (citation normalization, heading numbering, cross-reference repair) is enforced by post-passes, not hoped for.
 - **The last edit is the biggest lever.** A whole-article *readability rewrite* takes a sprawling, over-structured draft and tightens it into a reference-length report. That single stage moved our RACE overall from 0.527 → 0.540 and readability from 0.427 → 0.504 — past the #1 model. It's fail-soft (a bad rewrite ships the original draft) and toggleable via `DR_READABILITY_REWRITE=off`.
-- **It's tested.** 1192 unit tests, deterministic post-passes pinned against their live constants.
+- **It's tested.** A broad unit-test suite, with deterministic post-passes pinned against their live constants.
 
 **Model stack:** Claude Opus 4.8 for planning / writing / refining, GPT-5.5 for intent / criteria / scoring, and Nemotron-3 specialists (via OpenRouter) for parallel research. Each role is swappable with one env var (`DR_ROLE_<ROLE>=…`).
 
@@ -104,7 +100,7 @@ lunon-deep-research/
 │   ├── orchestrate.py      #   the end-to-end flow
 │   └── adapter.py          #   batch runner (resumable, incremental)
 ├── scripts/                # generation + grading helpers
-├── tests/                  # 1192 tests
+├── tests/                  # unit + integration tests
 └── requirements.txt
 ```
 
