@@ -10,6 +10,11 @@ __pycache__/
 venv/
 .env/
 
+# Packaging build artifacts (pip install -e . / build)
+*.egg-info/
+build/
+dist/
+
 # OS / editor cruft
 .DS_Store
 *.swp

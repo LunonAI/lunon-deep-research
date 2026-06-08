@@ -13,7 +13,7 @@ Source of truth: assets/data/architecture.json
 Output:          assets/architecture-{light,dark}.png   (2x retina)
 
 Usage:
-    pip install -r requirements-viz.txt
+    pip install -e ".[viz]"
     python -m playwright install chromium      # one-time
     python scripts/render_architecture_diagram.py
     python scripts/render_architecture_diagram.py --check   # models vs config.py

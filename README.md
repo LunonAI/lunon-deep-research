@@ -76,7 +76,7 @@ A few things we found mattered more than expected:
 ```bash
 git clone https://github.com/LunonAI/lunon-deep-research
 cd lunon-deep-research
-pip install -r requirements.txt
+pip install -e .            # runtime deps + the package (add ".[dev]" for tests/lint)
 cp .env.example .env        # add your OpenAI / Anthropic / OpenRouter / Exa / Jina keys
 export DRB_PHASE=P1         # cost-attribution guard — the engine refuses to run unset
 ```
@@ -103,9 +103,9 @@ lunon-deep-research/
 │   ├── clients/            #   Anthropic / OpenAI / OpenRouter wrappers
 │   ├── orchestrate.py      #   the end-to-end flow
 │   └── adapter.py          #   batch runner (resumable, incremental)
-├── scripts/                # generation + grading helpers
+├── scripts/                # asset-render + research / grading helpers
 ├── tests/                  # unit + integration tests
-└── requirements.txt
+└── pyproject.toml          # deps (+ [dev] / [viz] extras) and tooling config
 ```
 
 ## Reproducing our benchmark results

@@ -12,7 +12,7 @@ Bundled assets (offline, deterministic): assets/fonts/Inter-*.woff2 (SIL OFL 1.1
 Output: assets/leaderboard-overall-{light,dark}.png  (2x retina)
 
 Usage:
-    pip install -r requirements-viz.txt
+    pip install -e ".[viz]"
     playwright install chromium      # one-time: downloads the version-locked browser
     python scripts/render_leaderboard_chart.py
 

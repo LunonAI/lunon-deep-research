@@ -57,17 +57,14 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-          # Hash BOTH manifests: requirements-dev.txt only does `-r requirements.txt`,
-          # so a floor bump in requirements.txt alone wouldn't change this file's
-          # content and the stale pip cache would be restored on a key match.
-          cache-dependency-path: |
-            requirements.txt
-            requirements-dev.txt
+          # Single source of truth for deps now lives in pyproject.toml ([project]
+          # dependencies + the [dev] extra); key the pip cache off it.
+          cache-dependency-path: pyproject.toml
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
+          pip install -e ".[dev]"
 
       # The suite imports deep_research.* without the external DRB harness on
       # disk; that import is lazy as of the A2 fix, so collection succeeds here.
