@@ -149,7 +149,7 @@ body.theme-light{
 .track{ position:relative; height:18px; border-radius:8px; overflow:hidden; background:var(--track-bg); box-shadow:var(--track-shadow);}
 .bar{ height:100%; border-radius:8px; background:var(--field-bar); border:1px solid var(--field-border); box-shadow:var(--field-inner);}
 .score{ text-align:right; font-size:16px; font-weight:600; color:var(--score);}
-.row--lunon .name{ font-weight:650; color:var(--text); letter-spacing:-.005em;}
+.row--lunon .name{ font-weight:700; color:var(--text); letter-spacing:-.005em;}
 .row--lunon .score{ font-size:19px; font-weight:700; color:var(--text);}
 .bar--lunon{ border:1px solid transparent;
   background:linear-gradient(100deg,#1E5BE6 0%,#2563EB 42%,#3B82F6 100%); box-shadow:var(--lunon-glow);}
@@ -171,7 +171,7 @@ $rows
 
 
 def build_html(rows, meta, theme: str) -> str:
-    return _HTML.substitute(
+    return _HTML.safe_substitute(
         font_faces=font_faces(),
         theme_class=f"theme-{theme}",
         title="DeepResearch-Bench — Overall",
@@ -185,12 +185,12 @@ def build_html(rows, meta, theme: str) -> str:
     )
 
 
-def render(html: str, out: Path, scale: int) -> None:
+def render(content: str, out: Path, scale: int) -> None:
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=["--force-color-profile=srgb"])
         ctx = browser.new_context(viewport=VIEWPORT, device_scale_factor=scale)
         page = ctx.new_page()
-        page.set_content(html, wait_until="load")
+        page.set_content(content, wait_until="load")
         page.evaluate("async () => { await document.fonts.ready; }")
         page.locator("#page").screenshot(path=str(out))
         browser.close()
