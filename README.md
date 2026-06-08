@@ -40,7 +40,6 @@ One question flows through four stages — **plan → research → write → edi
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/architecture-dark.png">
-    <source media="(prefers-color-scheme: light)" srcset="assets/architecture-light.png">
     <img src="assets/architecture-light.png" width="900" alt="The pipeline, threaded by a typed PipelineState. 01 Plan — intent, archetype and criteria (GPT-5.5) plus role_play, scout and architect (Claude Opus 4.8) — emits a typed plan with 48–64 research queries and acceptance criteria. 02 Research dispatches five isolated-context specialists (evidence_gatherer, mechanism_explorer, comparator, critic, horizon_scanner) on Nemotron-3-Super-120B, with a 64-tool budget, evidence dedup and gap-fill, into a memory bank. 03 Write drafts section by section on Opus through a grounding → score → regen loop (cap 2). 04 Edit refines and validates on GPT-5.5, runs an optional DeepSeek pass for Chinese and an Opus readability rewrite, then a nine-pass deterministic cleanup chain. The result is a cited final report.">
   </picture>
 </p>
