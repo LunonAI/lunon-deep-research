@@ -37,7 +37,13 @@ import re
 from .. import llm
 
 _MARKER_RE = re.compile(r"\[\^[^\]]+\]")
-_OUT_TOKEN_BUDGET = 32_000
+# Output budget is per-language because CJK tokenizes far denser. EN target
+# ~55-75k chars / ~4 chars/token ≈ 19k tokens fits 32k comfortably. ZH targets up
+# to ~3.5万字 (~35k CJK chars) which at ~1.3 tokens/char ≈ 45k tokens — a single
+# 32k cap truncates the ZH rewrite mid-sentence, and the truncated draft still
+# passes the size guards, so it would ship silently. Give ZH the wider budget.
+_OUT_TOKEN_BUDGET_EN = 32_000
+_OUT_TOKEN_BUDGET_ZH = 48_000
 _GUARD_LO = 0.10  # below this fraction of the original -> summarized away -> revert
 _GUARD_HI = 1.05  # above this fraction of original length -> didn't condense -> revert
 
@@ -75,9 +81,11 @@ def rewrite(article: str, language: str, *, numeric_spine=None) -> dict:
         return {"article": article, "applied": False, "stats": {"reason": "empty-input"}}
     role = "readability_rewriter"
     spine = _spine_literal(numeric_spine)
-    system = _SYS_ZH if language == "zh" else _SYS_EN
+    is_zh = language == "zh"
+    system = _SYS_ZH if is_zh else _SYS_EN
+    budget = _OUT_TOKEN_BUDGET_ZH if is_zh else _OUT_TOKEN_BUDGET_EN
     try:
-        out = llm.call(role, article, system=system, max_tokens=_OUT_TOKEN_BUDGET, note="readability_rewrite")
+        out = llm.call(role, article, system=system, max_tokens=budget, note="readability_rewrite")
     except Exception as e:  # noqa: BLE001 — enhancement only; never break the run
         return {"article": article, "applied": False, "stats": {"reason": f"err:{type(e).__name__}"}}
     out = (out or "").strip()

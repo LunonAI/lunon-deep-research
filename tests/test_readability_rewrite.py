@@ -75,6 +75,22 @@ def test_language_routes_to_zh_prompt(monkeypatch):
     assert seen["system"] == rr._SYS_ZH
 
 
+def test_zh_gets_wider_token_budget_than_en(monkeypatch):
+    # ZH tokenizes denser; a 32k cap truncates the ~3.5万字 target mid-sentence.
+    seen = {}
+
+    def cap(role, user, system="", *, max_tokens=None, **k):
+        seen["max_tokens"] = max_tokens
+        return "# R\n\n精炼。" * 30
+
+    monkeypatch.setattr(rr.llm, "call", cap)
+    rr.rewrite("# R\n\n" + ("长内容。" * 400), "zh")
+    assert seen["max_tokens"] == rr._OUT_TOKEN_BUDGET_ZH
+    rr.rewrite("# R\n\n" + ("long content. " * 400), "en")
+    assert seen["max_tokens"] == rr._OUT_TOKEN_BUDGET_EN
+    assert rr._OUT_TOKEN_BUDGET_ZH > rr._OUT_TOKEN_BUDGET_EN
+
+
 def test_empty_input_noop():
     out = rr.rewrite("   ", "en")
     assert out["applied"] is False and out["stats"]["reason"] == "empty-input"
