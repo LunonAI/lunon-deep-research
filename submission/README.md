@@ -27,13 +27,15 @@ submission/
 ├── reports/
 │   └── 1.md … 100.md                      # per-task report (the `article` field, for browsing)
 └── results/race/lunon-deep-research/
-    ├── race_result.txt                    # aggregate: 4 dimensions + weighted overall
+    ├── race_result.txt                    # aggregate: 4 dimensions + RACE overall
     └── raw_results.jsonl                  # per-task RACE scores (id, prompt, 4 dims, overall)
 ```
 
 - **`data/test_data/raw_data/lunon-deep-research.jsonl`** — the canonical submission file, one JSON object per line in the benchmark's required format: `{"id": <int 1–100>, "prompt": <task>, "article": <report>}`. Citations are inline markdown links.
 - **`reports/<id>.md`** — the same report text broken out per task for easy reading. `reports/<id>.md` is byte-for-byte the `article` field of task `<id>`.
-- **`results/race/lunon-deep-research/`** — the RACE evaluation output (aggregate + per-task), exactly as written by the official harness.
+- **`results/race/lunon-deep-research/`** — the RACE evaluation output (aggregate + per-task). `race_result.txt` is byte-for-byte the harness output; `raw_results.jsonl` is slimmed to the canonical 7 keys (`id`, `prompt`, the four dimensions, `overall_score`) — the harness's internal `criteria_scores` and `judge_raw` keys were dropped.
+
+> **On `overall_score`:** RACE does not derive the overall from a fixed-weight average of the four dimensions — the evaluator generates dynamic, per-task criteria weights and scores each report against a reference report. Those per-task weights are not reproduced here, so the per-task (and aggregate) overall scores cannot be reconstructed from the four dimension values alone; see the benchmark's [RACE evaluator](https://github.com/Ayanami0730/deep_research_bench/blob/main/deepresearch_bench_race.py) and [paper](https://arxiv.org/abs/2506.11763) for the exact method.
 
 The benchmark covers 100 PhD-level tasks across 22 fields, **50 Chinese + 50 English**; prompts and reports are kept in each task's native language.
 
