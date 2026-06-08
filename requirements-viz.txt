@@ -1,0 +1,6 @@
+# Build-time visualization deps for scripts/render_leaderboard_chart.py.
+# NOT part of the deep_research runtime. Install only to regenerate README chart assets:
+#   pip install -r requirements-viz.txt
+# Kaleido v1 needs a system Chrome OR a one-time: python -c "import kaleido; kaleido.get_chrome_sync()"
+plotly>=6.1.1,<7
+kaleido>=1.0,<2
