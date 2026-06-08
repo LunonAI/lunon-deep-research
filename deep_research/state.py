@@ -201,6 +201,9 @@ class PipelineState:
     zh_writer_pass_stats: dict = field(default_factory=dict)
     # round 4 W4: paragraph-density clamp telemetry.
     clamp_paragraphs_stats: dict = field(default_factory=dict)
+    # 2026-06-08: readability-rewrite stage telemetry {pre/post_chars, ratio,
+    # cites_pre/post, reason}. The validated full-100 readability lever (0.427->0.51).
+    readability_rewrite_stats: dict = field(default_factory=dict)
     # P3b-OPT2 (2026-05-27): per-section inner-loop iteration trajectory.
     # One entry per section: {"section": sid, "iters": [{"i", "grounding_ok",
     # "scored", "score_ok", "min_score"}, ...]}. INNER_CAP is unchanged (3);
