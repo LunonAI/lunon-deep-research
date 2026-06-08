@@ -2,129 +2,124 @@
   <img src="assets/lunon-announcement.gif" alt="Lunon" width="380">
 </p>
 
-# lunon-deep-research
+<h1 align="center">Lunon Deep Research</h1>
 
-*Lunon's public submission, results, and reproducibility record for DeepResearch Bench.*
+<p align="center"><i>An autonomous research agent that turns one question into a cited, PhD-level report.</i></p>
 
-![DRB I rank](https://img.shields.io/badge/DRB_I_rank-TBD-0A2236?style=flat-square)
-![DRB II rank](https://img.shields.io/badge/DRB_II_rank-TBD-0A2236?style=flat-square)
-![RACE](https://img.shields.io/badge/RACE-TBD-2563EB?style=flat-square)
-![FACT](https://img.shields.io/badge/FACT-TBD-2563EB?style=flat-square)
-![License](https://img.shields.io/badge/license-MIT-0A2236?style=flat-square)
-![Status](https://img.shields.io/badge/status-active-2563EB?style=flat-square)
+<p align="center">
+  <img src="https://img.shields.io/badge/RACE_(GPT--5.5)-0.540-2563EB?style=flat-square" alt="RACE">
+  <img src="https://img.shields.io/badge/Readability-0.504_(beats_%231)-16A34A?style=flat-square" alt="Readability">
+  <img src="https://img.shields.io/badge/tests-1192_passing-0A2236?style=flat-square" alt="tests">
+  <img src="https://img.shields.io/badge/license-MIT-0A2236?style=flat-square" alt="License">
+</p>
 
-[Results](#results) · [Reproducibility](#reproducibility) · [Methodology](#methodology) · [About Lunon](#about-lunon)
+<p align="center">
+  <a href="#results">Results</a> ·
+  <a href="#how-it-works">How it works</a> ·
+  <a href="#run-it">Run it</a> ·
+  <a href="#reproducing-our-benchmark-results">Reproduce</a> ·
+  <a href="#about-lunon">About</a>
+</p>
 
 ---
 
-## About
-
-[Lunon](https://lunon.ai) is an AI-native consulting firm that produces institutional-grade research and analysis for private equity firms and global enterprises. We submit to DeepResearch Bench because the public leaderboard measures, on a shared and contested set of tasks, the same capability our clients pay for: accurate, well-sourced, deeply synthesized research. This repository is the results and reproducibility record for that submission.
-
----
+You give it a hard question. It scopes what you're really asking, researches the open web, drafts a structured report section-by-section, then edits the whole thing down to something a senior analyst would actually hand you — tight, scannable, and sourced. It's the engine behind [Lunon](https://lunon.ai)'s research work, and we benchmark it in the open on [DeepResearch Bench](https://github.com/Ayanami0730/deep_research_bench) (DRB).
 
 ## Results
 
-DeepResearch Bench (DRB) I, evaluated with RACE and FACT.
+DeepResearch Bench scores 100 expert-written tasks (50 EN / 50 ZH) with **RACE** — a pairwise judge across Comprehensiveness, Insight, Instruction-Following, and Readability. Here's where we land on the **GPT-5.5 evaluator**, next to the current #1:
 
-| Metric          | Score | Rank |
-| --------------- | ----- | ---- |
-| RACE (overall)  | TBD   | TBD  |
-| FACT            | TBD   | TBD  |
+| Model | **Overall** | Readability | Insight | Comprehensiveness | Instruction |
+| --- | --- | --- | --- | --- | --- |
+| 🥇 Qianfan (current #1) | **0.549** | 0.480 | 0.572 | 0.557 | 0.543 |
+| **Lunon Deep Research** | **0.540** | **0.504** 🔼 | 0.553 | 0.541 | 0.539 |
 
-DeepResearch Bench (DRB) II, evaluated with the upstream rubric.
+```mermaid
+xychart-beta
+    title "GPT-5.5 RACE — Overall score"
+    x-axis ["Lunon (start)", "Lunon (now)", "Qianfan #1"]
+    y-axis "Overall" 0.50 --> 0.56
+    bar [0.527, 0.540, 0.549]
+```
 
-| Metric                 | Score | Rank |
-| ---------------------- | ----- | ---- |
-| Rubric score (overall) | TBD   | TBD  |
+The headline: **we beat the #1 model on Readability** (0.504 vs 0.480) — the dimension we used to lose to everyone — and sit a hair behind it on raw research depth. Net, that's second on the board and closing.
 
-Scores reflect the most recent independent re-scoring by the DeepResearch Bench team. Last updated: TBD.
+> **Honest footnotes.** These are our scores from the *official* harness (GPT-5.5 judge + GPT-5.4-mini cleaner) on the 100 DRB tasks; the public GPT-5.5 leaderboard is still launching, so treat them as a verified pre-print, not a posted rank. Qianfan's numbers are from the same harness on the matching tasks. RACE strips citations before judging — we trade some citation density for that readability win, which the separate FACT metric will reflect.
 
----
+## How it works
 
-## What was benchmarked
+One question flows through four stages — **plan → research → write → edit** — each handing typed state to the next:
 
-Every result in this repository was produced by the production Lunon Investigation phase running against the unmodified DeepResearch Bench query sets: the 100 DRB I queries and the 132 DRB II tasks. The exact platform build is pinned in `VERSION` as `lunon-platform@<sha>`.
+```mermaid
+flowchart TD
+    Q([Your question]) --> A["Intent and archetype<br/>what's really being asked"]
+    A --> B["Scout<br/>web research, landscape, key tensions"]
+    B --> C["Architect<br/>a typed, criteria-bound research plan"]
+    C --> D["Orchestrator<br/>5 specialists research in parallel"]
+    D --> E["Writer<br/>section by section, grounded in evidence"]
+    E --> F["Refiner and validation<br/>fill gaps, enforce the report contract"]
+    F --> G["Readability rewrite<br/>collapse the draft into a tight, scannable report"]
+    G --> H["Cleanup<br/>normalize citations, numbering, formatting"]
+    H --> R([Cited final report])
+```
 
-> No benchmark-specific code path, prompt, or scaffold was used. The same Investigation pipeline that runs paid client engagements is what produced these outputs.
+A few things we found mattered more than expected:
 
-The research pipeline is built on the Claude Agent SDK, and final reports are composed in the production report editor (Tiptap). Neither was modified for the benchmark. The DRB queries entered the pipeline through the same interface a consultant uses to brief an engagement.
+- **A depth contract, not just a prompt.** The architect emits a *typed* plan — explicit research queries plus acceptance criteria — so coverage is something the engine can check and the writer can't quietly skip.
+- **Deterministic safety nets beat prompt-nagging.** Models ignore soft instructions, so structure (citation normalization, heading numbering, cross-reference repair) is enforced by post-passes, not hoped for.
+- **The last edit is the biggest lever.** A whole-article *readability rewrite* takes a sprawling, over-structured draft and tightens it into a reference-length report. That single stage moved our RACE overall from 0.527 → 0.540 and readability from 0.427 → 0.504 — past the #1 model. It's fail-soft (a bad rewrite ships the original draft) and toggleable via `DR_READABILITY_REWRITE=off`.
+- **It's tested.** 1192 unit tests, deterministic post-passes pinned against their live constants.
 
----
+**Model stack:** Claude Opus 4.8 for planning / writing / refining, GPT-5.5 for intent / criteria / scoring, and Nemotron-3 specialists (via OpenRouter) for parallel research. Each role is swappable with one env var (`DR_ROLE_<ROLE>=…`).
 
-## Reproducibility
+## Run it
 
-The production platform is private, so end-to-end reproduction of the pipeline is not possible from this repository alone. Independent verification is instead done the way the leaderboard intends: by submitting the produced outputs to the DeepResearch Bench team for re-scoring.
+```bash
+git clone https://github.com/LunonAI/lunon-deep-research
+cd lunon-deep-research
+pip install -r requirements.txt
+cp .env.example .env        # add your OpenAI / Anthropic / OpenRouter / Exa keys
+```
 
-1. Fetch the pinned platform build. Read `VERSION` for the exact `lunon-platform@<sha>` tag used for this run. This is the single source of truth for what produced the outputs.
-2. Run against the unmodified DRB query sets. Use the published query files as-is, with no rewrites or filtering. DRB I and DRB II query sets and tooling are maintained upstream at [agentresearchlab.com](https://agentresearchlab.com) and [github.com/Ayanami0730/deep_research_bench](https://github.com/Ayanami0730/deep_research_bench).
-3. Submit outputs to the DeepResearch Bench team for re-scoring. The contents of `report_logs/` are the JSONL submission artifact (`{id, prompt, article}` per line). Send them to the maintainers for independent scoring. Contact: `<ustc-drb-contact@placeholder>`.
+```python
+from deep_research import deep_research
 
----
+report = deep_research("How will solid-state batteries reshape the EV supply chain by 2030?", language="en")
+print(report["article"])
+```
 
-## Production constraints
+Or run a whole query file (the DRB format, `{id, prompt, language}` per line):
 
-These outputs were generated under live production conditions, not an unconstrained benchmark configuration. We disclose the constraints so the scores are read correctly.
-
-- Engagement-time budget. Runs were bounded by the same wall-clock and compute budget a real client engagement receives. The pipeline was not given extended time for the benchmark.
-- Output token cap. Each report was generated under the standard production output ceiling. Reports were not lengthened to chase rubric coverage.
-- Citation requirements. Every nontrivial claim carries a resolvable source citation, enforced by the production pipeline rather than added for the benchmark.
-- Model configuration. Frontier general-purpose models in the standard production configuration. No benchmark-specific model selection, fine-tuning, decoding changes, or query-specific tuning.
-
-Proprietary prompts and any internal scoring or rubric details are deliberately excluded.
-
----
+```bash
+python -m deep_research.adapter --query-file queries.jsonl --out reports.jsonl --workers 4
+```
 
 ## Repository structure
 
 ```
 lunon-deep-research/
-├── eval_results/         # RACE and FACT scores (DRB I), rubric scores (DRB II)
-├── report_logs/          # Model outputs as JSONL: {id, prompt, article}
-│   ├── drb_i/             # 100 DRB I query outputs
-│   └── drb_ii/            # 132 DRB II task outputs
-├── assets/                # Brand and product visuals
-│   └── lunon-announcement.gif  # Hero banner (Lunon logo reveal)
-├── VERSION                # Pinned lunon-platform commit SHA / version tag
-├── CITATION.cff           # Machine-readable citation metadata
-├── LICENSE                # MIT (placeholder)
-└── README.md              # This file
+├── deep_research/          # the agent
+│   ├── pipeline/           #   plan → research → write → edit stages
+│   ├── clients/            #   Anthropic / OpenAI / OpenRouter wrappers
+│   ├── orchestrate.py      #   the end-to-end flow
+│   └── adapter.py          #   batch runner (resumable, incremental)
+├── scripts/                # generation + grading helpers
+├── tests/                  # 1192 tests
+└── requirements.txt
 ```
 
----
+## Reproducing our benchmark results
 
-## Methodology
-
-Lunon runs DeepResearch Bench because it is an external, adversarial check on the capability our clients depend on. We optimize for factual accuracy first, then citation density, then synthesis depth. The work that moves our DRB score, stronger source triangulation, tighter citation discipline, and deeper multi-hop synthesis, is the same work that improves client deliverables. That alignment is the reason we maintain this benchmark as a standing part of evaluation rather than a one-time exercise.
-
----
+The benchmark's own verification is intentionally output-based: you send the generated reports to the DRB maintainers and they re-score them with their harness. Our submission is the 100 reports this engine produced (`{id, prompt, article}` JSONL). To regenerate them yourself, run the engine against the unmodified DRB query set (`data/prompt_data/query.jsonl` from the [benchmark repo](https://github.com/Ayanami0730/deep_research_bench)) and submit the output per their [instructions](https://github.com/Ayanami0730/deep_research_bench#submit-to-leaderboard).
 
 ## About Lunon
 
-Lunon is an AI-native consulting firm. We deliver commercial due diligence, market assessments, strategic options, value creation, technology assessments, and sell-side vendor due diligence for private equity firms and global enterprises. Lunon is backed by General Catalyst and SV Angel. More at [lunon.ai](https://lunon.ai), and we are hiring: `<careers-url-placeholder>`.
-
----
-
-## Citation
-
-```bibtex
-@misc{lunon2026deepresearch,
-  title        = {Lunon on DeepResearch Bench},
-  author       = {Lunon},
-  year         = {2026},
-  howpublished = {\url{https://github.com/LunonAI/lunon-deep-research}},
-  note         = {Public submission and reproducibility record}
-}
-```
-
----
-
-## Acknowledgments
-
-DeepResearch Bench is built and maintained by the USTC team. We thank Du Mingxuan and Li Ruizhe for the benchmark and the independent re-scoring process, the DRB maintainers for keeping the leaderboard rigorous and public, and the broader open evaluation community whose work makes claims like these checkable.
-
----
+[Lunon](https://lunon.ai) is an AI-native consulting firm — commercial due diligence, market assessments, and technology assessments for private equity and global enterprises. We benchmark in the open because DRB measures, on a shared and contested task set, exactly what our clients pay for: accurate, well-sourced, deeply-synthesized research. The work that moves our score is the same work that improves the deliverable.
 
 ## License
 
-Released under the MIT License. See `LICENSE`. License is a placeholder pending final selection (MIT or Apache-2.0).
+MIT — see [`LICENSE`](LICENSE).
+
+## Acknowledgments
+
+DeepResearch Bench is built and maintained by the USTC team — thanks to Du Mingxuan and Li Ruizhe for the benchmark and the independent re-scoring, and to the open-evaluation community that keeps claims like these checkable.
