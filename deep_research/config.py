@@ -48,6 +48,9 @@ _DEFAULTS = {
     # DeepSeek-V4-Pro mean 8.00 > Qwen3-235B 7.40 > DeepSeek-V3.2-exp 6.6.
     # V4 Pro wins by +0.60 (>0.5 keep threshold). Apache-2.0.
     "zh_writer": os.environ.get("DR_ROLE_ZH_WRITER", "deepseek/deepseek-v4-pro"),
+    # Readability rewrite (2026-06-08): the validated whole-article tighten/restructure
+    # pass (readability 0.427->0.51, overall 0.527->0.54). Opus won Opus-vs-GPT-5.5.
+    "readability_rewriter": os.environ.get("DR_ROLE_READABILITY_REWRITER", OPUS),
     # P2-Wave-1-D: embedding model for D1 cosine-clustering evidence dedup.
     # text-embedding-3-small is deterministic, cheap (~$0.02 per 1M tokens),
     # multilingual (handles EN+ZH), and is the OpenAI workhorse 1536-dim model.
