@@ -118,6 +118,7 @@ def _persist_drift(s, language: str, query: str) -> None:
             "clamp_citations": dict(getattr(s, "clamp_citations_stats", {}) or {}),
             "clamp_emdash": dict(getattr(s, "clamp_emdash_stats", {}) or {}),
             "zh_writer_pass": dict(getattr(s, "zh_writer_pass_stats", {}) or {}),
+            "readability_rewrite": dict(getattr(s, "readability_rewrite_stats", {}) or {}),
             # P3b-OPT2 (2026-05-27): per-section inner-loop trajectory so
             # scripts/inner_cap_ab_analysis.py can measure whether the 2nd/3rd
             # corrective pass (only reachable at INNER_CAP=3) earns its cost.
@@ -148,6 +149,7 @@ from .pipeline import (
     mermaid_validate,
     numbering_fix,
     orchestrator,
+    readability_rewrite,
     refiner,
     refiner_gate,
     role_play,
@@ -349,6 +351,25 @@ def from_plan(ctx: dict, query: str, language: str, task_id: int | None = None) 
         )
         s.article = zp["article"]
         s.zh_writer_pass_stats = zp.get("stats", {})
+
+    # Readability rewrite (2026-06-08): the validated whole-article tighten/
+    # restructure pass — the single lever that moved the full-100 GPT-5.5 score
+    # (readability 0.427->0.51, overall 0.527->0.54, beating Qianfan #1 on
+    # readability). Runs AFTER the content stages (refiner/validation/zh_writer)
+    # and BEFORE the deterministic cleanup chain below, so xref_repair /
+    # footnote_normalize / numbering_fix / cjk_despace re-normalize the rewritten
+    # article's citations + heading numbers. Fail-soft (ships the draft on any
+    # guard trip). Kill-switch: DR_READABILITY_REWRITE=off.
+    if os.environ.get("DR_READABILITY_REWRITE", "on") != "off":
+        rr = _phase(
+            "readability_rewrite",
+            readability_rewrite.rewrite,
+            s.article,
+            language,
+            numeric_spine=s.plan.get("numeric_spine"),
+        )
+        s.article = rr["article"]
+        s.readability_rewrite_stats = rr.get("stats", {})
 
     # P3-W3.b (2026-05-27): xref_repair safety-net post-pass. The
     # writer's in-prompt `_MID_PARAGRAPH_XREF_RULE` (writing_rules.py) is
