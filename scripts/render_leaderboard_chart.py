@@ -67,7 +67,7 @@ def build(rows, theme):
     labels = []
     for r, s in zip(rows, scores, strict=True):
         if r.get("lunon"):
-            labels.append(f"<b>{s:.1f}</b>  <span style='color:{BLUE}'>#1</span>")
+            labels.append(f"<b>{s:.1f}</b>")
         else:
             labels.append(f"<span style='color:{t['sub']}'>{s:.1f}</span>")
 
@@ -92,7 +92,7 @@ def build(rows, theme):
             text=(
                 "<b>DeepResearch-Bench — Overall</b>"
                 f"<br><span style='font-size:13px;color:{t['sub']}'>"
-                "RACE score (×100) · GPT-5.5 judge · Lunon ranked #1</span>"
+                "RACE score (×100) · GPT-5.5 judge</span>"
             ),
             font=dict(family=FONT, size=22, color=t["text"]),
             x=0.0,
