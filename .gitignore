@@ -15,6 +15,9 @@ venv/
 *.swp
 *:Zone.Identifier
 
+# Claude Code local session data + worktrees (multi-GB; never commit)
+.claude/
+
 # === STRATEGY / RESEARCH ARTIFACTS — keep LOCAL (do not publish) ===
 # Phase outputs (every iteration, mined rationales, scored articles)
 p0_artifacts/
@@ -29,6 +32,12 @@ docs/
 
 # Cost ledgers (dollar amounts by phase/provider)
 cost_tracking/
+
+# On this machine p0/p1_artifacts and cost_tracking are SYMLINKS into transfer/;
+# the trailing-slash patterns above match dirs but NOT symlinks, so anchor by name.
+/p0_artifacts
+/p1_artifacts
+/cost_tracking
 
 # Phase checklists + roadmaps (entire competitive strategy)
 p0-checklist.md

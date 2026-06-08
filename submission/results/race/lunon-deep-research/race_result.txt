@@ -1,0 +1,5 @@
+Comprehensiveness: 0.5410
+Insight: 0.5529
+Instruction Following: 0.5392
+Readability: 0.5041
+Overall Score: 0.5397
