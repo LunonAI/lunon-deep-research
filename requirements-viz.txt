@@ -1,6 +1,8 @@
 # Build-time visualization deps for scripts/render_leaderboard_chart.py.
 # NOT part of the deep_research runtime. Install only to regenerate README chart assets:
 #   pip install -r requirements-viz.txt
-# Kaleido v1 needs a system Chrome OR a one-time: python -c "import kaleido; kaleido.get_chrome_sync()"
-plotly>=6.1.1,<7
-kaleido>=1.0,<2
+#   playwright install chromium      # one-time: downloads the version-locked browser (~150MB)
+# The chart is a bespoke HTML/CSS document screenshotted with headless Chromium, so the
+# glassmorphism (backdrop-filter, gradients, glow) + bundled Inter font render faithfully.
+# 1.49+ for the new headless mode that composites blur reliably in screenshots.
+playwright>=1.49,<2
