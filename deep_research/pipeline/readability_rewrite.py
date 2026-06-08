@@ -34,13 +34,12 @@ from __future__ import annotations
 
 import re
 
-from .. import config, llm
+from .. import llm
 
 _MARKER_RE = re.compile(r"\[\^[^\]]+\]")
-_NUM_RE = re.compile(r"\d[\d,.]*")
 _OUT_TOKEN_BUDGET = 32_000
 _GUARD_LO = 0.10  # below this fraction of the original -> summarized away -> revert
-_GUARD_HI = 1.05  # at/above original length -> didn't condense -> revert
+_GUARD_HI = 1.05  # above this fraction of original length -> didn't condense -> revert
 
 _SYS_EN = (
     "You are a top research analyst. Rewrite the report below to MAXIMIZE readability as judged "
@@ -84,9 +83,11 @@ def rewrite(article: str, language: str, *, numeric_spine=None) -> dict:
     out = (out or "").strip()
     pre_n, post_n = len(article), len(out)
     stats = {
-        "pre_chars": pre_n, "post_chars": post_n,
+        "pre_chars": pre_n,
+        "post_chars": post_n,
         "ratio": round(post_n / max(1, pre_n), 3),
-        "cites_pre": len(_MARKER_RE.findall(article)), "cites_post": len(_MARKER_RE.findall(out)),
+        "cites_pre": len(_MARKER_RE.findall(article)),
+        "cites_post": len(_MARKER_RE.findall(out)),
     }
     if not out:
         return {"article": article, "applied": False, "stats": {**stats, "reason": "empty-output"}}

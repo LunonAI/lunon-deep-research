@@ -38,8 +38,10 @@ def test_reverts_on_empty_output(monkeypatch):
 
 def test_failsoft_on_exception(monkeypatch):
     orig = "# R\n\n" + ("x " * 200)
+
     def boom(*a, **k):
         raise RuntimeError("api down")
+
     monkeypatch.setattr(rr.llm, "call", boom)
     out = rr.rewrite(orig, "en")
     assert out["applied"] is False and out["article"] == orig and "err:" in out["stats"]["reason"]
@@ -63,9 +65,11 @@ def test_keeps_spine_when_present(monkeypatch):
 
 def test_language_routes_to_zh_prompt(monkeypatch):
     seen = {}
+
     def cap(role, user, system="", **k):
         seen["system"] = system
         return "# R\n\n精炼内容。" * 20
+
     monkeypatch.setattr(rr.llm, "call", cap)
     rr.rewrite("# R\n\n" + ("原始很长的内容。" * 200), "zh")
     assert seen["system"] == rr._SYS_ZH

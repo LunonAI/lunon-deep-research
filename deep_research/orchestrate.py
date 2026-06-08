@@ -362,7 +362,10 @@ def from_plan(ctx: dict, query: str, language: str, task_id: int | None = None) 
     # guard trip). Kill-switch: DR_READABILITY_REWRITE=off.
     if os.environ.get("DR_READABILITY_REWRITE", "on") != "off":
         rr = _phase(
-            "readability_rewrite", readability_rewrite.rewrite, s.article, language,
+            "readability_rewrite",
+            readability_rewrite.rewrite,
+            s.article,
+            language,
             numeric_spine=s.plan.get("numeric_spine"),
         )
         s.article = rr["article"]
