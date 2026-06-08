@@ -244,33 +244,57 @@ def render(doc):
 
     with sync_playwright() as p:
         browser = p.chromium.launch()
-        for theme in ("light", "dark"):
-            out = THEMES[theme]["out"]
-            page = browser.new_page(viewport={"width": W, "height": 1600}, device_scale_factor=2)
-            page.set_content(build_html(doc, theme), wait_until="networkidle")
-            page.evaluate("document.fonts.ready")
-            shot = page.locator("#diagram").screenshot()
-            page.close()
-            im = Image.open(io.BytesIO(shot)).convert("RGB")
-            im.quantize(colors=256, method=Image.Quantize.FASTOCTREE,
-                        dither=Image.Dither.FLOYDSTEINBERG).save(out, optimize=True)
-            print(f"wrote {out.relative_to(ROOT)}  ({out.stat().st_size // 1024} KB)")
-        browser.close()
+        try:
+            for theme in ("light", "dark"):
+                out = THEMES[theme]["out"]
+                page = browser.new_page(viewport={"width": W, "height": 1600}, device_scale_factor=2)
+                page.set_content(build_html(doc, theme), wait_until="networkidle")
+                page.evaluate("document.fonts.ready")
+                shot = page.locator("#diagram").screenshot()
+                page.close()
+                im = Image.open(io.BytesIO(shot)).convert("RGB")
+                im.quantize(colors=256, method=Image.Quantize.FASTOCTREE,
+                            dither=Image.Dither.FLOYDSTEINBERG).save(out, optimize=True)
+                print(f"wrote {out.relative_to(ROOT)}  ({out.stat().st_size // 1024} KB)")
+        finally:
+            browser.close()
 
 
 def check(doc):
+    """Drift guard. Each diagram model-key asserts a family/version about the live
+    model id in config.py (the label "GPT-5.5" claims a gpt-5.5 id, "DeepSeek"
+    claims a deepseek id, etc.). Verify those assertions against the *live* config
+    for only the keys the diagram (`doc`) actually uses, so a model swap in
+    config.py (e.g. zh_writer -> qwen) is flagged. Exits non-zero on mismatch."""
     sys.path.insert(0, str(ROOT))
     from deep_research import config
 
     roles = config.all_roles()
-    expect = {"opus": config.OPUS, "gpt": config.GPT55, "nemo": config.NEMOTRON,
-              "deepseek": roles.get("zh_writer", "")}
+    # token the diagram's label for each key claims is present in the live model id
+    asserts = {"opus": "opus", "gpt": "gpt-5.5", "nemo": "nemotron-3-super-120b", "deepseek": "deepseek"}
+    live_id = {"opus": config.OPUS, "gpt": config.GPT55, "nemo": config.NEMOTRON,
+               "deepseek": roles.get("zh_writer", "")}
+
+    used = {s["model"] for ph in doc["phases"] for s in ph.get("stages", [])}
+    used |= {ph[k]["model"] for ph in doc["phases"] for k in ("fanout", "loop") if k in ph}
+
     ok = True
-    for key, ident in expect.items():
-        present = ident in set(roles.values())
-        ok = ok and present
-        print(f"  {key:9} -> {ident!r:46} [{'ok' if present else 'DRIFT'}]")
-    print("check:", "all model chips match config" if ok else "MISMATCH — update the diagram")
+    if unknown := used - set(MODELS):
+        ok = False
+        print(f"  unknown model keys in architecture.json: {sorted(unknown)}")
+    for key in sorted(used & asserts.keys()):
+        good = asserts[key] in live_id[key].lower()
+        ok = ok and good
+        print(f"  {key:9} label {MODELS[key]!r:11} expects {asserts[key]!r} in "
+              f"{live_id[key]!r:42} [{'ok' if good else 'DRIFT'}]")
+    # the fan-out spells out the full model name — it must still match the live Nemotron id
+    for ph in doc["phases"]:
+        if f := ph.get("fanout"):
+            norm = lambda s: s.lower().replace("-", "").replace(" ", "").replace("/", "")  # noqa: E731
+            good = norm(f["model_full"]) in norm(config.NEMOTRON)
+            ok = ok and good
+            print(f"  fan-out   {f['model_full']!r} vs {config.NEMOTRON!r} [{'ok' if good else 'DRIFT'}]")
+    print("check:", "diagram labels match config" if ok else "DRIFT — update the diagram and re-render")
     return 0 if ok else 1
 
 
