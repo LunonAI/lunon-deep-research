@@ -10,7 +10,7 @@ query.jsonl line in  ->  {id, prompt, article} line out.
 - DRB_PHASE asserted at startup (fail-loud, plan point 9).
 
 Run: DRB_PHASE=P1 /usr/bin/python3 -m deep_research.adapter \
-        --query-file /home/connor/dev/deep_research_bench/data/prompt_data/query.jsonl \
+        --query-file ~/dev/deep_research_bench/data/prompt_data/query.jsonl \
         --out p1_artifacts/<name>.jsonl [--limit N] [--only-en|--only-zh] [--ids 1,2,3]
 """
 
@@ -21,14 +21,14 @@ import pathlib
 import sys
 
 from . import assert_phase, deep_research
+from ._env import drb_root
 
 # Path to the DRB query.jsonl harness manifest. Override per-environment with
 # `DR_QUERY_FILE=/path/to/query.jsonl` so the same code works on other devs'
-# machines (e.g. macOS at /Users/<user>/...).
-DEFAULT_QUERY = os.environ.get(
-    "DR_QUERY_FILE",
-    "/home/connor/dev/deep_research_bench/data/prompt_data/query.jsonl",
-)
+# machines (e.g. macOS at /Users/<user>/...). Otherwise falls back to the
+# resolved DRB root (drb_root(): $DRB_REPO, else ~/dev/deep_research_bench) —
+# no hardcoded home directory.
+DEFAULT_QUERY = os.environ.get("DR_QUERY_FILE") or str(drb_root() / "data" / "prompt_data" / "query.jsonl")
 
 
 def _load_queries(path):

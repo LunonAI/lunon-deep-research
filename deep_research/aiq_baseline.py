@@ -59,13 +59,14 @@ if __name__ == "__main__":
     import pathlib
 
     from . import assert_phase
+    from ._env import drb_root
 
     assert_phase()
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True)
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--workers", type=int, default=6)
-    ap.add_argument("--query-file", default="/home/connor/dev/deep_research_bench/data/prompt_data/query.jsonl")
+    ap.add_argument("--query-file", default=str(drb_root() / "data" / "prompt_data" / "query.jsonl"))
     a = ap.parse_args()
     import threading
     from concurrent.futures import ThreadPoolExecutor

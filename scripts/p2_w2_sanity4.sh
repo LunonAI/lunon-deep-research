@@ -23,10 +23,10 @@ set -euo pipefail
 
 # Greptile follow-up (PR #16): paths derived relative to the script location
 # so this runs from any clone. The DRB harness path remains overrideable via
-# DRB_REPO (defaults to /home/connor/dev/deep_research_bench on the dev box).
+# DRB_REPO (defaults to $HOME/dev/deep_research_bench).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LUNON_REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
-DRB_REPO="${DRB_REPO:-/home/connor/dev/deep_research_bench}"
+DRB_REPO="${DRB_REPO:-$HOME/dev/deep_research_bench}"
 
 cd "$LUNON_REPO"
 

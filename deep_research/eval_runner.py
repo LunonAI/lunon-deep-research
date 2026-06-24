@@ -20,9 +20,11 @@ import pathlib
 import subprocess
 import sys
 
-DRB = pathlib.Path("/home/connor/dev/deep_research_bench")
-RAW_DIR = DRB / "data/test_data/raw_data"
-RESULTS = DRB / "results/race"
+from ._env import drb_root
+
+# DRB harness paths are resolved via drb_root() at each call site (not bound to
+# module-level constants) so a caller that exports $DRB_REPO before running —
+# even after this module is imported — is honored.
 ARCH_MAP = pathlib.Path(__file__).resolve().parent.parent / "p0_artifacts/archetype_map.jsonl"
 RESERVED = {"claude-3-7-sonnet-latest", "reference"}
 
@@ -33,7 +35,7 @@ def stage(in_jsonl: str, model: str) -> pathlib.Path:
     rows = [json.loads(x) for x in pathlib.Path(in_jsonl).read_text(encoding="utf-8").splitlines() if x.strip()]
     for r in rows:  # harness expects {id(str), prompt, article}
         r["id"] = str(r["id"])
-    dst = RAW_DIR / f"{model}.jsonl"
+    dst = drb_root() / "data/test_data/raw_data" / f"{model}.jsonl"
     dst.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n", encoding="utf-8")
     return dst
 
@@ -53,13 +55,13 @@ def run_race(model: str, limit=None, only=None, workers=10, force=True) -> int:
         cmd += " --only_zh"
     if force:
         cmd += " --force"
-    full = f"cd {DRB} && source env.local.sh && {cmd}"
+    full = f"cd {drb_root()} && source env.local.sh && {cmd}"
     print(f"[eval] {full}", flush=True)
     return subprocess.call(["bash", "-lc", full])
 
 
 def parse_result(model: str) -> dict:
-    f = RESULTS / model / "race_result.txt"
+    f = drb_root() / "results/race" / model / "race_result.txt"
     if not f.exists():
         return {}
     out = {}
@@ -82,12 +84,13 @@ def parse_result(model: str) -> dict:
 
 
 def breakdown(model: str) -> dict:
-    rr = RESULTS / model / "raw_results.jsonl"
+    drb = drb_root()
+    rr = drb / "results/race" / model / "raw_results.jsonl"
     if not rr.exists():
         return {}
     rows = [json.loads(x) for x in rr.read_text().splitlines() if x.strip()]
     qlang = {}
-    for q in (DRB / "data/prompt_data/query.jsonl").read_text().splitlines():
+    for q in (drb / "data/prompt_data/query.jsonl").read_text().splitlines():
         if q.strip():
             d = json.loads(q)
             qlang[str(d["id"])] = d["language"]

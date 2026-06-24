@@ -35,7 +35,7 @@ trap 'git checkout "$ORIGINAL_BRANCH" 2>/dev/null || true' EXIT
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LUNON_REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
-DRB_REPO="${DRB_REPO:-/home/connor/dev/deep_research_bench}"
+DRB_REPO="${DRB_REPO:-$HOME/dev/deep_research_bench}"
 QUERY_FILE="$DRB_REPO/data/prompt_data/query.jsonl"
 
 cd "$LUNON_REPO"

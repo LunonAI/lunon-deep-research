@@ -33,19 +33,17 @@ _LAZY_ATTRS = frozenset({"CRITERIA_PROMPTS", "WEIGHT_PROMPT", "format_criteria_l
 
 
 def _drb_candidates() -> tuple:
-    """Resolve candidate harness locations at CALL time, not import time.
+    """Candidate harness locations, resolved at CALL time (not import time).
 
-    Honors `$DRB_REPO` first (the repo convention), then probes well-known
-    per-machine locations. Evaluating these inside `_harness()` (rather than
-    binding them to a module-level constant at import) means a caller that sets
+    Thin wrapper over :func:`deep_research._env.drb_candidates` so the resolution
+    order lives in one place; kept under this name because `_harness()` and the
+    tests reference it. Evaluating at call time means a caller that sets
     `$DRB_REPO` *after* importing this module — but before the first criteria
     regeneration — is still honored.
     """
-    return (
-        os.environ.get("DRB_REPO"),
-        os.path.expanduser("~/dev/deep_research_bench"),
-        "/home/connor/dev/deep_research_bench",  # legacy Linux path
-    )
+    from ._env import drb_candidates
+
+    return drb_candidates()
 
 
 @functools.lru_cache(maxsize=1)

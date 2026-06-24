@@ -77,7 +77,7 @@ def main() -> int:
     scored_path = (
         Path(scored_path_env)
         if scored_path_env
-        else Path("/home/connor/dev/deep_research_bench/results/race/lunon-p1-2026-05-21-final/raw_results.jsonl")
+        else Path.home() / "dev/deep_research_bench/results/race/lunon-p1-2026-05-21-final/raw_results.jsonl"
     )
     scored_ids: set | None = None
     if scored_path.exists():
