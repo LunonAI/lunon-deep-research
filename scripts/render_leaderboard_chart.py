@@ -180,7 +180,7 @@ def build_html(rows, meta, theme: str) -> str:
         rows=rows_html(rows),
         source=(
             "Source: muset-ai/DeepResearch-Bench (GPT-5.5 board) · "
-            "Lunon: validated harness, submission in processing · scores ×100"
+            "Lunon: validated harness · scores ×100"
         ),
     )
 

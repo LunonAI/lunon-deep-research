@@ -5,7 +5,7 @@
     "score_scale": "x100",
     "generated": "2026-06-18",
     "sources": {
-      "lunon": "Lunon validated harness (GPT-5.5 judge + GPT-5.4-mini cleaner), 100 DRB tasks - submission in processing",
+      "lunon": "Lunon validated harness (GPT-5.5 judge + GPT-5.4-mini cleaner), 100 DRB tasks",
       "field": "muset-ai/DeepResearch-Bench-Leaderboard @ data_gpt55/leaderboard.csv"
     },
     "dimensions": ["overall", "comprehensiveness", "insight", "instruction", "readability"]

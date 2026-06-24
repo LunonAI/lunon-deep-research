@@ -29,8 +29,6 @@ Give it a hard question. It works out what you're actually asking, searches the 
   </picture>
 </p>
 
-<p align="center"><sub>RACE overall (×100) on DeepResearch Bench, GPT-5.5 judge. Our submission is being processed by the benchmark maintainers — treat as a verified pre-print until it posts.</sub></p>
-
 ## How it works
 
 A question moves through four stages — **plan → research → write → edit** — each passing typed state to the next:
