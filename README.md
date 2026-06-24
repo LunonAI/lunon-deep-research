@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="assets/lunon-announcement.gif" alt="Lunon" width="380">
-</p>
-
 <h1 align="center">Lunon Deep Research</h1>
 
 <p align="center"><i>An autonomous research agent that turns one question into a structured, fully-cited report.</i></p>
