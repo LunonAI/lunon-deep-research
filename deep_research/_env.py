@@ -63,11 +63,15 @@ def drb_candidates() -> tuple:
     legacy dev-box path. Read from ``os.environ`` (not the .env file) and built at
     CALL time so a caller that exports ``$DRB_REPO`` after import is still honored.
     """
-    return (
-        os.environ.get("DRB_REPO"),
-        os.path.expanduser("~/dev/deep_research_bench"),
-        "/home/connor/dev/deep_research_bench",  # legacy dev-box path
-    )
+    home_path = os.path.expanduser("~/dev/deep_research_bench")
+    candidates = [os.environ.get("DRB_REPO"), home_path]
+    # Add the legacy dev-box path only when it differs from the home-dir
+    # expansion (i.e. $HOME != /home/connor) so we never probe the same
+    # directory twice.
+    legacy = "/home/connor/dev/deep_research_bench"
+    if legacy != home_path:
+        candidates.append(legacy)
+    return tuple(candidates)
 
 
 def drb_root() -> pathlib.Path:

@@ -22,11 +22,10 @@ import rationale_miner as rm  # noqa: E402
 
 from ._env import drb_root  # noqa: E402
 
-DRB = drb_root()
-
 
 def mine(model: str) -> list:
-    rr = DRB / "results/race" / model / "raw_results.jsonl"
+    # Resolve the harness root at call time (not import) so a late $DRB_REPO is honored.
+    rr = drb_root() / "results/race" / model / "raw_results.jsonl"
     rows = []
     for line in rr.read_text(encoding="utf-8").splitlines():
         if not line.strip():
