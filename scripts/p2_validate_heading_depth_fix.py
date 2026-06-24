@@ -10,7 +10,7 @@ after-fix numbers go to ~0/100.
 
 Usage:
   python3 scripts/p2_validate_heading_depth_fix.py \\
-    --jsonl /home/connor/dev/deep_research_bench/data/test_data/cleaned_data/lunon-p1-2026-05-21-final.jsonl \\
+    --jsonl ~/dev/deep_research_bench/data/test_data/cleaned_data/lunon-p1-2026-05-21-final.jsonl \\
     --out p2_artifacts/p2_heading_depth_validation.json
 """
 

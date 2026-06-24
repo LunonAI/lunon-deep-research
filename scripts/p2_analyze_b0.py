@@ -22,7 +22,7 @@ import statistics
 import sys
 from pathlib import Path
 
-_DEFAULT_RESULTS_BASE = "/home/connor/dev/deep_research_bench/results/race"
+_DEFAULT_RESULTS_BASE = str(Path.home() / "dev" / "deep_research_bench" / "results" / "race")
 RESULTS_BASE = Path(os.environ.get("DRB_RESULTS_BASE") or _DEFAULT_RESULTS_BASE)
 if not RESULTS_BASE.exists():
     print(

@@ -20,7 +20,9 @@ _ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / "p0_artifacts"))
 import rationale_miner as rm  # noqa: E402
 
-DRB = pathlib.Path("/home/connor/dev/deep_research_bench")
+from ._env import drb_root  # noqa: E402
+
+DRB = drb_root()
 
 
 def mine(model: str) -> list:

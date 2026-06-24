@@ -43,8 +43,8 @@ import json
 
 # Greptile follow-up (PR #16): paths resolved repo-relative so this script
 # runs from any clone / CI. The W9 raw_results path remains overrideable via
-# DR_W9_RESULTS to support the canonical DRB tree at /home/connor/dev/...
-# on the dev box.
+# DR_W9_RESULTS, falling back to the DRB tree under the running user's home
+# (~/dev/deep_research_bench/...) rather than a hardcoded /home/connor.
 import os as _os
 import re
 import statistics
@@ -54,7 +54,7 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 REFERENCE_DIR = _REPO_ROOT / "reference-dr-questions"
 P1_FINAL = _REPO_ROOT / "p1_artifacts" / "p1_final.jsonl"
-_DEFAULT_W9 = "/home/connor/dev/deep_research_bench/results/race/lunon-p1-2026-05-21-final/raw_results.jsonl"
+_DEFAULT_W9 = str(Path.home() / "dev/deep_research_bench/results/race/lunon-p1-2026-05-21-final/raw_results.jsonl")
 W9_RAW = Path(_os.environ.get("DR_W9_RESULTS", _DEFAULT_W9))
 OUT_MD = _REPO_ROOT / "p2_artifacts" / "reference_style_profile.md"
 OUT_JSONL = _REPO_ROOT / "p2_artifacts" / "reference_profile.jsonl"

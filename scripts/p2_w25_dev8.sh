@@ -35,7 +35,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LUNON_REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
-DRB_REPO="${DRB_REPO:-/home/connor/dev/deep_research_bench}"
+DRB_REPO="${DRB_REPO:-$HOME/dev/deep_research_bench}"
 
 cd "$LUNON_REPO"
 

@@ -20,7 +20,9 @@ import pathlib
 import subprocess
 import sys
 
-DRB = pathlib.Path("/home/connor/dev/deep_research_bench")
+from ._env import drb_root
+
+DRB = drb_root()
 RAW_DIR = DRB / "data/test_data/raw_data"
 RESULTS = DRB / "results/race"
 ARCH_MAP = pathlib.Path(__file__).resolve().parent.parent / "p0_artifacts/archetype_map.jsonl"

@@ -56,6 +56,34 @@ def int_env(name: str, default: int) -> int:
         ) from None
 
 
+def drb_candidates() -> tuple:
+    """Ordered candidate locations for the external DeepResearch Bench harness.
+
+    ``$DRB_REPO`` first (the repo convention), then a home-dir checkout, then the
+    legacy dev-box path. Read from ``os.environ`` (not the .env file) and built at
+    CALL time so a caller that exports ``$DRB_REPO`` after import is still honored.
+    """
+    return (
+        os.environ.get("DRB_REPO"),
+        os.path.expanduser("~/dev/deep_research_bench"),
+        "/home/connor/dev/deep_research_bench",  # legacy dev-box path
+    )
+
+
+def drb_root() -> pathlib.Path:
+    """Resolve the external DeepResearch Bench harness root.
+
+    Returns the first :func:`drb_candidates` entry that exists on disk, else
+    falls back to the home-dir default (``~/dev/deep_research_bench``) so callers
+    can still construct sub-paths and fail loudly at read time — rather than
+    baking a hardcoded ``/home/connor`` default into the engine.
+    """
+    for c in drb_candidates():
+        if c and os.path.isdir(c):
+            return pathlib.Path(c)
+    return pathlib.Path(os.path.expanduser("~/dev/deep_research_bench"))
+
+
 def assert_phase() -> str:
     """Fail loud if DRB_PHASE is unset or unexpected (plan point 9)."""
     phase = os.environ.get("DRB_PHASE", "").strip()
