@@ -7,7 +7,7 @@
 <p align="center"><i>An autonomous research agent that turns one question into a structured, fully-cited report.</i></p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/RACE_(GPT--5.5)-0.540-2563EB?style=flat-square" alt="RACE">
+  <img src="https://img.shields.io/badge/RACE_(GPT--5.5)-0.5351-2563EB?style=flat-square" alt="RACE">
   <img src="https://img.shields.io/badge/license-MIT-0A2236?style=flat-square" alt="License">
 </p>
 
@@ -25,7 +25,7 @@ Give it a hard question. It works out what you're actually asking, searches the 
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/leaderboard-overall-dark.png">
     <source media="(prefers-color-scheme: light)" srcset="assets/leaderboard-overall-light.png">
-    <img src="assets/leaderboard-overall-light.png" alt="DeepResearch-Bench Overall (RACE, GPT-5.5 judge): Lunon at 54.0, ahead of dalpha-deepresearch 53.1, sourcery 51.2, gemini-2.5-pro 50.0, openai 47.8, perplexity 43.1, grok 41.2." width="680">
+    <img src="assets/leaderboard-overall-light.png" alt="DeepResearch-Bench Overall (RACE, GPT-5.5 judge): Lunon at 53.51, ahead of dalpha-deepresearch 53.10, sourcery 51.17, gemini-2.5-pro 49.98, openai 47.84, perplexity 43.05, grok 41.22." width="680">
   </picture>
 </p>
 
@@ -65,7 +65,7 @@ A few design choices mattered more than we expected:
 
 - **Depth is a contract, not a prompt.** The architect emits a *typed* plan — explicit research queries plus acceptance criteria — so coverage is something the engine verifies rather than something the writer can quietly skip.
 - **Structure is enforced, not requested.** Models drift on soft formatting instructions, so citation normalization, heading numbering, and cross-reference repair run as deterministic post-passes instead of living in the prompt.
-- **The final edit is the largest single lever.** A whole-article *readability rewrite* takes a sprawling, over-structured draft and compresses it to roughly reference length. That one stage moved our RACE overall from 0.527 → 0.540 and readability from 0.427 → 0.504 — more than any other change we made. It fails soft (a bad rewrite falls back to the original draft) and can be disabled with `DR_READABILITY_REWRITE=off`.
+- **The final edit is the largest single lever.** A whole-article *readability rewrite* takes a sprawling, over-structured draft and compresses it to roughly reference length. That one stage moved our RACE overall from 0.527 → 0.5351 and readability from 0.427 → 0.504 — more than any other change we made. It fails soft (a bad rewrite falls back to the original draft) and can be disabled with `DR_READABILITY_REWRITE=off`.
 - **It's tested.** A broad unit-test suite covers the pipeline, with the deterministic post-passes pinned against their live constants.
 
 **Model stack.** Claude Opus 4.8 handles planning, writing, and the readability rewrite; GPT-5.5 handles intent, criteria, refining, and scoring; and two models run via OpenRouter — Nemotron-3-Super-120B (NVIDIA) for the five parallel research specialists, and DeepSeek-V4-Pro for the Chinese-language writer pass. Every role is swappable with a single env var (`DR_ROLE_<ROLE>=…`).

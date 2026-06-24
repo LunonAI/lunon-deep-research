@@ -61,10 +61,10 @@ def font_faces() -> str:
     )
 
 
-def month_year(iso_date: str) -> str:
-    """'2026-06-08' -> 'JUN 2026'."""
-    y, m, _d = iso_date.split("-")
-    return f"{_MONTHS[int(m) - 1]} {y}"
+def format_date(iso_date: str) -> str:
+    """'2026-06-18' -> 'JUN 18, 2026'."""
+    y, m, d = iso_date.split("-")
+    return f"{_MONTHS[int(m) - 1]} {int(d)}, {y}"
 
 
 def load():
@@ -85,7 +85,7 @@ def rows_html(rows) -> str:
             f'<div class="{row_cls}">'
             f'<div class="name">{html.escape(r["model"])}</div>'
             f'<div class="track"><div class="{bar_cls}" style="width:{pct:.2f}%"></div></div>'
-            f'<div class="score">{r["overall"]:.1f}</div>'
+            f'<div class="score">{r["overall"]:.2f}</div>'
             f"</div>"
         )
     return "\n".join(out)
@@ -176,7 +176,7 @@ def build_html(rows, meta, theme: str) -> str:
         theme_class=f"theme-{theme}",
         title="DeepResearch-Bench — Overall",
         dek=f"RACE score (×100) · {html.escape(meta['judge'])} judge",
-        meta=f"{len(rows)} AGENTS · {month_year(meta['generated'])}",
+        meta=f"{len(rows)} AGENTS · {format_date(meta['generated'])}",
         rows=rows_html(rows),
         source=(
             "Source: muset-ai/DeepResearch-Bench (GPT-5.5 board) · "
