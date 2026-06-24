@@ -3,15 +3,15 @@
     "benchmark": "DeepResearch-Bench (RACE)",
     "judge": "GPT-5.5",
     "score_scale": "x100",
-    "generated": "2026-06-08",
+    "generated": "2026-06-18",
     "sources": {
-      "lunon": "Lunon validated harness (GPT-5.5 judge + GPT-5.4-mini cleaner), 100 DRB tasks - submission in processing",
+      "lunon": "Lunon validated harness (GPT-5.5 judge + GPT-5.4-mini cleaner), 100 DRB tasks",
       "field": "muset-ai/DeepResearch-Bench-Leaderboard @ data_gpt55/leaderboard.csv"
     },
     "dimensions": ["overall", "comprehensiveness", "insight", "instruction", "readability"]
   },
   "rows": [
-    {"model": "Lunon Deep Research", "lunon": true, "overall": 53.97, "comprehensiveness": 54.10, "insight": 55.29, "instruction": 53.92, "readability": 50.41},
+    {"model": "Lunon Deep Research", "lunon": true, "overall": 53.51, "comprehensiveness": 54.10, "insight": 55.29, "instruction": 53.92, "readability": 50.41},
     {"model": "dalpha-deepresearch", "overall": 53.10, "comprehensiveness": 52.58, "insight": 52.94, "instruction": 53.87, "readability": 53.20},
     {"model": "sourcery", "overall": 51.17, "comprehensiveness": 50.53, "insight": 52.22, "instruction": 51.06, "readability": 49.68},
     {"model": "gemini-2.5-pro-deepresearch", "overall": 49.98, "comprehensiveness": 50.01, "insight": 49.92, "instruction": 50.22, "readability": 49.58},
