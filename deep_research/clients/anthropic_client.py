@@ -1,4 +1,4 @@
-"""Claude Opus 4.7 client (anthropic SDK), mirroring gpt55.py's retry +
+"""Claude Opus 4.8 client (anthropic SDK), mirroring gpt55.py's retry +
 auto cost-log discipline. Used for orchestrator/planner/scout/architect/writer.
 
 Cost hook: Anthropic usage shape (input_tokens/output_tokens) is logged via
@@ -83,10 +83,10 @@ def raw_call(
 ):
     """Return (text_str, usage_dict). Raises RuntimeError after retries.
 
-    Opus 4.7 API: reasoning is controlled by output_config.effort; think=True
+    Opus 4.8 API: reasoning is controlled by output_config.effort; think=True
     enables adaptive thinking (thinking.type='adaptive'). Default: plain (no
     thinking) to control cost. (The old thinking.type='enabled'+budget_tokens
-    form is rejected by Opus 4.7.)
+    form is rejected by Opus 4.8.)
 
     cache_system: when True and `system` is a non-empty string, attach an
     Anthropic prompt-cache breakpoint to the system block. The model receives

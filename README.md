@@ -37,24 +37,6 @@ A question moves through four stages — **plan → research → write → edit*
   </picture>
 </p>
 
-<details>
-<summary>Text version (Mermaid)</summary>
-
-```mermaid
-flowchart TD
-    Q([Your question]) --> A["Intent and archetype<br/>what's really being asked"]
-    A --> B["Scout<br/>web research, landscape, key tensions"]
-    B --> C["Architect<br/>a typed, criteria-bound research plan"]
-    C --> D["Orchestrator<br/>5 specialists research in parallel"]
-    D --> E["Writer<br/>section by section, grounded in evidence"]
-    E --> F["Refiner and validation<br/>fill gaps, enforce the report contract"]
-    F --> G["Readability rewrite<br/>collapse the draft into a tight, scannable report"]
-    G --> H["Cleanup<br/>normalize citations, numbering, formatting"]
-    H --> R([Cited final report])
-```
-
-</details>
-
 A few design choices mattered more than we expected:
 
 - **Depth is a contract, not a prompt.** The architect emits a *typed* plan — explicit research queries plus acceptance criteria — so coverage is something the engine verifies rather than something the writer can quietly skip.
@@ -71,7 +53,6 @@ git clone https://github.com/LunonAI/lunon-deep-research
 cd lunon-deep-research
 pip install -e .            # runtime deps + the package (add ".[dev]" for tests/lint)
 cp .env.example .env        # add your OpenAI / Anthropic / OpenRouter / Exa / Jina keys
-export DRB_PHASE=P1         # cost-attribution guard — the engine refuses to run unset
 ```
 
 ```python
@@ -84,8 +65,10 @@ print(report["article"])
 Or run a whole query file (the DRB format, `{id, prompt, language}` per line):
 
 ```bash
-DRB_PHASE=P1 python -m deep_research.adapter --query-file queries.jsonl --out reports.jsonl --workers 4
+python -m deep_research.adapter --query-file queries.jsonl --out reports.jsonl --workers 4
 ```
+
+No flags to tune — once your keys are in `.env`, the engine runs at its full configuration by default (including the readability rewrite, the single biggest lever on quality).
 
 ## About Lunon
 

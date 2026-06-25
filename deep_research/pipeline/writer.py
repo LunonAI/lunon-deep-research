@@ -2,7 +2,7 @@
 
 Writes the report PER SECTION. For each section it retrieves ONLY that
 section's evidence from the WebWeaver memory bank (by citation ID) — the writer
-never sees the full evidence corpus (item 25 context boundary). Opus 4.7.
+never sees the full evidence corpus (item 25 context boundary). Opus 4.8.
 Applies the differentiator writing rules (opening template, insight minimums,
 cleaning-resistant attribution, length governor) via writing_rules.writer_system.
 

@@ -1,6 +1,6 @@
 """role_play node (p1-checklist item 32; LINK-Researcher pipeline node 1).
 
-Runs after intent.py, before scout. Opus 4.7 generates a one-paragraph expert
+Runs after intent.py, before scout. Opus 4.8 generates a one-paragraph expert
 persona (60-200 words) for the task given (prompt, domain, archetype,
 language). The persona is injected as a PREPENDED context block in the
 architect's system prompt and is available to the writer system prompt.

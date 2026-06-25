@@ -7,9 +7,9 @@ query.jsonl line in  ->  {id, prompt, article} line out.
 - Resume integrity check (plan point 11): every existing output line must parse
   as JSON with non-empty {id, prompt, article}; malformed/partial lines are
   dropped and that id re-runs.
-- DRB_PHASE asserted at startup (fail-loud, plan point 9).
+- DRB_PHASE resolved at startup (defaults to P1 when unset; bad values fail loud).
 
-Run: DRB_PHASE=P1 /usr/bin/python3 -m deep_research.adapter \
+Run: /usr/bin/python3 -m deep_research.adapter \
         --query-file ~/dev/deep_research_bench/data/prompt_data/query.jsonl \
         --out p1_artifacts/<name>.jsonl [--limit N] [--only-en|--only-zh] [--ids 1,2,3]
 """
