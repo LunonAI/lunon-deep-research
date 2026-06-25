@@ -9,7 +9,7 @@
 Model-name hygiene (plan point 10): unique date+iteration-stamped names only;
 RESERVED names are refused so P0 trusted results are never clobbered.
 
-Run: DRB_PHASE=P1 /usr/bin/python3 -m deep_research.eval_runner \
+Run: /usr/bin/python3 -m deep_research.eval_runner \
        --in p1_artifacts/<f>.jsonl --model lunon-p1-2026-05-19-dev1 [--limit N]
        [--only en|zh] [--workers 10]
 """

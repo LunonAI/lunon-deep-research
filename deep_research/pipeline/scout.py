@@ -1,6 +1,6 @@
 """Scout subagent (p1-checklist item 5; adapts AI-Q scout.j2).
 
-Wide-net landscape discovery — NOT the final plan. Opus 4.7 proposes ≥12
+Wide-net landscape discovery — NOT the final plan. Opus 4.8 proposes ≥12
 diverse angles, each issued as an Exa search (≥10 Exa calls), then Opus
 synthesizes a landscape map: definitions / divergences, discovered tensions,
 per-topic source-richness, a suggested title and high-level (sections-only) TOC.

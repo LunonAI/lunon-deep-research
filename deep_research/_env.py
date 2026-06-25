@@ -1,8 +1,9 @@
 """Shared env + cost-tracking infra for the deep_research engine.
 
 - load_env(): mirrors p0_artifacts/gpt55.py — reads the engine .env into a dict.
-- assert_phase(): fail-loud DRB_PHASE guard (plan point 9) so P1 spend is never
-  silently mis-attributed to 'P?'/'P0'.
+- assert_phase(): resolve the DRB_PHASE cost label (plan point 9), defaulting to
+  P1 when unset so a fresh public clone runs with no internal config; a non-empty
+  but unrecognized value still fails loud to catch typos in internal runs.
 - log_usage / log_request: cost_tracking hooks (import-safe, never raise into caller),
   mirroring the gpt55.py auto-log pattern for the new Claude/OpenRouter clients.
 """
@@ -89,13 +90,19 @@ def drb_root() -> pathlib.Path:
 
 
 def assert_phase() -> str:
-    """Fail loud if DRB_PHASE is unset or unexpected (plan point 9)."""
+    """Resolve the cost-attribution phase, defaulting to ``P1`` when unset.
+
+    ``DRB_PHASE`` is a Lunon-internal cost-tracking label; a fresh public clone
+    has no reason to set it, so an unset/empty value falls back to the ``P1``
+    norm rather than refusing to run. A *non-empty but unrecognized* value is
+    still a typo we fail loud on, preserving the guard's value for internal runs
+    that set the phase explicitly."""
     phase = os.environ.get("DRB_PHASE", "").strip()
+    if not phase:
+        return "P1"
     if phase not in _VALID_PHASES:
         raise RuntimeError(
-            f"DRB_PHASE must be set to one of {sorted(_VALID_PHASES)} before any "
-            f"engine/script run (got {phase!r}). Refusing to run and undercount "
-            f"P1 spend. Export DRB_PHASE=P1."
+            f"DRB_PHASE must be one of {sorted(_VALID_PHASES)} (got {phase!r}). Unset it to use the default (P1)."
         )
     return phase
 

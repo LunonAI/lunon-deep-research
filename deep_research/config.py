@@ -5,10 +5,10 @@ code change / no recompile, so P2 ablations can swap any role. Provider is
 inferred from the model id prefix by llm.py.
 
 Model stack (p1-checklist:13-18; divergences logged in plan + SUMMARY):
-- Orchestrator/Planner/Scout/Architect/Writer = Claude Opus 4.7
+- Orchestrator/Planner/Scout/Architect/Writer = Claude Opus 4.8
 - 5 researcher specialists = Nemotron-3-Super-120B via OpenRouter (paid slug; decision #1)
 - Intent / criteria-gen / archetype / inner-loop scorer / grounding / Refiner = GPT-5.5
-- ZH writer-pass = chosen at W6 (Qwen3-235B vs DeepSeek-V3.2 via OpenRouter)
+- ZH writer-pass = DeepSeek-V4-Pro via OpenRouter (chosen at W6; see ZH_WRITER_CANDIDATES)
 """
 
 import os
